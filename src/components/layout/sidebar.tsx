@@ -1,0 +1,137 @@
+"use client";
+
+import { useState, useEffect } from "react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { signOut } from "next-auth/react";
+import { cn } from "@/lib/utils";
+
+const navigation = [
+  { name: "Conversaciones", href: "/conversations", icon: "💬" },
+  { name: "Contactos", href: "/contacts", icon: "👥" },
+  { name: "Configuración", href: "/settings", icon: "⚙️" },
+];
+
+type SidebarProps = {
+  user: { name: string; email: string };
+};
+
+export function Sidebar({ user }: SidebarProps) {
+  const pathname = usePathname();
+  const [isOpen, setIsOpen] = useState(false);
+
+  // Close sidebar on route change
+  useEffect(() => {
+    setIsOpen(false);
+  }, [pathname]);
+
+  // Close sidebar on escape key
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setIsOpen(false);
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  // Prevent body scroll when sidebar is open on mobile
+  useEffect(() => {
+    if (isOpen) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [isOpen]);
+
+  const sidebarContent = (
+    <>
+      {/* Logo */}
+      <div className="flex h-16 items-center justify-between px-6">
+        <h1 className="text-xl font-bold text-white">FanFlow</h1>
+        {/* Close button (mobile only) */}
+        <button
+          onClick={() => setIsOpen(false)}
+          className="rounded-lg p-1 text-gray-400 hover:text-white lg:hidden"
+        >
+          <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+
+      {/* Navigation */}
+      <nav className="flex-1 space-y-1 px-3 py-4">
+        {navigation.map((item) => (
+          <Link
+            key={item.href}
+            href={item.href}
+            className={cn(
+              "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
+              pathname.startsWith(item.href)
+                ? "bg-gray-800 text-white"
+                : "text-gray-400 hover:bg-gray-800/50 hover:text-white"
+            )}
+          >
+            <span>{item.icon}</span>
+            {item.name}
+          </Link>
+        ))}
+      </nav>
+
+      {/* User section */}
+      <div className="border-t border-gray-800 p-4">
+        <div className="mb-3">
+          <p className="text-sm font-medium text-white">{user.name}</p>
+          <p className="text-xs text-gray-400">{user.email}</p>
+        </div>
+        <button
+          onClick={() => signOut({ callbackUrl: "/login" })}
+          className="w-full rounded-lg border border-gray-700 px-3 py-2 text-sm text-gray-400 hover:bg-gray-800 hover:text-white"
+        >
+          Cerrar sesión
+        </button>
+      </div>
+    </>
+  );
+
+  return (
+    <>
+      {/* Hamburger button (mobile only) */}
+      <button
+        onClick={() => setIsOpen(true)}
+        className="fixed left-4 top-4 z-40 rounded-lg bg-gray-900 p-2 text-gray-400 shadow-lg hover:text-white lg:hidden"
+      >
+        <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+        </svg>
+      </button>
+
+      {/* Desktop sidebar (always visible) */}
+      <div className="hidden w-64 flex-col border-r border-gray-800 bg-gray-900 lg:flex">
+        {sidebarContent}
+      </div>
+
+      {/* Mobile overlay */}
+      <div
+        className={cn(
+          "fixed inset-0 z-40 bg-black/60 backdrop-blur-sm transition-opacity duration-300 lg:hidden",
+          isOpen ? "opacity-100" : "pointer-events-none opacity-0"
+        )}
+        onClick={() => setIsOpen(false)}
+      />
+
+      {/* Mobile sidebar (slides in) */}
+      <div
+        className={cn(
+          "fixed inset-y-0 left-0 z-50 flex w-64 flex-col bg-gray-900 shadow-2xl transition-transform duration-300 ease-in-out lg:hidden",
+          isOpen ? "translate-x-0" : "-translate-x-full"
+        )}
+      >
+        {sidebarContent}
+      </div>
+    </>
+  );
+}
