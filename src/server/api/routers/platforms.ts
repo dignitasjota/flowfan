@@ -2,6 +2,8 @@ import { z } from "zod";
 import { eq, and } from "drizzle-orm";
 import { createTRPCRouter, protectedProcedure } from "../trpc";
 import { platforms } from "@/server/db/schema";
+import { checkPlatformLimit } from "@/server/services/usage-limits";
+import { platformTypeSchema } from "@/lib/constants";
 
 const personalityConfigSchema = z.object({
   tone: z.string().optional(),
@@ -23,16 +25,7 @@ export const platformsRouter = createTRPCRouter({
   upsert: protectedProcedure
     .input(
       z.object({
-        platformType: z.enum([
-          "instagram",
-          "tinder",
-          "reddit",
-          "onlyfans",
-          "twitter",
-          "telegram",
-          "snapchat",
-          "other",
-        ]),
+        platformType: platformTypeSchema,
         personalityConfig: personalityConfigSchema,
         isActive: z.boolean().default(true),
       })
@@ -58,6 +51,9 @@ export const platformsRouter = createTRPCRouter({
         return updated;
       }
 
+      // Only check limit on insert, not update
+      await checkPlatformLimit(ctx.db, ctx.creatorId);
+
       const [created] = await ctx.db
         .insert(platforms)
         .values({
@@ -71,10 +67,7 @@ export const platformsRouter = createTRPCRouter({
     }),
 
   delete: protectedProcedure
-    .input(z.object({ platformType: z.enum([
-      "instagram", "tinder", "reddit", "onlyfans",
-      "twitter", "telegram", "snapchat", "other",
-    ]) }))
+    .input(z.object({ platformType: platformTypeSchema }))
     .mutation(async ({ ctx, input }) => {
       await ctx.db
         .delete(platforms)

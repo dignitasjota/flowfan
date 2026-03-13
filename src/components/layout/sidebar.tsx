@@ -5,10 +5,14 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { signOut } from "next-auth/react";
 import { cn } from "@/lib/utils";
+import { trpc } from "@/lib/trpc";
+import { useTheme } from "@/hooks/useTheme";
 
 const navigation = [
+  { name: "Dashboard", href: "/dashboard", icon: "📊" },
   { name: "Conversaciones", href: "/conversations", icon: "💬" },
   { name: "Contactos", href: "/contacts", icon: "👥" },
+  { name: "Billing", href: "/billing", icon: "💳" },
   { name: "Configuración", href: "/settings", icon: "⚙️" },
 ];
 
@@ -19,6 +23,7 @@ type SidebarProps = {
 export function Sidebar({ user }: SidebarProps) {
   const pathname = usePathname();
   const [isOpen, setIsOpen] = useState(false);
+  const { theme, toggleTheme } = useTheme();
 
   // Close sidebar on route change
   useEffect(() => {
@@ -79,19 +84,37 @@ export function Sidebar({ user }: SidebarProps) {
             {item.name}
           </Link>
         ))}
+        <NotificationBell />
       </nav>
 
       {/* User section */}
       <div className="border-t border-gray-800 p-4">
-        <div className="mb-3">
-          <p className="text-sm font-medium text-white">{user.name}</p>
-          <p className="text-xs text-gray-400">{user.email}</p>
+        <div className="mb-3 flex items-center justify-between">
+          <div>
+            <p className="text-sm font-medium text-white">{user.name}</p>
+            <p className="text-xs text-gray-400">{user.email}</p>
+          </div>
+          <button
+            onClick={toggleTheme}
+            className="rounded-lg p-2 text-gray-400 hover:bg-gray-800 hover:text-white"
+            title={theme === "dark" ? "Cambiar a modo claro" : "Cambiar a modo oscuro"}
+          >
+            {theme === "dark" ? (
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+              </svg>
+            ) : (
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+              </svg>
+            )}
+          </button>
         </div>
         <button
           onClick={() => signOut({ callbackUrl: "/login" })}
           className="w-full rounded-lg border border-gray-700 px-3 py-2 text-sm text-gray-400 hover:bg-gray-800 hover:text-white"
         >
-          Cerrar sesión
+          Cerrar sesion
         </button>
       </div>
     </>
@@ -99,7 +122,7 @@ export function Sidebar({ user }: SidebarProps) {
 
   return (
     <>
-      {/* Hamburger button (mobile only) */}
+      {/* Hamburger button – mobile only */}
       <button
         onClick={() => setIsOpen(true)}
         className="fixed left-4 top-4 z-40 rounded-lg bg-gray-900 p-2 text-gray-400 shadow-lg hover:text-white lg:hidden"
@@ -133,5 +156,29 @@ export function Sidebar({ user }: SidebarProps) {
         {sidebarContent}
       </div>
     </>
+  );
+}
+
+function NotificationBell() {
+  const { data: unreadCount } = trpc.intelligence.getUnreadCount.useQuery(
+    undefined,
+    { refetchInterval: 30000 }
+  );
+
+  return (
+    <Link
+      href="/dashboard#notifications"
+      className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-gray-400 transition-colors hover:bg-gray-800/50 hover:text-white"
+    >
+      <span className="relative">
+        🔔
+        {(unreadCount ?? 0) > 0 && (
+          <span className="absolute -right-1.5 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
+            {unreadCount}
+          </span>
+        )}
+      </span>
+      Notificaciones
+    </Link>
   );
 }

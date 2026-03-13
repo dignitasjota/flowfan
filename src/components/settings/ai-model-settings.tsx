@@ -45,22 +45,27 @@ export function AIModelSettings() {
   const [savedModel, setSavedModel] = useState<string | null>(null);
   const [savedApiKeyMasked, setSavedApiKeyMasked] = useState<string | null>(null);
 
-  const configQuery = trpc.aiConfig.get.useQuery(undefined, {
-    onSuccess: (data) => {
-      if (data) {
-        setProvider(data.provider);
-        setModel(data.model);
-        setApiKey(data.apiKey);
-        setSavedProvider(data.provider);
-        setSavedModel(data.model);
-        setSavedApiKeyMasked(data.apiKey);
-      }
-    },
-  });
+  const configQuery = trpc.aiConfig.get.useQuery();
+
+  useEffect(() => {
+    const data = configQuery.data;
+    if (data) {
+      setProvider(data.provider);
+      setModel(data.model);
+      setApiKey(data.apiKey);
+      setSavedProvider(data.provider);
+      setSavedModel(data.model);
+      setSavedApiKeyMasked(data.apiKey);
+    }
+  }, [configQuery.data]);
 
   const modelsQuery = trpc.aiConfig.getModels.useQuery();
 
+  const utils = trpc.useUtils();
   const upsertConfig = trpc.aiConfig.upsert.useMutation({
+    onMutate: async () => {
+      await utils.aiConfig.get.cancel();
+    },
     onSuccess: (data) => {
       setSaved(true);
       setIsEditing(false);
@@ -71,7 +76,7 @@ export function AIModelSettings() {
         setSavedApiKeyMasked(data.apiKey);
         setApiKey(data.apiKey);
       }
-      configQuery.refetch();
+      utils.aiConfig.get.invalidate();
     },
   });
 
@@ -341,6 +346,166 @@ export function AIModelSettings() {
             Moonshot. Buen rendimiento multilingüe.
           </li>
         </ul>
+      </div>
+
+      {/* Multi-model assignments */}
+      {hasConfig && <MultiModelSection models={modelsQuery.data} />}
+    </div>
+  );
+}
+
+const TASK_TYPES = [
+  { value: "suggestion", label: "Sugerencias", description: "Generacion de respuestas para el creador" },
+  { value: "analysis", label: "Analisis", description: "Sentimiento y señales conductuales" },
+  { value: "summary", label: "Resumenes", description: "Resumen automatico de conversaciones" },
+  { value: "report", label: "Informes", description: "Informes detallados de contactos" },
+  { value: "price_advice", label: "Precios", description: "Recomendaciones de precio" },
+] as const;
+
+type TaskType = typeof TASK_TYPES[number]["value"];
+
+function MultiModelSection({ models }: { models: Record<string, { value: string; label: string }[]> | undefined }) {
+  const [editingTask, setEditingTask] = useState<TaskType | null>(null);
+  const [taskProvider, setTaskProvider] = useState<Provider>("anthropic");
+  const [taskModel, setTaskModel] = useState("");
+
+  const utils = trpc.useUtils();
+  const { data: assignments } = trpc.aiConfig.getAssignments.useQuery();
+  const upsertAssignment = trpc.aiConfig.upsertAssignment.useMutation({
+    onSuccess: () => {
+      utils.aiConfig.getAssignments.invalidate();
+      setEditingTask(null);
+    },
+  });
+  const deleteAssignment = trpc.aiConfig.deleteAssignment.useMutation({
+    onSuccess: () => {
+      utils.aiConfig.getAssignments.invalidate();
+    },
+  });
+
+  function handleEditTask(taskType: TaskType) {
+    const existing = assignments?.find((a) => a.taskType === taskType);
+    if (existing) {
+      setTaskProvider(existing.provider);
+      setTaskModel(existing.model);
+    } else {
+      setTaskProvider("anthropic");
+      setTaskModel("");
+    }
+    setEditingTask(taskType);
+  }
+
+  function handleSaveTask() {
+    if (!editingTask || !taskModel) return;
+    upsertAssignment.mutate({
+      taskType: editingTask,
+      provider: taskProvider,
+      model: taskModel,
+    });
+  }
+
+  const taskModels = models?.[taskProvider] ?? [];
+
+  return (
+    <div className="mt-8 max-w-2xl">
+      <h3 className="mb-1 text-sm font-semibold text-white">Modo multi-modelo</h3>
+      <p className="mb-4 text-xs text-gray-400">
+        Asigna modelos diferentes para cada tipo de tarea. Si no asignas uno, se usa el modelo principal.
+      </p>
+
+      <div className="space-y-2">
+        {TASK_TYPES.map((task) => {
+          const assignment = assignments?.find((a) => a.taskType === task.value);
+          const isEditing = editingTask === task.value;
+
+          return (
+            <div
+              key={task.value}
+              className="rounded-lg border border-gray-700 bg-gray-800/50 p-3"
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-sm font-medium text-white">{task.label}</span>
+                  <p className="text-xs text-gray-500">{task.description}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {assignment && !isEditing && (
+                    <span className="rounded-full bg-indigo-500/10 px-2 py-0.5 text-xs text-indigo-300">
+                      {assignment.provider}/{assignment.model}
+                    </span>
+                  )}
+                  {!assignment && !isEditing && (
+                    <span className="text-xs text-gray-600">Modelo principal</span>
+                  )}
+                  {!isEditing && (
+                    <button
+                      onClick={() => handleEditTask(task.value)}
+                      className="text-xs text-indigo-400 hover:text-indigo-300"
+                    >
+                      {assignment ? "Cambiar" : "Asignar"}
+                    </button>
+                  )}
+                  {assignment && !isEditing && (
+                    <button
+                      onClick={() => deleteAssignment.mutate({ taskType: task.value })}
+                      className="text-xs text-red-400 hover:text-red-300"
+                    >
+                      Quitar
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {isEditing && (
+                <div className="mt-3 flex flex-wrap items-end gap-2">
+                  <div className="flex-1 min-w-[120px]">
+                    <label className="mb-1 block text-[10px] uppercase text-gray-500">Proveedor</label>
+                    <select
+                      value={taskProvider}
+                      onChange={(e) => {
+                        const p = e.target.value as Provider;
+                        setTaskProvider(p);
+                        const firstModel = models?.[p]?.[0]?.value ?? "";
+                        setTaskModel(firstModel);
+                      }}
+                      className="w-full rounded border border-gray-600 bg-gray-700 px-2 py-1.5 text-xs text-white focus:border-indigo-500 focus:outline-none"
+                    >
+                      {(["anthropic", "openai", "google", "minimax", "kimi"] as const).map((p) => (
+                        <option key={p} value={p}>{p}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex-1 min-w-[140px]">
+                    <label className="mb-1 block text-[10px] uppercase text-gray-500">Modelo</label>
+                    <select
+                      value={taskModel}
+                      onChange={(e) => setTaskModel(e.target.value)}
+                      className="w-full rounded border border-gray-600 bg-gray-700 px-2 py-1.5 text-xs text-white focus:border-indigo-500 focus:outline-none"
+                    >
+                      <option value="">Seleccionar...</option>
+                      {taskModels.map((m) => (
+                        <option key={m.value} value={m.value}>{m.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <button
+                    onClick={handleSaveTask}
+                    disabled={!taskModel || upsertAssignment.isPending}
+                    className="rounded bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+                  >
+                    {upsertAssignment.isPending ? "..." : "Guardar"}
+                  </button>
+                  <button
+                    onClick={() => setEditingTask(null)}
+                    className="px-2 py-1.5 text-xs text-gray-400 hover:text-white"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

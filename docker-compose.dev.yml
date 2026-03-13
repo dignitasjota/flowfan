@@ -4,13 +4,13 @@ services:
     ports:
       - "5432:5432"
     environment:
-      POSTGRES_USER: fanflow
-      POSTGRES_PASSWORD: fanflow_secret
-      POSTGRES_DB: fanflow
+      POSTGRES_USER: ${POSTGRES_USER:-fanflow}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fanflow_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-fanflow}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U fanflow"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-fanflow}"]
       interval: 5s
       timeout: 5s
       retries: 5

@@ -2,16 +2,28 @@ import { z } from "zod";
 import { eq, and } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { createTRPCRouter, protectedProcedure } from "../trpc";
+import { createChildLogger } from "@/lib/logger";
+
+const log = createChildLogger("ai-router");
 import {
   conversations,
   messages,
   platforms,
   contacts,
+  contactProfiles,
   notes,
   aiUsageLog,
   aiConfigs,
 } from "@/server/db/schema";
 import { generateSuggestion } from "@/server/services/ai";
+import { analyzeMessage } from "@/server/services/ai-analysis";
+import { summarizeConversation } from "@/server/services/conversation-summary";
+import { analysisQueue } from "@/server/queues";
+import { generateContactReport } from "@/server/services/contact-report";
+import { getPriceAdvice } from "@/server/services/price-advisor";
+import { resolveAIConfig } from "@/server/services/ai-config-resolver";
+import type { BehavioralSignals } from "@/server/services/scoring";
+import { checkAIMessageLimit, checkReportLimit, checkFeatureAccess } from "@/server/services/usage-limits";
 
 export const aiRouter = createTRPCRouter({
   suggest: protectedProcedure
@@ -22,12 +34,13 @@ export const aiRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      // Get AI config for this creator
-      const aiConfig = await ctx.db.query.aiConfigs.findFirst({
-        where: eq(aiConfigs.creatorId, ctx.creatorId),
-      });
+      await checkAIMessageLimit(ctx.db, ctx.creatorId);
 
-      if (!aiConfig) {
+      // Resolve AI configs per task (multi-model support)
+      const suggestionConfig = await resolveAIConfig(ctx.db, ctx.creatorId, "suggestion");
+      const analysisConfig = await resolveAIConfig(ctx.db, ctx.creatorId, "analysis");
+
+      if (!suggestionConfig) {
         throw new TRPCError({
           code: "PRECONDITION_FAILED",
           message:
@@ -68,11 +81,14 @@ export const aiRouter = createTRPCRouter({
       });
 
       // Save the fan message first
-      await ctx.db.insert(messages).values({
-        conversationId: input.conversationId,
-        role: "fan",
-        content: input.fanMessage,
-      });
+      const [fanMsg] = await ctx.db
+        .insert(messages)
+        .values({
+          conversationId: input.conversationId,
+          role: "fan",
+          content: input.fanMessage,
+        })
+        .returning();
 
       // Update timestamps
       await ctx.db
@@ -85,38 +101,67 @@ export const aiRouter = createTRPCRouter({
         .set({ lastInteractionAt: new Date() })
         .where(eq(contacts.id, conversation.contactId));
 
-      // Generate AI suggestion using creator's configured provider
-      const result = await generateSuggestion(
-        {
-          provider: aiConfig.provider,
-          model: aiConfig.model,
-          apiKey: aiConfig.apiKey,
-        },
-        {
+      const conversationHistory = conversation.messages.map((m) => ({
+        role: m.role,
+        content: m.content,
+      }));
+
+      // Run suggestion + analysis in parallel (each may use different model)
+      const analysisConfigResolved = analysisConfig ?? suggestionConfig;
+      const [suggestionResult, analysisResult] = await Promise.all([
+        generateSuggestion(suggestionConfig, {
           platformType: conversation.platformType,
           personality:
             (platform?.personalityConfig as Record<string, unknown>) ?? {},
-          contactProfile: conversation.contact.profile,
-          conversationHistory: conversation.messages.map((m) => ({
-            role: m.role,
-            content: m.content,
-          })),
+          contactProfile: conversation.contact.profile as Parameters<typeof generateSuggestion>[1]["contactProfile"],
+          conversationHistory,
           contactNotes: contactNotes.map((n) => n.content),
           fanMessage: input.fanMessage,
-        }
-      );
+        }),
+        analyzeMessage(analysisConfigResolved, {
+          message: input.fanMessage,
+          conversationHistory: conversationHistory.slice(-5),
+          platformType: conversation.platformType,
+        }),
+      ]);
 
-      // Log AI usage
-      await ctx.db.insert(aiUsageLog).values({
-        creatorId: ctx.creatorId,
-        requestType: "suggestion",
-        tokensUsed: result.tokensUsed,
-        modelUsed: `${result.provider}/${result.model}`,
-      });
+      // Enqueue profile update (processed by worker)
+      if (fanMsg) {
+        analysisQueue
+          .add("analyze", {
+            creatorId: ctx.creatorId,
+            contactId: conversation.contactId,
+            messageId: fanMsg.id,
+            conversationId: input.conversationId,
+            messageContent: input.fanMessage,
+            platformType: conversation.platformType,
+            conversationHistory: conversationHistory.slice(-5),
+          })
+          .catch((err) => {
+            log.error({ err }, "Failed to enqueue analysis job");
+          });
+      }
+
+      // Log both AI usages
+      await ctx.db.insert(aiUsageLog).values([
+        {
+          creatorId: ctx.creatorId,
+          requestType: "suggestion" as const,
+          tokensUsed: suggestionResult.tokensUsed,
+          modelUsed: `${suggestionResult.provider}/${suggestionResult.model}`,
+        },
+        {
+          creatorId: ctx.creatorId,
+          requestType: "analysis" as const,
+          tokensUsed: analysisResult.tokensUsed,
+          modelUsed: `${analysisConfigResolved.provider}/${analysisConfigResolved.model}`,
+        },
+      ]);
 
       return {
-        suggestions: result.suggestions,
-        tokensUsed: result.tokensUsed,
+        suggestions: suggestionResult.suggestions,
+        variants: suggestionResult.variants,
+        tokensUsed: suggestionResult.tokensUsed + analysisResult.tokensUsed,
       };
     }),
 
@@ -127,11 +172,11 @@ export const aiRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const aiConfig = await ctx.db.query.aiConfigs.findFirst({
-        where: eq(aiConfigs.creatorId, ctx.creatorId),
-      });
+      await checkAIMessageLimit(ctx.db, ctx.creatorId);
 
-      if (!aiConfig) {
+      const config = await resolveAIConfig(ctx.db, ctx.creatorId, "suggestion");
+
+      if (!config) {
         throw new TRPCError({
           code: "PRECONDITION_FAILED",
           message: "No has configurado tu proveedor de IA.",
@@ -186,16 +231,12 @@ export const aiRouter = createTRPCRouter({
       const historyMessages = conversation.messages.slice(0, lastFanIndex);
 
       const result = await generateSuggestion(
-        {
-          provider: aiConfig.provider,
-          model: aiConfig.model,
-          apiKey: aiConfig.apiKey,
-        },
+        config,
         {
           platformType: conversation.platformType,
           personality:
             (platform?.personalityConfig as Record<string, unknown>) ?? {},
-          contactProfile: conversation.contact.profile,
+          contactProfile: conversation.contact.profile as Parameters<typeof generateSuggestion>[1]["contactProfile"],
           conversationHistory: historyMessages.map((m) => ({
             role: m.role,
             content: m.content,
@@ -214,7 +255,198 @@ export const aiRouter = createTRPCRouter({
 
       return {
         suggestions: result.suggestions,
+        variants: result.variants,
         tokensUsed: result.tokensUsed,
       };
+    }),
+
+  summarizeConversation: protectedProcedure
+    .input(z.object({ conversationId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const config = await resolveAIConfig(ctx.db, ctx.creatorId, "summary");
+
+      if (!config) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "No has configurado tu proveedor de IA.",
+        });
+      }
+
+      const conversation = await ctx.db.query.conversations.findFirst({
+        where: and(
+          eq(conversations.id, input.conversationId),
+          eq(conversations.creatorId, ctx.creatorId)
+        ),
+        with: {
+          contact: { with: { profile: true } },
+          messages: { orderBy: (m, { asc }) => [asc(m.createdAt)] },
+        },
+      });
+
+      if (!conversation) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Conversacion no encontrada" });
+      }
+
+      const result = await summarizeConversation(config, {
+        platformType: conversation.platformType,
+        contactUsername: conversation.contact.username,
+        funnelStage: conversation.contact.profile?.funnelStage ?? "cold",
+        messages: conversation.messages.map((m) => ({
+          role: m.role,
+          content: m.content,
+        })),
+      });
+
+      await ctx.db
+        .update(conversations)
+        .set({ summary: result.summary })
+        .where(eq(conversations.id, input.conversationId));
+
+      await ctx.db.insert(aiUsageLog).values({
+        creatorId: ctx.creatorId,
+        requestType: "summary",
+        tokensUsed: result.tokensUsed,
+        modelUsed: `${config.provider}/${config.model}`,
+      });
+
+      return result;
+    }),
+
+  generateReport: protectedProcedure
+    .input(z.object({ contactId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      await checkReportLimit(ctx.db, ctx.creatorId);
+
+      const config = await resolveAIConfig(ctx.db, ctx.creatorId, "report");
+
+      if (!config) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "No has configurado tu proveedor de IA.",
+        });
+      }
+
+      const contact = await ctx.db.query.contacts.findFirst({
+        where: and(
+          eq(contacts.id, input.contactId),
+          eq(contacts.creatorId, ctx.creatorId)
+        ),
+        with: { profile: true, conversations: true },
+      });
+
+      if (!contact) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Contacto no encontrado" });
+      }
+
+      const recentMessages: { role: "fan" | "creator"; content: string }[] = [];
+      for (const conv of contact.conversations.slice(-3)) {
+        const msgs = await ctx.db.query.messages.findMany({
+          where: eq(messages.conversationId, conv.id),
+          orderBy: (m, { desc }) => [desc(m.createdAt)],
+          limit: 10,
+        });
+        recentMessages.push(
+          ...msgs.reverse().map((m) => ({ role: m.role, content: m.content }))
+        );
+      }
+
+      const signals = contact.profile?.behavioralSignals as BehavioralSignals | null;
+
+      const result = await generateContactReport(config, {
+        contactUsername: contact.username,
+        platformType: contact.platformType,
+        funnelStage: contact.profile?.funnelStage ?? "cold",
+        engagementLevel: contact.profile?.engagementLevel ?? 0,
+        paymentProbability: contact.profile?.paymentProbability ?? 0,
+        estimatedBudget: contact.profile?.estimatedBudget ?? "low",
+        totalConversations: contact.totalConversations,
+        firstInteractionAt: contact.firstInteractionAt.toISOString(),
+        topics: signals?.topicFrequency
+          ? Object.entries(signals.topicFrequency)
+              .sort(([, a], [, b]) => b - a)
+              .slice(0, 5)
+              .map(([t]) => t)
+          : [],
+        sentimentAvg: signals?.avgSentiment ?? 0,
+        sentimentTrend: signals?.sentimentTrend ?? 0,
+        messageCount: signals?.messageCount ?? 0,
+        recentMessages: recentMessages.slice(-10),
+      });
+
+      await ctx.db.insert(aiUsageLog).values({
+        creatorId: ctx.creatorId,
+        requestType: "analysis",
+        tokensUsed: result.tokensUsed,
+        modelUsed: `${config.provider}/${config.model}`,
+      });
+
+      return result;
+    }),
+
+  getPriceAdvice: protectedProcedure
+    .input(z.object({ contactId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      await checkFeatureAccess(ctx.db, ctx.creatorId, "priceAdvisor");
+
+      const config = await resolveAIConfig(ctx.db, ctx.creatorId, "price_advice");
+
+      if (!config) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "No has configurado tu proveedor de IA.",
+        });
+      }
+
+      const contact = await ctx.db.query.contacts.findFirst({
+        where: and(
+          eq(contacts.id, input.contactId),
+          eq(contacts.creatorId, ctx.creatorId)
+        ),
+        with: { profile: true, conversations: true },
+      });
+
+      if (!contact) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Contacto no encontrado" });
+      }
+
+      const recentMessages: { role: "fan" | "creator"; content: string }[] = [];
+      const lastConv = contact.conversations.at(-1);
+      if (lastConv) {
+        const msgs = await ctx.db.query.messages.findMany({
+          where: eq(messages.conversationId, lastConv.id),
+          orderBy: (m, { desc }) => [desc(m.createdAt)],
+          limit: 10,
+        });
+        recentMessages.push(
+          ...msgs.reverse().map((m) => ({ role: m.role, content: m.content }))
+        );
+      }
+
+      const signals = contact.profile?.behavioralSignals as BehavioralSignals | null;
+
+      const result = await getPriceAdvice(config, {
+        platformType: contact.platformType,
+        funnelStage: contact.profile?.funnelStage ?? "cold",
+        paymentProbability: contact.profile?.paymentProbability ?? 0,
+        estimatedBudget: contact.profile?.estimatedBudget ?? "low",
+        engagementLevel: contact.profile?.engagementLevel ?? 0,
+        sentimentTrend: signals?.sentimentTrend ?? 0,
+        topics: signals?.topicFrequency
+          ? Object.entries(signals.topicFrequency)
+              .sort(([, a], [, b]) => b - a)
+              .slice(0, 5)
+              .map(([t]) => t)
+          : [],
+        recentMessages,
+      });
+
+      await ctx.db.insert(aiUsageLog).values({
+        creatorId: ctx.creatorId,
+        requestType: "analysis",
+        tokensUsed: result.tokensUsed,
+        modelUsed: `${config.provider}/${config.model}`,
+      });
+
+      return result;
     }),
 });

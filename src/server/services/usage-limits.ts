@@ -1,0 +1,265 @@
+import { eq, and, gte, sql, count } from "drizzle-orm";
+import { TRPCError } from "@trpc/server";
+import type { db as DbType } from "@/server/db";
+import {
+  creators,
+  contacts,
+  platforms,
+  responseTemplates,
+  aiUsageLog,
+} from "@/server/db/schema";
+
+type Db = typeof DbType;
+
+type PlanType = "free" | "starter" | "pro" | "business";
+
+type PlanLimits = {
+  contacts: number;
+  aiMessagesPerMonth: number;
+  platforms: number;
+  templates: number;
+  reportsPerMonth: number;
+  priceAdvisor: boolean;
+  multiModel: boolean;
+  export: "none" | "csv" | "csv_json" | "csv_json_api";
+};
+
+export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
+  free: {
+    contacts: 5,
+    aiMessagesPerMonth: 20,
+    platforms: 1,
+    templates: 3,
+    reportsPerMonth: 0,
+    priceAdvisor: false,
+    multiModel: false,
+    export: "none",
+  },
+  starter: {
+    contacts: 50,
+    aiMessagesPerMonth: 200,
+    platforms: 3,
+    templates: 20,
+    reportsPerMonth: 5,
+    priceAdvisor: false,
+    multiModel: false,
+    export: "csv",
+  },
+  pro: {
+    contacts: -1,
+    aiMessagesPerMonth: 2000,
+    platforms: -1,
+    templates: -1,
+    reportsPerMonth: -1,
+    priceAdvisor: true,
+    multiModel: true,
+    export: "csv_json",
+  },
+  business: {
+    contacts: -1,
+    aiMessagesPerMonth: -1,
+    platforms: -1,
+    templates: -1,
+    reportsPerMonth: -1,
+    priceAdvisor: true,
+    multiModel: true,
+    export: "csv_json_api",
+  },
+};
+
+async function getCreatorPlan(db: Db, creatorId: string): Promise<PlanType> {
+  const creator = await db.query.creators.findFirst({
+    where: eq(creators.id, creatorId),
+    columns: { subscriptionPlan: true },
+  });
+  return (creator?.subscriptionPlan as PlanType) ?? "free";
+}
+
+function startOfMonth(): Date {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), 1);
+}
+
+export async function checkContactLimit(db: Db, creatorId: string) {
+  const plan = await getCreatorPlan(db, creatorId);
+  const limits = PLAN_LIMITS[plan];
+  if (limits.contacts === -1) return;
+
+  const [result] = await db
+    .select({ count: count() })
+    .from(contacts)
+    .where(eq(contacts.creatorId, creatorId));
+
+  if ((result?.count ?? 0) >= limits.contacts) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: `Has alcanzado el límite de ${limits.contacts} contactos en el plan ${plan}. Actualiza tu plan para añadir más.`,
+    });
+  }
+}
+
+export async function checkAIMessageLimit(db: Db, creatorId: string) {
+  const plan = await getCreatorPlan(db, creatorId);
+  const limits = PLAN_LIMITS[plan];
+  if (limits.aiMessagesPerMonth === -1) return;
+
+  const monthStart = startOfMonth();
+  const [result] = await db
+    .select({ count: count() })
+    .from(aiUsageLog)
+    .where(
+      and(
+        eq(aiUsageLog.creatorId, creatorId),
+        gte(aiUsageLog.createdAt, monthStart)
+      )
+    );
+
+  if ((result?.count ?? 0) >= limits.aiMessagesPerMonth) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: `Has alcanzado el límite de ${limits.aiMessagesPerMonth} mensajes IA/mes en el plan ${plan}. Actualiza tu plan para más mensajes.`,
+    });
+  }
+}
+
+export async function checkPlatformLimit(db: Db, creatorId: string) {
+  const plan = await getCreatorPlan(db, creatorId);
+  const limits = PLAN_LIMITS[plan];
+  if (limits.platforms === -1) return;
+
+  const [result] = await db
+    .select({ count: count() })
+    .from(platforms)
+    .where(and(eq(platforms.creatorId, creatorId), eq(platforms.isActive, true)));
+
+  if ((result?.count ?? 0) >= limits.platforms) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: `Has alcanzado el límite de ${limits.platforms} plataformas en el plan ${plan}. Actualiza tu plan para más plataformas.`,
+    });
+  }
+}
+
+export async function checkTemplateLimit(db: Db, creatorId: string) {
+  const plan = await getCreatorPlan(db, creatorId);
+  const limits = PLAN_LIMITS[plan];
+  if (limits.templates === -1) return;
+
+  const [result] = await db
+    .select({ count: count() })
+    .from(responseTemplates)
+    .where(eq(responseTemplates.creatorId, creatorId));
+
+  if ((result?.count ?? 0) >= limits.templates) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: `Has alcanzado el límite de ${limits.templates} templates en el plan ${plan}. Actualiza tu plan para más templates.`,
+    });
+  }
+}
+
+export async function checkReportLimit(db: Db, creatorId: string) {
+  const plan = await getCreatorPlan(db, creatorId);
+  const limits = PLAN_LIMITS[plan];
+  if (limits.reportsPerMonth === -1) return;
+
+  if (limits.reportsPerMonth === 0) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: `Los reportes IA no están disponibles en el plan ${plan}. Actualiza tu plan para acceder a esta función.`,
+    });
+  }
+
+  const monthStart = startOfMonth();
+  const [result] = await db
+    .select({ count: count() })
+    .from(aiUsageLog)
+    .where(
+      and(
+        eq(aiUsageLog.creatorId, creatorId),
+        eq(aiUsageLog.requestType, "analysis"),
+        gte(aiUsageLog.createdAt, monthStart)
+      )
+    );
+
+  if ((result?.count ?? 0) >= limits.reportsPerMonth) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: `Has alcanzado el límite de ${limits.reportsPerMonth} reportes/mes en el plan ${plan}. Actualiza tu plan para más reportes.`,
+    });
+  }
+}
+
+export async function checkFeatureAccess(
+  db: Db,
+  creatorId: string,
+  feature: "priceAdvisor" | "multiModel"
+) {
+  const plan = await getCreatorPlan(db, creatorId);
+  const limits = PLAN_LIMITS[plan];
+
+  if (!limits[feature]) {
+    const featureNames: Record<string, string> = {
+      priceAdvisor: "Price Advisor",
+      multiModel: "Multi-modelo IA",
+    };
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: `${featureNames[feature]} no está disponible en el plan ${plan}. Actualiza a Pro o superior para acceder.`,
+    });
+  }
+}
+
+export async function getUsageSummary(db: Db, creatorId: string) {
+  const plan = await getCreatorPlan(db, creatorId);
+  const limits = PLAN_LIMITS[plan];
+  const monthStart = startOfMonth();
+
+  const [contactCount] = await db
+    .select({ count: count() })
+    .from(contacts)
+    .where(eq(contacts.creatorId, creatorId));
+
+  const [aiMessageCount] = await db
+    .select({ count: count() })
+    .from(aiUsageLog)
+    .where(
+      and(
+        eq(aiUsageLog.creatorId, creatorId),
+        gte(aiUsageLog.createdAt, monthStart)
+      )
+    );
+
+  const [platformCount] = await db
+    .select({ count: count() })
+    .from(platforms)
+    .where(and(eq(platforms.creatorId, creatorId), eq(platforms.isActive, true)));
+
+  const [templateCount] = await db
+    .select({ count: count() })
+    .from(responseTemplates)
+    .where(eq(responseTemplates.creatorId, creatorId));
+
+  const [reportCount] = await db
+    .select({ count: count() })
+    .from(aiUsageLog)
+    .where(
+      and(
+        eq(aiUsageLog.creatorId, creatorId),
+        eq(aiUsageLog.requestType, "analysis"),
+        gte(aiUsageLog.createdAt, monthStart)
+      )
+    );
+
+  return {
+    plan,
+    limits,
+    usage: {
+      contacts: { used: contactCount?.count ?? 0, limit: limits.contacts },
+      aiMessages: { used: aiMessageCount?.count ?? 0, limit: limits.aiMessagesPerMonth },
+      platforms: { used: platformCount?.count ?? 0, limit: limits.platforms },
+      templates: { used: templateCount?.count ?? 0, limit: limits.templates },
+      reports: { used: reportCount?.count ?? 0, limit: limits.reportsPerMonth },
+    },
+  };
+}

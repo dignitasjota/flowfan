@@ -1,8 +1,10 @@
 import { z } from "zod";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { createTRPCRouter, protectedProcedure } from "../trpc";
-import { aiConfigs } from "@/server/db/schema";
+import { aiConfigs, aiModelAssignments } from "@/server/db/schema";
 import { PROVIDER_MODELS } from "@/server/services/ai";
+import { checkFeatureAccess } from "@/server/services/usage-limits";
+import { encrypt, decrypt } from "@/lib/crypto";
 
 export const aiConfigRouter = createTRPCRouter({
   get: protectedProcedure.query(async ({ ctx }) => {
@@ -12,10 +14,11 @@ export const aiConfigRouter = createTRPCRouter({
 
     if (!config) return null;
 
-    // Mask API key for frontend display
+    // Decrypt then mask API key for frontend display
+    const decryptedKey = decrypt(config.apiKey);
     return {
       ...config,
-      apiKey: maskApiKey(config.apiKey),
+      apiKey: maskApiKey(decryptedKey),
     };
   }),
 
@@ -32,11 +35,12 @@ export const aiConfigRouter = createTRPCRouter({
         where: eq(aiConfigs.creatorId, ctx.creatorId),
       });
 
-      // If apiKey is masked (hasn't changed), keep the existing one
-      const apiKey =
+      // If apiKey is masked (hasn't changed), keep the existing encrypted value
+      // Otherwise, encrypt the new key before storing
+      const apiKeyToStore =
         input.apiKey.includes("••••") && existing
           ? existing.apiKey
-          : input.apiKey;
+          : encrypt(input.apiKey);
 
       if (existing) {
         const [updated] = await ctx.db
@@ -44,12 +48,12 @@ export const aiConfigRouter = createTRPCRouter({
           .set({
             provider: input.provider,
             model: input.model,
-            apiKey,
+            apiKey: apiKeyToStore,
             updatedAt: new Date(),
           })
           .where(eq(aiConfigs.id, existing.id))
           .returning();
-        return { ...updated!, apiKey: maskApiKey(updated!.apiKey) };
+        return { ...updated!, apiKey: maskApiKey(decrypt(updated!.apiKey)) };
       }
 
       const [created] = await ctx.db
@@ -58,10 +62,10 @@ export const aiConfigRouter = createTRPCRouter({
           creatorId: ctx.creatorId,
           provider: input.provider,
           model: input.model,
-          apiKey,
+          apiKey: apiKeyToStore,
         })
         .returning();
-      return { ...created!, apiKey: maskApiKey(created!.apiKey) };
+      return { ...created!, apiKey: maskApiKey(decrypt(created!.apiKey)) };
     }),
 
   getModels: protectedProcedure.query(() => {
@@ -77,14 +81,14 @@ export const aiConfigRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      // If apiKey is masked, get the real one from DB
+      // If apiKey is masked, get the real one from DB and decrypt
       let apiKey = input.apiKey;
       if (apiKey.includes("••••")) {
         const existing = await ctx.db.query.aiConfigs.findFirst({
           where: eq(aiConfigs.creatorId, ctx.creatorId),
         });
         if (!existing) throw new Error("No hay API key guardada");
-        apiKey = existing.apiKey;
+        apiKey = decrypt(existing.apiKey);
       }
 
       try {
@@ -110,6 +114,84 @@ export const aiConfigRouter = createTRPCRouter({
           message: error instanceof Error ? error.message : "Error desconocido",
         };
       }
+    }),
+
+  // --- Multi-model assignments ---
+
+  getAssignments: protectedProcedure.query(async ({ ctx }) => {
+    return ctx.db.query.aiModelAssignments.findMany({
+      where: eq(aiModelAssignments.creatorId, ctx.creatorId),
+    });
+  }),
+
+  upsertAssignment: protectedProcedure
+    .input(
+      z.object({
+        taskType: z.enum(["suggestion", "analysis", "summary", "report", "price_advice"]),
+        provider: z.enum(["anthropic", "openai", "google", "minimax", "kimi"]),
+        model: z.string().min(1),
+        apiKey: z.string().optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      await checkFeatureAccess(ctx.db, ctx.creatorId, "multiModel");
+
+      const existing = await ctx.db.query.aiModelAssignments.findFirst({
+        where: and(
+          eq(aiModelAssignments.creatorId, ctx.creatorId),
+          eq(aiModelAssignments.taskType, input.taskType)
+        ),
+      });
+
+      // Resolve API key: use provided (encrypted), keep existing, or null (will fallback to default)
+      let apiKey: string | null = input.apiKey ?? null;
+      if (apiKey && apiKey.includes("••••") && existing) {
+        apiKey = existing.apiKey;
+      } else if (apiKey && !apiKey.includes("••••")) {
+        apiKey = encrypt(apiKey);
+      }
+
+      if (existing) {
+        const [updated] = await ctx.db
+          .update(aiModelAssignments)
+          .set({
+            provider: input.provider,
+            model: input.model,
+            apiKey,
+            updatedAt: new Date(),
+          })
+          .where(eq(aiModelAssignments.id, existing.id))
+          .returning();
+        return updated;
+      }
+
+      const [created] = await ctx.db
+        .insert(aiModelAssignments)
+        .values({
+          creatorId: ctx.creatorId,
+          taskType: input.taskType,
+          provider: input.provider,
+          model: input.model,
+          apiKey,
+        })
+        .returning();
+      return created;
+    }),
+
+  deleteAssignment: protectedProcedure
+    .input(z.object({
+      taskType: z.enum(["suggestion", "analysis", "summary", "report", "price_advice"]),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      await ctx.db
+        .delete(aiModelAssignments)
+        .where(
+          and(
+            eq(aiModelAssignments.creatorId, ctx.creatorId),
+            eq(aiModelAssignments.taskType, input.taskType)
+          )
+        );
+      return { success: true };
     }),
 });
 

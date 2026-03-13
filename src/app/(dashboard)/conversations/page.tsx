@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
+import { useQueryClient } from "@tanstack/react-query";
 import { ConversationList } from "@/components/conversations/conversation-list";
 import { ChatPanel } from "@/components/conversations/chat-panel";
 import { ContactPanel } from "@/components/conversations/contact-panel";
@@ -13,6 +14,8 @@ export default function ConversationsPage() {
   >(null);
   const [showContactPanel, setShowContactPanel] = useState(false);
 
+  const queryClient = useQueryClient();
+  const utils = trpc.useUtils();
   const conversationsQuery = trpc.conversations.list.useQuery();
   const conversationQuery = trpc.conversations.getById.useQuery(
     { id: selectedConversationId! },
@@ -58,10 +61,13 @@ export default function ConversationsPage() {
       >
         {hasConversation ? (
           <ChatPanel
-            conversation={conversationQuery.data}
+            conversation={conversationQuery.data!}
             onMessageSent={() => {
-              conversationQuery.refetch();
-              conversationsQuery.refetch();
+              utils.conversations.getById.invalidate({ id: selectedConversationId! });
+              utils.conversations.list.invalidate();
+              queryClient.invalidateQueries({
+                queryKey: [["intelligence.getContactScoring"]],
+              });
             }}
             onBack={handleBack}
             onToggleContact={() => setShowContactPanel(!showContactPanel)}
@@ -82,7 +88,8 @@ export default function ConversationsPage() {
           )}
         >
           <ContactPanel
-            contact={conversationQuery.data.contact}
+            contact={conversationQuery.data!.contact}
+            conversationId={selectedConversationId}
             onBack={() => setShowContactPanel(false)}
           />
         </div>

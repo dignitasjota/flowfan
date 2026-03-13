@@ -1,7 +1,12 @@
 import { z } from "zod";
 import { eq, and } from "drizzle-orm";
+import { TRPCError } from "@trpc/server";
 import { createTRPCRouter, protectedProcedure } from "../trpc";
+import { createChildLogger } from "@/lib/logger";
+
+const log = createChildLogger("messages-router");
 import { messages, conversations, contacts } from "@/server/db/schema";
+import { analysisQueue } from "@/server/queues";
 
 export const messagesRouter = createTRPCRouter({
   list: protectedProcedure
@@ -22,7 +27,7 @@ export const messagesRouter = createTRPCRouter({
       });
 
       if (!conversation) {
-        throw new Error("Conversation not found");
+        throw new TRPCError({ code: "NOT_FOUND", message: "Conversation not found" });
       }
 
       return ctx.db.query.messages.findMany({
@@ -50,7 +55,7 @@ export const messagesRouter = createTRPCRouter({
       });
 
       if (!conversation) {
-        throw new Error("Conversation not found");
+        throw new TRPCError({ code: "NOT_FOUND", message: "Conversation not found" });
       }
 
       const [message] = await ctx.db
@@ -73,6 +78,32 @@ export const messagesRouter = createTRPCRouter({
         .set({ lastInteractionAt: new Date() })
         .where(eq(contacts.id, conversation.contactId));
 
+      // Enqueue analysis job (processed by worker)
+      if (message) {
+        const recentMessages = await ctx.db.query.messages.findMany({
+          where: eq(messages.conversationId, input.conversationId),
+          orderBy: (m, { desc }) => [desc(m.createdAt)],
+          limit: 5,
+        });
+
+        analysisQueue
+          .add("analyze", {
+            creatorId: ctx.creatorId,
+            contactId: conversation.contactId,
+            messageId: message.id,
+            conversationId: input.conversationId,
+            messageContent: input.content,
+            platformType: conversation.platformType,
+            conversationHistory: recentMessages.reverse().map((m) => ({
+              role: m.role,
+              content: m.content,
+            })),
+          })
+          .catch((err) => {
+            log.error({ err }, "Failed to enqueue analysis job");
+          });
+      }
+
       return message;
     }),
 
@@ -94,7 +125,7 @@ export const messagesRouter = createTRPCRouter({
       });
 
       if (!conversation) {
-        throw new Error("Conversation not found");
+        throw new TRPCError({ code: "NOT_FOUND", message: "Conversation not found" });
       }
 
       const [message] = await ctx.db

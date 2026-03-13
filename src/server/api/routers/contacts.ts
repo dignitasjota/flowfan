@@ -1,24 +1,20 @@
 import { z } from "zod";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, ilike, or, sql, count } from "drizzle-orm";
 import { createTRPCRouter, protectedProcedure } from "../trpc";
 import { contacts, contactProfiles } from "@/server/db/schema";
+import { checkContactLimit } from "@/server/services/usage-limits";
+import { platformTypeSchema, funnelStageSchema } from "@/lib/constants";
 
 export const contactsRouter = createTRPCRouter({
   list: protectedProcedure
     .input(
       z.object({
-        platformType: z
-          .enum([
-            "instagram",
-            "tinder",
-            "reddit",
-            "onlyfans",
-            "twitter",
-            "telegram",
-            "snapchat",
-            "other",
-          ])
+        platformType: platformTypeSchema.optional(),
+        search: z.string().max(100).optional(),
+        funnelStage: funnelStageSchema
           .optional(),
+        limit: z.number().min(1).max(100).default(50),
+        offset: z.number().min(0).default(0),
       }).optional()
     )
     .query(async ({ ctx, input }) => {
@@ -28,11 +24,40 @@ export const contactsRouter = createTRPCRouter({
         conditions.push(eq(contacts.platformType, input.platformType));
       }
 
-      return ctx.db.query.contacts.findMany({
+      if (input?.search) {
+        const searchTerm = `%${input.search}%`;
+        conditions.push(
+          or(
+            ilike(contacts.username, searchTerm),
+            ilike(contacts.displayName, searchTerm)
+          )!
+        );
+      }
+
+      // Get total count for pagination
+      const [totalResult] = await ctx.db
+        .select({ count: count() })
+        .from(contacts)
+        .where(and(...conditions));
+
+      const results = await ctx.db.query.contacts.findMany({
         where: and(...conditions),
         with: { profile: true },
         orderBy: [desc(contacts.lastInteractionAt)],
+        limit: input?.limit ?? 50,
+        offset: input?.offset ?? 0,
       });
+
+      // Filter by funnel stage in-memory (profile is a relation)
+      const filtered = input?.funnelStage
+        ? results.filter((c) => c.profile?.funnelStage === input.funnelStage)
+        : results;
+
+      return {
+        items: filtered,
+        total: totalResult?.count ?? 0,
+        hasMore: (input?.offset ?? 0) + (input?.limit ?? 50) < (totalResult?.count ?? 0),
+      };
     }),
 
   getById: protectedProcedure
@@ -56,19 +81,12 @@ export const contactsRouter = createTRPCRouter({
       z.object({
         username: z.string().min(1).max(255),
         displayName: z.string().max(255).optional(),
-        platformType: z.enum([
-          "instagram",
-          "tinder",
-          "reddit",
-          "onlyfans",
-          "twitter",
-          "telegram",
-          "snapchat",
-          "other",
-        ]),
+        platformType: platformTypeSchema,
       })
     )
     .mutation(async ({ ctx, input }) => {
+      await checkContactLimit(ctx.db, ctx.creatorId);
+
       const [contact] = await ctx.db
         .insert(contacts)
         .values({

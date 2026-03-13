@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { db } from "./db";
 import { creators } from "./db/schema";
 import { compare } from "bcryptjs";
+import { rateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 
 declare module "next-auth" {
   interface Session {
@@ -33,8 +34,15 @@ export const authOptions: NextAuthOptions = {
         email: { label: "Email", type: "email" },
         password: { label: "Password", type: "password" },
       },
-      async authorize(credentials) {
+      async authorize(credentials, req) {
         if (!credentials?.email || !credentials?.password) return null;
+
+        // Rate limit login attempts by email
+        const rateLimitResult = await rateLimit(
+          `login:${credentials.email}`,
+          RATE_LIMITS.auth
+        );
+        if (!rateLimitResult.success) return null;
 
         const creator = await db.query.creators.findFirst({
           where: eq(creators.email, credentials.email),

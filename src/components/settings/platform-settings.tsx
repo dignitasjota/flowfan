@@ -1,20 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
-
-const platformOptions = [
-  { value: "instagram", label: "Instagram" },
-  { value: "tinder", label: "Tinder" },
-  { value: "reddit", label: "Reddit" },
-  { value: "onlyfans", label: "OnlyFans" },
-  { value: "twitter", label: "Twitter" },
-  { value: "telegram", label: "Telegram" },
-  { value: "snapchat", label: "Snapchat" },
-  { value: "other", label: "Otra" },
-] as const;
-
-type PlatformType = (typeof platformOptions)[number]["value"];
+import { PLATFORM_OPTIONS, type PlatformType } from "@/lib/constants";
 
 export function PlatformSettings() {
   const [selectedPlatform, setSelectedPlatform] =
@@ -29,17 +17,26 @@ export function PlatformSettings() {
   const [customInstructions, setCustomInstructions] = useState("");
   const [saved, setSaved] = useState(false);
 
-  const platformsQuery = trpc.platforms.list.useQuery(undefined, {
-    onSuccess: (data) => {
-      loadPlatformConfig(selectedPlatform, data);
-    },
-  });
+  const platformsQuery = trpc.platforms.list.useQuery();
 
+  useEffect(() => {
+    if (platformsQuery.data) {
+      loadPlatformConfig(selectedPlatform, platformsQuery.data);
+    }
+  }, [platformsQuery.data]);
+
+  const utils = trpc.useUtils();
   const upsertPlatform = trpc.platforms.upsert.useMutation({
+    onMutate: async () => {
+      await utils.platforms.list.cancel();
+    },
     onSuccess: () => {
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
-      platformsQuery.refetch();
+      utils.platforms.list.invalidate();
+    },
+    onError: () => {
+      utils.platforms.list.invalidate();
     },
   });
 
@@ -101,7 +98,7 @@ export function PlatformSettings() {
 
       {/* Platform selector */}
       <div className="mb-6 flex flex-wrap gap-2">
-        {platformOptions.map((p) => (
+        {PLATFORM_OPTIONS.map((p) => (
           <button
             key={p.value}
             onClick={() => handlePlatformChange(p.value)}

@@ -46,9 +46,15 @@ export type SuggestionInput = {
 
 type SuggestionResult = {
   suggestions: string[];
+  variants: SuggestionVariant[];
   tokensUsed: number;
   model: string;
   provider: AIProvider;
+};
+
+export type AICallResult = {
+  text: string;
+  tokensUsed: number;
 };
 
 // ============================================================
@@ -86,8 +92,61 @@ export const PROVIDER_MODELS: Record<AIProvider, { value: string; label: string 
 // Prompt Builder (shared across providers)
 // ============================================================
 
+export type SuggestionVariant = {
+  type: "casual" | "sales" | "retention";
+  label: string;
+  content: string;
+};
+
+function getVariantInstructions(funnelStage: string): string {
+  // Adapt variant types based on funnel stage
+  if (funnelStage === "cold" || funnelStage === "curious") {
+    return `Genera exactamente 3 variantes de respuesta con estos enfoques:
+1. CASUAL: Tono relajado y amistoso para generar confianza
+2. ENGAGEMENT: Orientada a profundizar la conversacion y conocer mejor al fan
+3. RETENTION: Mantener el interes sin presion
+
+Formato OBLIGATORIO - cada variante debe empezar con su etiqueta:
+[CASUAL] <mensaje>
+---
+[ENGAGEMENT] <mensaje>
+---
+[RETENTION] <mensaje>`;
+  }
+
+  if (funnelStage === "interested" || funnelStage === "hot_lead") {
+    return `Genera exactamente 3 variantes de respuesta con estos enfoques:
+1. CASUAL: Tono relajado y cercano
+2. SALES: Orientada sutilmente hacia una conversion o compra
+3. RETENTION: Mantener engagement sin presion de venta
+
+Formato OBLIGATORIO - cada variante debe empezar con su etiqueta:
+[CASUAL] <mensaje>
+---
+[SALES] <mensaje>
+---
+[RETENTION] <mensaje>`;
+  }
+
+  // buyer, vip
+  return `Genera exactamente 3 variantes de respuesta con estos enfoques:
+1. CASUAL: Tono relajado y personal para fortalecer la relacion
+2. SALES: Orientada a upsell o contenido premium exclusivo
+3. RETENTION: Hacer sentir especial al fan para fidelizarlo
+
+Formato OBLIGATORIO - cada variante debe empezar con su etiqueta:
+[CASUAL] <mensaje>
+---
+[SALES] <mensaje>
+---
+[RETENTION] <mensaje>`;
+}
+
 function buildSystemPrompt(input: SuggestionInput): string {
   const parts: string[] = [];
+
+  const funnelStage = input.contactProfile?.funnelStage ?? "cold";
+  const variantInstructions = getVariantInstructions(funnelStage);
 
   parts.push(`Eres un asistente de conversación para un creador de contenido.
 Tu rol es generar sugerencias de respuesta que el creador copiará y enviará manualmente.
@@ -97,7 +156,7 @@ REGLAS IMPORTANTES:
 - Nunca reveles que eres una IA
 - Nunca generes contenido que involucre menores
 - Respeta las restricciones definidas por el creador
-- Genera exactamente 2 variantes de respuesta, separadas por ---`);
+- ${variantInstructions}`);
 
   parts.push(`\nPLATAFORMA: ${input.platformType}`);
 
@@ -148,132 +207,48 @@ function buildConversationMessages(input: SuggestionInput) {
   return msgs;
 }
 
-function stripThinkingBlocks(text: string): string {
+export function stripThinkingBlocks(text: string): string {
   // Remove <think>...</think> blocks from reasoning models (MiniMax, DeepSeek, etc.)
   return text.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
 }
 
-function parseSuggestions(text: string): string[] {
+function parseSuggestionVariants(text: string): SuggestionVariant[] {
   const cleaned = stripThinkingBlocks(text);
-  const suggestions = cleaned
+  const parts = cleaned
     .split("---")
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
-  return suggestions.length > 0 ? suggestions : [cleaned];
-}
 
-// ============================================================
-// Provider Implementations
-// ============================================================
-
-async function generateWithAnthropic(
-  config: AIConfig,
-  input: SuggestionInput
-): Promise<SuggestionResult> {
-  const client = new Anthropic({ apiKey: config.apiKey });
-  const systemPrompt = buildSystemPrompt(input);
-  const messages = buildConversationMessages(input);
-
-  const response = await client.messages.create({
-    model: config.model,
-    max_tokens: 1024,
-    system: systemPrompt,
-    messages,
-  });
-
-  const text =
-    response.content[0]?.type === "text" ? response.content[0].text : "";
-  const tokensUsed =
-    (response.usage?.input_tokens ?? 0) + (response.usage?.output_tokens ?? 0);
-
-  return {
-    suggestions: parseSuggestions(text),
-    tokensUsed,
-    model: config.model,
-    provider: "anthropic",
+  const labelMap: Record<string, { type: SuggestionVariant["type"]; label: string }> = {
+    CASUAL: { type: "casual", label: "Casual" },
+    SALES: { type: "sales", label: "Venta" },
+    ENGAGEMENT: { type: "retention", label: "Engagement" },
+    RETENTION: { type: "retention", label: "Retencion" },
   };
-}
 
-async function generateWithOpenAI(
-  config: AIConfig,
-  input: SuggestionInput
-): Promise<SuggestionResult> {
-  const client = new OpenAI({ apiKey: config.apiKey });
-  const systemPrompt = buildSystemPrompt(input);
-  const conversationMessages = buildConversationMessages(input);
-
-  const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-    { role: "system", content: systemPrompt },
-    ...conversationMessages,
-  ];
-
-  const response = await client.chat.completions.create({
-    model: config.model,
-    max_tokens: 1024,
-    messages,
-  });
-
-  const text = response.choices[0]?.message?.content ?? "";
-  const tokensUsed =
-    (response.usage?.prompt_tokens ?? 0) +
-    (response.usage?.completion_tokens ?? 0);
-
-  return {
-    suggestions: parseSuggestions(text),
-    tokensUsed,
-    model: config.model,
-    provider: "openai",
-  };
-}
-
-async function generateWithGoogle(
-  config: AIConfig,
-  input: SuggestionInput
-): Promise<SuggestionResult> {
-  const systemPrompt = buildSystemPrompt(input);
-  const conversationMessages = buildConversationMessages(input);
-
-  // Google Gemini REST API
-  const contents = conversationMessages.map((msg) => ({
-    role: msg.role === "assistant" ? "model" : "user",
-    parts: [{ text: msg.content }],
-  }));
-
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${config.model}:generateContent?key=${config.apiKey}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        system_instruction: { parts: [{ text: systemPrompt }] },
-        contents,
-        generationConfig: { maxOutputTokens: 1024 },
-      }),
+  const variants: SuggestionVariant[] = [];
+  for (const part of parts) {
+    const tagMatch = part.match(/^\[(CASUAL|SALES|ENGAGEMENT|RETENTION)\]\s*/i);
+    if (tagMatch) {
+      const tag = tagMatch[1]!.toUpperCase();
+      const content = part.slice(tagMatch[0].length).trim();
+      const info = labelMap[tag] ?? { type: "casual" as const, label: "Casual" };
+      variants.push({ type: info.type, label: info.label, content });
+    } else {
+      // Fallback: no tag found
+      variants.push({ type: "casual", label: "Sugerencia", content: part });
     }
-  );
-
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`Google AI error: ${error}`);
   }
 
-  const data = await response.json();
-  const text =
-    data.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-  const tokensUsed =
-    (data.usageMetadata?.promptTokenCount ?? 0) +
-    (data.usageMetadata?.candidatesTokenCount ?? 0);
+  if (variants.length === 0) {
+    variants.push({ type: "casual", label: "Sugerencia", content: cleaned });
+  }
 
-  return {
-    suggestions: parseSuggestions(text),
-    tokensUsed,
-    model: config.model,
-    provider: "google",
-  };
+  return variants;
 }
 
 // ============================================================
-// OpenAI-compatible providers (MiniMax, Kimi)
+// Generic AI Provider Call
 // ============================================================
 
 const OPENAI_COMPATIBLE_BASES: Record<string, string> = {
@@ -281,41 +256,102 @@ const OPENAI_COMPATIBLE_BASES: Record<string, string> = {
   kimi: "https://api.moonshot.cn/v1",
 };
 
-async function generateWithOpenAICompatible(
+export async function callAIProvider(
   config: AIConfig,
-  input: SuggestionInput
-): Promise<SuggestionResult> {
-  const baseURL = OPENAI_COMPATIBLE_BASES[config.provider];
-  if (!baseURL) {
-    throw new Error(`No base URL for provider: ${config.provider}`);
+  systemPrompt: string,
+  messages: { role: "user" | "assistant"; content: string }[],
+  maxTokens: number = 1024
+): Promise<AICallResult> {
+  switch (config.provider) {
+    case "anthropic": {
+      const client = new Anthropic({ apiKey: config.apiKey });
+      const response = await client.messages.create({
+        model: config.model,
+        max_tokens: maxTokens,
+        system: systemPrompt,
+        messages,
+      });
+      const text =
+        response.content[0]?.type === "text" ? response.content[0].text : "";
+      const tokensUsed =
+        (response.usage?.input_tokens ?? 0) + (response.usage?.output_tokens ?? 0);
+      return { text, tokensUsed };
+    }
+
+    case "openai": {
+      const client = new OpenAI({ apiKey: config.apiKey });
+      const oaiMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+        { role: "system", content: systemPrompt },
+        ...messages,
+      ];
+      const response = await client.chat.completions.create({
+        model: config.model,
+        max_tokens: maxTokens,
+        messages: oaiMessages,
+      });
+      const text = response.choices[0]?.message?.content ?? "";
+      const tokensUsed =
+        (response.usage?.prompt_tokens ?? 0) +
+        (response.usage?.completion_tokens ?? 0);
+      return { text, tokensUsed };
+    }
+
+    case "google": {
+      const contents = messages.map((msg) => ({
+        role: msg.role === "assistant" ? "model" : "user",
+        parts: [{ text: msg.content }],
+      }));
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${config.model}:generateContent?key=${config.apiKey}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            system_instruction: { parts: [{ text: systemPrompt }] },
+            contents,
+            generationConfig: { maxOutputTokens: maxTokens },
+          }),
+        }
+      );
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(`Google AI error: ${error}`);
+      }
+      const data = await response.json();
+      const text =
+        data.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+      const tokensUsed =
+        (data.usageMetadata?.promptTokenCount ?? 0) +
+        (data.usageMetadata?.candidatesTokenCount ?? 0);
+      return { text, tokensUsed };
+    }
+
+    case "minimax":
+    case "kimi": {
+      const baseURL = OPENAI_COMPATIBLE_BASES[config.provider];
+      if (!baseURL) {
+        throw new Error(`No base URL for provider: ${config.provider}`);
+      }
+      const client = new OpenAI({ apiKey: config.apiKey, baseURL });
+      const oaiMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+        { role: "system", content: systemPrompt },
+        ...messages,
+      ];
+      const response = await client.chat.completions.create({
+        model: config.model,
+        max_tokens: maxTokens,
+        messages: oaiMessages,
+      });
+      const text = response.choices[0]?.message?.content ?? "";
+      const tokensUsed =
+        (response.usage?.prompt_tokens ?? 0) +
+        (response.usage?.completion_tokens ?? 0);
+      return { text, tokensUsed };
+    }
+
+    default:
+      throw new Error(`Unsupported AI provider: ${config.provider}`);
   }
-
-  const client = new OpenAI({ apiKey: config.apiKey, baseURL });
-  const systemPrompt = buildSystemPrompt(input);
-  const conversationMessages = buildConversationMessages(input);
-
-  const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-    { role: "system", content: systemPrompt },
-    ...conversationMessages,
-  ];
-
-  const response = await client.chat.completions.create({
-    model: config.model,
-    max_tokens: 1024,
-    messages,
-  });
-
-  const text = response.choices[0]?.message?.content ?? "";
-  const tokensUsed =
-    (response.usage?.prompt_tokens ?? 0) +
-    (response.usage?.completion_tokens ?? 0);
-
-  return {
-    suggestions: parseSuggestions(text),
-    tokensUsed,
-    model: config.model,
-    provider: config.provider,
-  };
 }
 
 // ============================================================
@@ -326,17 +362,17 @@ export async function generateSuggestion(
   config: AIConfig,
   input: SuggestionInput
 ): Promise<SuggestionResult> {
-  switch (config.provider) {
-    case "anthropic":
-      return generateWithAnthropic(config, input);
-    case "openai":
-      return generateWithOpenAI(config, input);
-    case "google":
-      return generateWithGoogle(config, input);
-    case "minimax":
-    case "kimi":
-      return generateWithOpenAICompatible(config, input);
-    default:
-      throw new Error(`Unsupported AI provider: ${config.provider}`);
-  }
+  const systemPrompt = buildSystemPrompt(input);
+  const conversationMessages = buildConversationMessages(input);
+  const result = await callAIProvider(config, systemPrompt, conversationMessages, 1024);
+
+  const variants = parseSuggestionVariants(result.text);
+
+  return {
+    suggestions: variants.map((v) => v.content),
+    variants,
+    tokensUsed: result.tokensUsed,
+    model: config.model,
+    provider: config.provider,
+  };
 }

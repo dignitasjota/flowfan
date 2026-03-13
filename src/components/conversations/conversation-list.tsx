@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { cn } from "@/lib/utils";
+import { ConversationListSkeleton } from "@/components/ui/skeleton";
 
 type Conversation = {
   id: string;
@@ -63,21 +64,32 @@ export function ConversationList({
   onSelect,
   isLoading,
 }: Props) {
+  const [searchTerm, setSearchTerm] = useState("");
   const [collapsedPlatforms, setCollapsedPlatforms] = useState<Set<string>>(
     new Set()
   );
 
-  // Group conversations by platform
+  // Filter and group conversations by platform
+  const filtered = useMemo(() => {
+    if (!searchTerm) return conversations;
+    const term = searchTerm.toLowerCase();
+    return conversations.filter(
+      (c) =>
+        c.contact.username.toLowerCase().includes(term) ||
+        c.contact.displayName?.toLowerCase().includes(term)
+    );
+  }, [conversations, searchTerm]);
+
   const grouped = useMemo(() => {
     const groups: Record<string, Conversation[]> = {};
-    for (const conv of conversations) {
+    for (const conv of filtered) {
       const key = conv.platformType;
       if (!groups[key]) groups[key] = [];
       groups[key].push(conv);
     }
     // Sort platforms by number of conversations (most first)
     return Object.entries(groups).sort((a, b) => b[1].length - a[1].length);
-  }, [conversations]);
+  }, [filtered]);
 
   function togglePlatform(platform: string) {
     setCollapsedPlatforms((prev) => {
@@ -93,8 +105,11 @@ export function ConversationList({
 
   if (isLoading) {
     return (
-      <div className="flex h-full items-center justify-center text-gray-500">
-        Cargando...
+      <div className="flex h-full flex-col">
+        <div className="flex items-center justify-between border-b border-gray-800 px-4 py-3">
+          <h2 className="text-lg font-semibold text-white">Conversaciones</h2>
+        </div>
+        <ConversationListSkeleton />
       </div>
     );
   }
@@ -103,7 +118,32 @@ export function ConversationList({
     <div className="flex h-full flex-col">
       <div className="flex items-center justify-between border-b border-gray-800 px-4 py-3">
         <h2 className="text-lg font-semibold text-white">Conversaciones</h2>
-        <span className="text-sm text-gray-400">{conversations.length}</span>
+        <span className="text-sm text-gray-400">{filtered.length}</span>
+      </div>
+
+      {/* Search */}
+      <div className="border-b border-gray-800 px-4 py-2">
+        <div className="relative">
+          <svg
+            className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2}
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+            />
+          </svg>
+          <input
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder="Buscar contacto..."
+            className="w-full rounded-lg border border-gray-700 bg-gray-800 py-2 pl-10 pr-3 text-sm text-white placeholder-gray-500 focus:border-indigo-500 focus:outline-none"
+          />
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto">

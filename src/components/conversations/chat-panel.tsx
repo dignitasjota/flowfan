@@ -3,6 +3,8 @@
 import { useState, useRef, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
+import { useTrpcErrorHandler } from "@/hooks/useTrpcErrorHandler";
+import { useToast } from "@/components/ui/toast";
 
 type Message = {
   id: string;
@@ -22,6 +24,12 @@ type Conversation = {
   messages: Message[];
 };
 
+type SuggestionVariant = {
+  type: "casual" | "sales" | "retention";
+  label: string;
+  content: string;
+};
+
 type Props = {
   conversation: Conversation;
   onMessageSent: () => void;
@@ -31,14 +39,41 @@ type Props = {
 
 export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact }: Props) {
   const [fanMessage, setFanMessage] = useState("");
+  const [creatorMessage, setCreatorMessage] = useState("");
   const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [variants, setVariants] = useState<SuggestionVariant[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+  const [manualMode, setManualMode] = useState(false);
+  const [isSendingManual, setIsSendingManual] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  const utils = trpc.useUtils();
   const suggestMutation = trpc.ai.suggest.useMutation();
   const regenerateMutation = trpc.ai.regenerate.useMutation();
-  const addCreatorMessage = trpc.messages.addCreatorMessage.useMutation();
+  const addCreatorMessage = trpc.messages.addCreatorMessage.useMutation({
+    onMutate: async (input) => {
+      await utils.conversations.getById.cancel({ id: conversation.id });
+      return { content: input.content };
+    },
+    onSettled: () => {
+      utils.conversations.getById.invalidate({ id: conversation.id });
+    },
+  });
+  const addFanMessage = trpc.messages.addFanMessage.useMutation({
+    onMutate: async (input) => {
+      await utils.conversations.getById.cancel({ id: conversation.id });
+      return { content: input.content };
+    },
+    onSettled: () => {
+      utils.conversations.getById.invalidate({ id: conversation.id });
+    },
+  });
+  const usageQuery = trpc.billing.getUsage.useQuery(undefined, {
+    refetchInterval: 60000,
+  });
+  const { handleError } = useTrpcErrorHandler();
+  const { success: toastSuccess } = useToast();
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -49,6 +84,7 @@ export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact
 
     setIsGenerating(true);
     setSuggestions([]);
+    setVariants([]);
 
     try {
       const result = await suggestMutation.mutateAsync({
@@ -57,12 +93,46 @@ export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact
       });
 
       setSuggestions(result.suggestions);
+      setVariants(result.variants ?? []);
       setFanMessage("");
+      onMessageSent();
+    } catch (error) {
+      if (!handleError(error)) {
+        console.error("Error generating suggestions:", error);
+      }
+    } finally {
+      setIsGenerating(false);
+    }
+  }
+
+  async function handleSendManual() {
+    if (!fanMessage.trim() && !creatorMessage.trim()) return;
+    setIsSendingManual(true);
+
+    try {
+      // Save fan message if provided
+      if (fanMessage.trim()) {
+        await addFanMessage.mutateAsync({
+          conversationId: conversation.id,
+          content: fanMessage.trim(),
+        });
+      }
+
+      // Save creator message if provided
+      if (creatorMessage.trim()) {
+        await addCreatorMessage.mutateAsync({
+          conversationId: conversation.id,
+          content: creatorMessage.trim(),
+        });
+      }
+
+      setFanMessage("");
+      setCreatorMessage("");
       onMessageSent();
     } catch {
       // Error handled by tRPC
     } finally {
-      setIsGenerating(false);
+      setIsSendingManual(false);
     }
   }
 
@@ -70,6 +140,7 @@ export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact
     // Copy to clipboard
     await navigator.clipboard.writeText(suggestion);
     setCopiedIndex(index);
+    toastSuccess("Respuesta copiada al portapapeles");
     setTimeout(() => setCopiedIndex(null), 2000);
 
     // Save as creator message
@@ -87,6 +158,7 @@ export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact
   async function handleRegenerate() {
     setIsGenerating(true);
     setSuggestions([]);
+    setVariants([]);
 
     try {
       const result = await regenerateMutation.mutateAsync({
@@ -94,8 +166,11 @@ export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact
       });
 
       setSuggestions(result.suggestions);
-    } catch {
-      // Error handled by tRPC
+      setVariants(result.variants ?? []);
+    } catch (error) {
+      if (!handleError(error)) {
+        console.error("Error regenerating suggestions:", error);
+      }
     } finally {
       setIsGenerating(false);
     }
@@ -126,6 +201,33 @@ export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact
           </span>
         </div>
 
+        {/* Manual mode toggle */}
+        <button
+          onClick={() => {
+            setManualMode(!manualMode);
+            setSuggestions([]);
+            setCreatorMessage("");
+          }}
+          className={cn(
+            "flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors",
+            manualMode
+              ? "border-amber-500/50 bg-amber-500/10 text-amber-400"
+              : "border-gray-600 text-gray-400 hover:bg-gray-800 hover:text-white"
+          )}
+          title={manualMode ? "Desactivar modo manual" : "Activar modo manual"}
+        >
+          {manualMode ? (
+            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+            </svg>
+          ) : (
+            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+            </svg>
+          )}
+          {manualMode ? "Manual" : "Manual"}
+        </button>
+
         {/* Contact info button (mobile) */}
         {onToggleContact && (
           <button
@@ -138,6 +240,18 @@ export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact
           </button>
         )}
       </div>
+
+      {/* Manual mode banner */}
+      {manualMode && (
+        <div className="flex items-center gap-2 border-b border-amber-500/20 bg-amber-500/5 px-6 py-2">
+          <svg className="h-4 w-4 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <span className="text-xs text-amber-400/80">
+            Modo manual: la IA no genera sugerencias. Puedes registrar ambos lados de la conversacion.
+          </span>
+        </div>
+      )}
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-6 py-4">
@@ -171,7 +285,7 @@ export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact
                 <span className="h-2 w-2 animate-bounce rounded-full bg-indigo-400 [animation-delay:300ms]" />
               </div>
               <span className="text-sm text-gray-400">
-                La IA está generando sugerencias...
+                La IA esta generando sugerencias...
               </span>
             </div>
           )}
@@ -181,7 +295,7 @@ export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact
       </div>
 
       {/* AI Suggestions */}
-      {suggestions.length > 0 && (
+      {suggestions.length > 0 && !manualMode && (
         <div className="border-t border-gray-800 bg-gray-900/50 px-6 py-4">
           <div className="mb-3 flex items-center justify-between">
             <p className="text-xs font-medium uppercase tracking-wider text-gray-400">
@@ -209,72 +323,146 @@ export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact
             </button>
           </div>
           <div className="space-y-2">
-            {suggestions.map((suggestion, i) => (
-              <div
-                key={i}
-                className="flex items-start gap-2 rounded-lg border border-gray-700 bg-gray-800 p-3"
-              >
-                <p className="flex-1 text-sm text-gray-200">{suggestion}</p>
-                <button
-                  onClick={() => handleUseSuggestion(suggestion, i)}
-                  disabled={addCreatorMessage.isPending}
-                  className="flex flex-shrink-0 items-center gap-1.5 rounded bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+            {(variants.length > 0 ? variants : suggestions.map((s) => ({ type: "casual" as const, label: "Sugerencia", content: s }))).map((variant, i) => {
+              const variantColors: Record<string, string> = {
+                casual: "border-blue-500/40 bg-blue-500/10 text-blue-300",
+                sales: "border-green-500/40 bg-green-500/10 text-green-300",
+                retention: "border-purple-500/40 bg-purple-500/10 text-purple-300",
+              };
+              return (
+                <div
+                  key={i}
+                  className="rounded-lg border border-gray-700 bg-gray-800 p-3"
                 >
-                  {copiedIndex === i ? (
-                    "Copiado!"
-                  ) : (
-                    <>
-                      <svg
-                        className="h-3 w-3"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                        strokeWidth={2}
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"
-                        />
-                      </svg>
-                      Usar
-                    </>
-                  )}
-                </button>
-              </div>
-            ))}
+                  <div className="mb-2 flex items-center justify-between">
+                    <span
+                      className={cn(
+                        "inline-flex rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider",
+                        variantColors[variant.type] ?? "border-gray-600 bg-gray-700 text-gray-300"
+                      )}
+                    >
+                      {variant.label}
+                    </span>
+                    <button
+                      onClick={() => handleUseSuggestion(variant.content, i)}
+                      disabled={addCreatorMessage.isPending}
+                      className="flex flex-shrink-0 items-center gap-1.5 rounded bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+                    >
+                      {copiedIndex === i ? (
+                        "Copiado!"
+                      ) : (
+                        <>
+                          <svg
+                            className="h-3 w-3"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                            strokeWidth={2}
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"
+                            />
+                          </svg>
+                          Usar
+                        </>
+                      )}
+                    </button>
+                  </div>
+                  <p className="text-sm text-gray-200">{variant.content}</p>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
 
       {/* Input */}
       <div className="border-t border-gray-800 px-6 py-4">
-        <div className="flex gap-3">
-          <input
-            value={fanMessage}
-            onChange={(e) => setFanMessage(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                handleSendFanMessage();
-              }
-            }}
-            placeholder="Pega aquí el mensaje del fan..."
-            className="flex-1 rounded-lg border border-gray-700 bg-gray-800 px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:border-indigo-500 focus:outline-none"
-            disabled={isGenerating}
-          />
-          <button
-            onClick={handleSendFanMessage}
-            disabled={isGenerating || !fanMessage.trim()}
-            className="rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
-          >
-            {isGenerating ? "Generando..." : "Enviar"}
-          </button>
-        </div>
-        <p className="mt-2 text-[11px] text-gray-500">
-          Pega el mensaje que te ha enviado el fan. La IA generará una
-          sugerencia de respuesta.
-        </p>
+        {manualMode ? (
+          /* Manual mode: two inputs */
+          <div className="space-y-3">
+            <div>
+              <label className="mb-1 block text-[11px] font-medium uppercase tracking-wider text-gray-500">
+                Mensaje del fan
+              </label>
+              <input
+                value={fanMessage}
+                onChange={(e) => setFanMessage(e.target.value)}
+                placeholder="Pega el mensaje que te envio el fan..."
+                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:border-indigo-500 focus:outline-none"
+                disabled={isSendingManual}
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-[11px] font-medium uppercase tracking-wider text-gray-500">
+                Tu respuesta
+              </label>
+              <input
+                value={creatorMessage}
+                onChange={(e) => setCreatorMessage(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSendManual();
+                  }
+                }}
+                placeholder="Pega tu respuesta..."
+                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:border-indigo-500 focus:outline-none"
+                disabled={isSendingManual}
+              />
+            </div>
+            <button
+              onClick={handleSendManual}
+              disabled={isSendingManual || (!fanMessage.trim() && !creatorMessage.trim())}
+              className="w-full rounded-lg bg-amber-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+            >
+              {isSendingManual ? "Guardando..." : "Guardar mensajes"}
+            </button>
+          </div>
+        ) : (
+          /* AI mode: single input */
+          <>
+            <div className="flex gap-3">
+              <input
+                value={fanMessage}
+                onChange={(e) => setFanMessage(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSendFanMessage();
+                  }
+                }}
+                placeholder="Pega aqui el mensaje del fan..."
+                className="flex-1 rounded-lg border border-gray-700 bg-gray-800 px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:border-indigo-500 focus:outline-none"
+                disabled={isGenerating}
+              />
+              <button
+                onClick={handleSendFanMessage}
+                disabled={isGenerating || !fanMessage.trim()}
+                className="rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+              >
+                {isGenerating ? "Generando..." : "Enviar"}
+              </button>
+            </div>
+            <div className="mt-2 flex items-center justify-between">
+              <p className="text-[11px] text-gray-500">
+                Pega el mensaje que te ha enviado el fan. La IA generara una
+                sugerencia de respuesta.
+              </p>
+              {usageQuery.data && (
+                <span className="flex-shrink-0 text-[11px] text-gray-500">
+                  {usageQuery.data.usage.aiMessages.used}/
+                  {usageQuery.data.usage.aiMessages.limit === -1
+                    ? "ilim"
+                    : usageQuery.data.usage.aiMessages.limit}{" "}
+                  mensajes IA
+                </span>
+              )}
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

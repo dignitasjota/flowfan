@@ -93,6 +93,14 @@ export const aiProviderEnum = pgEnum("ai_provider", [
   "kimi",
 ]);
 
+export const aiTaskTypeEnum = pgEnum("ai_task_type", [
+  "suggestion",
+  "analysis",
+  "summary",
+  "report",
+  "price_advice",
+]);
+
 // ============================================================
 // TABLES
 // ============================================================
@@ -104,6 +112,8 @@ export const creators = pgTable("creators", {
   name: varchar("name", { length: 255 }).notNull(),
   passwordHash: text("password_hash").notNull(),
   avatarUrl: text("avatar_url"),
+  emailVerified: boolean("email_verified").default(false).notNull(),
+  emailVerificationToken: varchar("email_verification_token", { length: 255 }),
   subscriptionPlan: subscriptionPlanEnum("subscription_plan")
     .default("free")
     .notNull(),
@@ -111,6 +121,10 @@ export const creators = pgTable("creators", {
     .default("active")
     .notNull(),
   stripeCustomerId: varchar("stripe_customer_id", { length: 255 }),
+  stripeSubscriptionId: varchar("stripe_subscription_id", { length: 255 }),
+  stripePriceId: varchar("stripe_price_id", { length: 255 }),
+  currentPeriodEnd: timestamp("current_period_end"),
+  onboardingCompleted: boolean("onboarding_completed").default(false).notNull(),
   settings: jsonb("settings").default({}),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -184,6 +198,7 @@ export const contactProfiles = pgTable("contact_profiles", {
   recommendedPriceRange: jsonb("recommended_price_range").default({}),
   funnelStage: funnelStageEnum("funnel_stage").default("cold").notNull(),
   scoringHistory: jsonb("scoring_history").default([]),
+  behavioralSignals: jsonb("behavioral_signals").default({}),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
@@ -285,6 +300,88 @@ export const aiUsageLog = pgTable(
   (table) => [index("ai_usage_creator_idx").on(table.creatorId)]
 );
 
+// --- Response Templates ---
+export const responseTemplates = pgTable(
+  "response_templates",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    creatorId: uuid("creator_id")
+      .notNull()
+      .references(() => creators.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 255 }).notNull(),
+    content: text("content").notNull(),
+    category: varchar("category", { length: 100 }),
+    platformType: platformTypeEnum("platform_type"),
+    variables: text("variables").array().default([]),
+    usageCount: integer("usage_count").default(0).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("templates_creator_idx").on(table.creatorId),
+  ]
+);
+
+// --- AI Model Assignments (multi-model per task) ---
+export const aiModelAssignments = pgTable(
+  "ai_model_assignments",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    creatorId: uuid("creator_id")
+      .notNull()
+      .references(() => creators.id, { onDelete: "cascade" }),
+    taskType: aiTaskTypeEnum("task_type").notNull(),
+    provider: aiProviderEnum("provider").notNull(),
+    model: varchar("model", { length: 100 }).notNull(),
+    apiKey: text("api_key"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("model_assignments_creator_task_idx").on(
+      table.creatorId,
+      table.taskType
+    ),
+  ]
+);
+
+// --- Password Reset Tokens ---
+export const passwordResetTokens = pgTable("password_reset_tokens", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  email: varchar("email", { length: 255 }).notNull(),
+  token: varchar("token", { length: 255 }).notNull().unique(),
+  expiresAt: timestamp("expires_at").notNull(),
+  usedAt: timestamp("used_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// --- Notifications ---
+export const notifications = pgTable(
+  "notifications",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    creatorId: uuid("creator_id")
+      .notNull()
+      .references(() => creators.id, { onDelete: "cascade" }),
+    contactId: uuid("contact_id").references(() => contacts.id, {
+      onDelete: "cascade",
+    }),
+    type: varchar("type", { length: 50 }).notNull(), // "payment_probability_spike", "funnel_advance", etc.
+    title: varchar("title", { length: 255 }).notNull(),
+    message: text("message").notNull(),
+    data: jsonb("data").default({}),
+    isRead: boolean("is_read").default(false).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("notifications_creator_idx").on(table.creatorId),
+    index("notifications_creator_unread_idx").on(
+      table.creatorId,
+      table.isRead
+    ),
+  ]
+);
+
 // ============================================================
 // RELATIONS
 // ============================================================
@@ -296,6 +393,9 @@ export const creatorsRelations = relations(creators, ({ one, many }) => ({
   notes: many(notes),
   aiUsageLog: many(aiUsageLog),
   aiConfig: one(aiConfigs),
+  notifications: many(notifications),
+  responseTemplates: many(responseTemplates),
+  aiModelAssignments: many(aiModelAssignments),
 }));
 
 export const platformsRelations = relations(platforms, ({ one }) => ({
@@ -369,5 +469,32 @@ export const aiUsageLogRelations = relations(aiUsageLog, ({ one }) => ({
   creator: one(creators, {
     fields: [aiUsageLog.creatorId],
     references: [creators.id],
+  }),
+}));
+
+export const responseTemplatesRelations = relations(responseTemplates, ({ one }) => ({
+  creator: one(creators, {
+    fields: [responseTemplates.creatorId],
+    references: [creators.id],
+  }),
+}));
+
+export const aiModelAssignmentsRelations = relations(aiModelAssignments, ({ one }) => ({
+  creator: one(creators, {
+    fields: [aiModelAssignments.creatorId],
+    references: [creators.id],
+  }),
+}));
+
+export const passwordResetTokensRelations = relations(passwordResetTokens, () => ({}));
+
+export const notificationsRelations = relations(notifications, ({ one }) => ({
+  creator: one(creators, {
+    fields: [notifications.creatorId],
+    references: [creators.id],
+  }),
+  contact: one(contacts, {
+    fields: [notifications.contactId],
+    references: [contacts.id],
   }),
 }));

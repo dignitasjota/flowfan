@@ -1,6 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import { cn } from "@/lib/utils";
+import { trpc } from "@/lib/trpc";
 
 type Contact = {
   id: string;
@@ -21,7 +23,7 @@ type Contact = {
 };
 
 const funnelLabels: Record<string, string> = {
-  cold: "Frío",
+  cold: "Frio",
   curious: "Curioso",
   interested: "Interesado",
   hot_lead: "Comprador potencial",
@@ -40,11 +42,22 @@ const funnelColors: Record<string, string> = {
 
 type Props = {
   contact: Contact;
+  conversationId?: string;
   onBack?: () => void;
 };
 
-export function ContactPanel({ contact, onBack }: Props) {
+export function ContactPanel({ contact, conversationId, onBack }: Props) {
   const profile = contact.profile;
+
+  const { data: scoring } = trpc.intelligence.getContactScoring.useQuery(
+    { contactId: contact.id },
+    { enabled: !!contact.id }
+  );
+
+  const { data: sentimentTrend } = trpc.intelligence.getSentimentTrend.useQuery(
+    { conversationId: conversationId! },
+    { enabled: !!conversationId }
+  );
 
   return (
     <div className="flex h-full flex-col overflow-y-auto">
@@ -88,7 +101,7 @@ export function ContactPanel({ contact, onBack }: Props) {
               Probabilidad de pago
             </span>
             <span className="text-2xl font-bold text-white">
-              {profile.paymentProbability}%
+              {scoring?.paymentProbability ?? profile.paymentProbability}%
             </span>
           </div>
 
@@ -97,24 +110,120 @@ export function ContactPanel({ contact, onBack }: Props) {
             <div
               className={cn(
                 "h-2 rounded-full transition-all",
-                profile.paymentProbability >= 70
+                (scoring?.paymentProbability ?? profile.paymentProbability) >= 70
                   ? "bg-green-500"
-                  : profile.paymentProbability >= 40
+                  : (scoring?.paymentProbability ?? profile.paymentProbability) >= 40
                     ? "bg-yellow-500"
                     : "bg-gray-500"
               )}
-              style={{ width: `${profile.paymentProbability}%` }}
+              style={{ width: `${scoring?.paymentProbability ?? profile.paymentProbability}%` }}
             />
           </div>
 
           <p
             className={cn(
               "mt-2 text-sm font-medium",
-              funnelColors[profile.funnelStage] ?? "text-gray-400"
+              funnelColors[scoring?.funnelStage ?? profile.funnelStage] ?? "text-gray-400"
             )}
           >
-            {funnelLabels[profile.funnelStage] ?? profile.funnelStage}
+            {funnelLabels[scoring?.funnelStage ?? profile.funnelStage] ?? profile.funnelStage}
           </p>
+        </div>
+      )}
+
+      {/* Scoring Factors */}
+      {scoring?.factors && scoring.factors.length > 0 && (
+        <div className="border-b border-gray-800 px-4 py-4">
+          <h4 className="mb-3 text-xs font-medium uppercase tracking-wider text-gray-400">
+            Factores de scoring
+          </h4>
+          <div className="space-y-2">
+            {scoring.factors.map((factor) => (
+              <div key={factor.label}>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-gray-400">{factor.label}</span>
+                  <span className="text-gray-300">{Math.round(factor.value)}</span>
+                </div>
+                <div className="mt-1 h-1.5 rounded-full bg-gray-800">
+                  <div
+                    className="h-1.5 rounded-full bg-blue-500/70 transition-all"
+                    style={{ width: `${Math.min(factor.value, 100)}%` }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Sentiment Trend Sparkline */}
+      {sentimentTrend && sentimentTrend.length >= 2 && (
+        <div className="border-b border-gray-800 px-4 py-4">
+          <h4 className="mb-3 text-xs font-medium uppercase tracking-wider text-gray-400">
+            Tendencia de sentimiento
+          </h4>
+          <SentimentSparkline
+            data={sentimentTrend.map((s) => s.sentiment.score)}
+          />
+        </div>
+      )}
+
+      {/* Topics / Interests */}
+      {scoring?.behavioralSignals && (
+        (() => {
+          const signals = scoring.behavioralSignals as {
+            topicFrequency?: Record<string, number>;
+          };
+          const topics = signals.topicFrequency
+            ? Object.entries(signals.topicFrequency)
+                .sort(([, a], [, b]) => b - a)
+                .slice(0, 5)
+            : [];
+          if (topics.length === 0) return null;
+          return (
+            <div className="border-b border-gray-800 px-4 py-4">
+              <h4 className="mb-3 text-xs font-medium uppercase tracking-wider text-gray-400">
+                Temas / Intereses
+              </h4>
+              <div className="flex flex-wrap gap-1.5">
+                {topics.map(([topic, count]) => (
+                  <span
+                    key={topic}
+                    className="rounded-full bg-blue-500/10 px-2.5 py-0.5 text-xs text-blue-300"
+                  >
+                    {topic}
+                    {count > 1 && (
+                      <span className="ml-1 text-blue-400/60">{count}</span>
+                    )}
+                  </span>
+                ))}
+              </div>
+            </div>
+          );
+        })()
+      )}
+
+      {/* Scoring History Chart */}
+      {scoring?.scoringHistory && (scoring.scoringHistory as unknown[]).length >= 2 && (
+        <div className="border-b border-gray-800 px-4 py-4">
+          <h4 className="mb-3 text-xs font-medium uppercase tracking-wider text-gray-400">
+            Evolucion de scores
+          </h4>
+          <ScoringHistoryChart
+            data={
+              (scoring.scoringHistory as { timestamp: string; engagementLevel: number; paymentProbability: number }[])
+            }
+          />
+          <div className="mt-2 flex gap-4 text-xs">
+            <span className="flex items-center gap-1">
+              <span className="inline-block h-2 w-2 rounded-full bg-blue-400" />
+              Engagement
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="inline-block h-2 w-2 rounded-full bg-green-400" />
+              Prob. pago
+            </span>
+          </div>
         </div>
       )}
 
@@ -122,37 +231,42 @@ export function ContactPanel({ contact, onBack }: Props) {
       {profile && (
         <div className="border-b border-gray-800 px-4 py-4">
           <h4 className="mb-3 text-xs font-medium uppercase tracking-wider text-gray-400">
-            Señales
+            Senales
           </h4>
           <div className="space-y-2">
             <InfoRow
               label="Engagement"
-              value={`${profile.engagementLevel}/100`}
+              value={`${scoring?.engagementLevel ?? profile.engagementLevel}/100`}
             />
             <InfoRow
               label="Velocidad de respuesta"
-              value={profile.responseSpeed ?? "—"}
+              value={scoring?.responseSpeed ?? profile.responseSpeed ?? "—"}
             />
             <InfoRow
               label="Profundidad"
-              value={profile.conversationDepth ?? "—"}
+              value={scoring?.conversationDepth ?? profile.conversationDepth ?? "—"}
             />
             <InfoRow
               label="Presupuesto estimado"
-              value={profile.estimatedBudget ?? "—"}
+              value={scoring?.estimatedBudget ?? profile.estimatedBudget ?? "—"}
             />
           </div>
         </div>
       )}
 
+      {/* Price Advice & Report */}
+      {profile && (
+        <PriceAndReport contactId={contact.id} />
+      )}
+
       {/* Info */}
       <div className="px-4 py-4">
         <h4 className="mb-3 text-xs font-medium uppercase tracking-wider text-gray-400">
-          Información
+          Informacion
         </h4>
         <div className="space-y-2">
           <InfoRow
-            label="Primera interacción"
+            label="Primera interaccion"
             value={new Date(contact.firstInteractionAt).toLocaleDateString(
               "es-ES"
             )}
@@ -161,6 +275,16 @@ export function ContactPanel({ contact, onBack }: Props) {
             label="Conversaciones"
             value={String(contact.totalConversations)}
           />
+          {scoring?.scoringHistory && (scoring.scoringHistory as unknown[]).length > 0 && (
+            <InfoRow
+              label="Ultima actualizacion"
+              value={
+                new Date(
+                  (scoring.scoringHistory as { timestamp: string }[]).at(-1)?.timestamp ?? ""
+                ).toLocaleString("es-ES", { dateStyle: "short", timeStyle: "short" })
+              }
+            />
+          )}
           {contact.tags && contact.tags.length > 0 && (
             <div className="flex flex-wrap gap-1 pt-1">
               {contact.tags.map((tag) => (
@@ -179,11 +303,273 @@ export function ContactPanel({ contact, onBack }: Props) {
   );
 }
 
+function PriceAndReport({ contactId }: { contactId: string }) {
+  const [showReport, setShowReport] = useState(false);
+  const priceAdvice = trpc.ai.getPriceAdvice.useMutation();
+  const report = trpc.ai.generateReport.useMutation();
+
+  const timingColors: Record<string, string> = {
+    now: "text-green-400",
+    soon: "text-yellow-400",
+    wait: "text-gray-400",
+  };
+  const timingLabels: Record<string, string> = {
+    now: "Ahora",
+    soon: "Pronto",
+    wait: "Esperar",
+  };
+
+  const riskColors: Record<string, string> = {
+    low: "text-green-400",
+    medium: "text-yellow-400",
+    high: "text-red-400",
+  };
+
+  return (
+    <>
+      {/* Price Advice */}
+      <div className="border-b border-gray-800 px-4 py-4">
+        <div className="mb-3 flex items-center justify-between">
+          <h4 className="text-xs font-medium uppercase tracking-wider text-gray-400">
+            Recomendacion de precio
+          </h4>
+          <button
+            onClick={() => priceAdvice.mutate({ contactId })}
+            disabled={priceAdvice.isPending}
+            className="text-xs text-indigo-400 hover:text-indigo-300 disabled:opacity-50"
+          >
+            {priceAdvice.isPending ? "Analizando..." : "Analizar"}
+          </button>
+        </div>
+
+        {priceAdvice.data && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-gray-400">Precio sugerido</span>
+              <span className="text-lg font-bold text-white">
+                ${priceAdvice.data.recommendedPrice}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-gray-400">Rango</span>
+              <span className="text-sm text-gray-300">
+                ${priceAdvice.data.priceRange.min} - ${priceAdvice.data.priceRange.max}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-gray-400">Momento</span>
+              <span className={cn("text-sm font-medium", timingColors[priceAdvice.data.timing])}>
+                {timingLabels[priceAdvice.data.timing]}
+              </span>
+            </div>
+            <p className="text-xs text-gray-500">{priceAdvice.data.timingReason}</p>
+            <p className="rounded bg-gray-800/50 p-2 text-xs text-gray-300">
+              {priceAdvice.data.strategy}
+            </p>
+          </div>
+        )}
+
+        {!priceAdvice.data && !priceAdvice.isPending && (
+          <p className="text-xs text-gray-600">Pulsa "Analizar" para obtener una recomendacion</p>
+        )}
+      </div>
+
+      {/* Contact Report */}
+      <div className="border-b border-gray-800 px-4 py-4">
+        <div className="mb-3 flex items-center justify-between">
+          <h4 className="text-xs font-medium uppercase tracking-wider text-gray-400">
+            Informe IA
+          </h4>
+          <button
+            onClick={() => {
+              report.mutate({ contactId });
+              setShowReport(true);
+            }}
+            disabled={report.isPending}
+            className="text-xs text-indigo-400 hover:text-indigo-300 disabled:opacity-50"
+          >
+            {report.isPending ? "Generando..." : "Generar"}
+          </button>
+        </div>
+
+        {showReport && report.data && (
+          <div className="space-y-3">
+            <p className="text-xs leading-relaxed text-gray-300">{report.data.overview}</p>
+
+            {report.data.patterns.length > 0 && (
+              <div>
+                <span className="text-[10px] font-medium uppercase text-gray-500">Patrones</span>
+                <ul className="mt-1 space-y-0.5">
+                  {report.data.patterns.map((p, i) => (
+                    <li key={i} className="text-xs text-gray-400">• {p}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            <div className="flex items-center justify-between rounded bg-gray-800/50 p-2">
+              <div>
+                <span className="text-[10px] font-medium uppercase text-gray-500">Prediccion</span>
+                <p className="text-xs text-gray-300">
+                  {report.data.funnelPrediction.nextStage} ({report.data.funnelPrediction.probability}%)
+                </p>
+                <p className="text-[10px] text-gray-500">{report.data.funnelPrediction.timeframe}</p>
+              </div>
+              <div className="text-right">
+                <span className="text-[10px] font-medium uppercase text-gray-500">Riesgo</span>
+                <p className={cn("text-sm font-medium", riskColors[report.data.riskLevel])}>
+                  {report.data.riskLevel === "low" ? "Bajo" : report.data.riskLevel === "medium" ? "Medio" : "Alto"}
+                </p>
+              </div>
+            </div>
+
+            {report.data.recommendations.length > 0 && (
+              <div>
+                <span className="text-[10px] font-medium uppercase text-gray-500">Recomendaciones</span>
+                <ul className="mt-1 space-y-0.5">
+                  {report.data.recommendations.map((r, i) => (
+                    <li key={i} className="text-xs text-green-400/80">• {r}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
+
+        {!report.data && !report.isPending && (
+          <p className="text-xs text-gray-600">Pulsa "Generar" para un informe completo del contacto</p>
+        )}
+      </div>
+    </>
+  );
+}
+
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between">
       <span className="text-xs text-gray-400">{label}</span>
       <span className="text-sm text-white">{value}</span>
     </div>
+  );
+}
+
+function ScoringHistoryChart({
+  data,
+}: {
+  data: { timestamp: string; engagementLevel: number; paymentProbability: number }[];
+}) {
+  if (data.length < 2) return null;
+
+  const width = 200;
+  const height = 60;
+  const padding = 4;
+
+  function toPoints(values: number[]) {
+    const max = 100;
+    return values
+      .map((v, i) => {
+        const x = padding + (i / (values.length - 1)) * (width - padding * 2);
+        const y = height - padding - (v / max) * (height - padding * 2);
+        return `${x},${y}`;
+      })
+      .join(" ");
+  }
+
+  const engagementPoints = toPoints(data.map((d) => d.engagementLevel));
+  const paymentPoints = toPoints(data.map((d) => d.paymentProbability));
+
+  return (
+    <svg width={width} height={height} className="w-full" viewBox={`0 0 ${width} ${height}`}>
+      {/* Grid lines */}
+      {[0, 25, 50, 75, 100].map((v) => {
+        const y = height - padding - (v / 100) * (height - padding * 2);
+        return (
+          <line
+            key={v}
+            x1={padding}
+            y1={y}
+            x2={width - padding}
+            y2={y}
+            stroke="#1f2937"
+            strokeWidth={1}
+          />
+        );
+      })}
+      {/* Engagement line */}
+      <polyline
+        fill="none"
+        stroke="#60a5fa"
+        strokeWidth={1.5}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        points={engagementPoints}
+      />
+      {/* Payment probability line */}
+      <polyline
+        fill="none"
+        stroke="#4ade80"
+        strokeWidth={1.5}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        points={paymentPoints}
+      />
+    </svg>
+  );
+}
+
+function SentimentSparkline({ data }: { data: number[] }) {
+  if (data.length < 2) return null;
+
+  const width = 200;
+  const height = 40;
+  const padding = 4;
+
+  const min = Math.min(...data, -1);
+  const max = Math.max(...data, 1);
+  const range = max - min || 1;
+
+  const points = data
+    .map((v, i) => {
+      const x = padding + (i / (data.length - 1)) * (width - padding * 2);
+      const y = height - padding - ((v - min) / range) * (height - padding * 2);
+      return `${x},${y}`;
+    })
+    .join(" ");
+
+  // Zero line y position
+  const zeroY = height - padding - ((0 - min) / range) * (height - padding * 2);
+
+  // Color based on last value
+  const lastVal = data[data.length - 1] ?? 0;
+  const strokeColor = lastVal > 0.2 ? "#4ade80" : lastVal < -0.2 ? "#f87171" : "#94a3b8";
+
+  return (
+    <svg width={width} height={height} className="w-full" viewBox={`0 0 ${width} ${height}`}>
+      {/* Zero line */}
+      <line
+        x1={padding}
+        y1={zeroY}
+        x2={width - padding}
+        y2={zeroY}
+        stroke="#374151"
+        strokeWidth={1}
+        strokeDasharray="4,4"
+      />
+      {/* Trend line */}
+      <polyline
+        fill="none"
+        stroke={strokeColor}
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        points={points}
+      />
+      {/* Last point dot */}
+      {data.length > 0 && (() => {
+        const lastX = padding + ((data.length - 1) / (data.length - 1)) * (width - padding * 2);
+        const lastY = height - padding - ((lastVal - min) / range) * (height - padding * 2);
+        return <circle cx={lastX} cy={lastY} r={3} fill={strokeColor} />;
+      })()}
+    </svg>
   );
 }

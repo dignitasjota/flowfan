@@ -1,7 +1,9 @@
 import { z } from "zod";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, ilike, or } from "drizzle-orm";
+import { TRPCError } from "@trpc/server";
 import { createTRPCRouter, protectedProcedure } from "../trpc";
 import { conversations, contacts } from "@/server/db/schema";
+import { platformTypeSchema } from "@/lib/constants";
 
 export const conversationsRouter = createTRPCRouter({
   list: protectedProcedure
@@ -9,6 +11,7 @@ export const conversationsRouter = createTRPCRouter({
       z.object({
         contactId: z.string().uuid().optional(),
         status: z.enum(["active", "paused", "archived"]).optional(),
+        search: z.string().max(100).optional(),
       }).optional()
     )
     .query(async ({ ctx, input }) => {
@@ -21,47 +24,93 @@ export const conversationsRouter = createTRPCRouter({
         conditions.push(eq(conversations.status, input.status));
       }
 
-      return ctx.db.query.conversations.findMany({
+      const results = await ctx.db.query.conversations.findMany({
         where: and(...conditions),
         with: {
           contact: { with: { profile: true } },
         },
         orderBy: [desc(conversations.lastMessageAt)],
       });
+
+      // Filter by contact search in-memory (contact is a relation)
+      if (input?.search) {
+        const term = input.search.toLowerCase();
+        return results.filter(
+          (c) =>
+            c.contact.username.toLowerCase().includes(term) ||
+            c.contact.displayName?.toLowerCase().includes(term)
+        );
+      }
+
+      return results;
     }),
 
   getById: protectedProcedure
-    .input(z.object({ id: z.string().uuid() }))
+    .input(
+      z.object({
+        id: z.string().uuid(),
+        messageLimit: z.number().min(1).max(200).default(50),
+      })
+    )
     .query(async ({ ctx, input }) => {
-      return ctx.db.query.conversations.findFirst({
+      const conversation = await ctx.db.query.conversations.findFirst({
         where: and(
           eq(conversations.id, input.id),
           eq(conversations.creatorId, ctx.creatorId)
         ),
         with: {
           contact: { with: { profile: true } },
-          messages: { orderBy: (m, { asc }) => [asc(m.createdAt)] },
         },
       });
+
+      if (!conversation) return null;
+
+      // Load messages with limit (most recent first, then reverse for display)
+      const { messages: messagesTable } = await import("@/server/db/schema");
+      const { eq: eqOp, desc: descOp, count: countFn } = await import("drizzle-orm");
+
+      const allMessages = await ctx.db.query.messages.findMany({
+        where: eqOp(messagesTable.conversationId, input.id),
+        orderBy: (m, { desc }) => [desc(m.createdAt)],
+        limit: input.messageLimit,
+      });
+
+      const [totalResult] = await ctx.db
+        .select({ count: countFn() })
+        .from(messagesTable)
+        .where(eqOp(messagesTable.conversationId, input.id));
+
+      return {
+        ...conversation,
+        messages: allMessages.reverse(),
+        totalMessages: totalResult?.count ?? 0,
+        hasMoreMessages: (totalResult?.count ?? 0) > input.messageLimit,
+      };
     }),
 
   create: protectedProcedure
     .input(
       z.object({
         contactId: z.string().uuid(),
-        platformType: z.enum([
-          "instagram",
-          "tinder",
-          "reddit",
-          "onlyfans",
-          "twitter",
-          "telegram",
-          "snapchat",
-          "other",
-        ]),
+        platformType: platformTypeSchema,
       })
     )
     .mutation(async ({ ctx, input }) => {
+      // Verify the contact belongs to this creator
+      const contact = await ctx.db.query.contacts.findFirst({
+        where: and(
+          eq(contacts.id, input.contactId),
+          eq(contacts.creatorId, ctx.creatorId)
+        ),
+      });
+
+      if (!contact) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Contacto no encontrado",
+        });
+      }
+
       const [conversation] = await ctx.db
         .insert(conversations)
         .values({
@@ -71,16 +120,11 @@ export const conversationsRouter = createTRPCRouter({
         })
         .returning();
 
-      // Increment total conversations on contact
-      const contact = await ctx.db.query.contacts.findFirst({
-        where: eq(contacts.id, input.contactId),
-      });
-      if (contact) {
-        await ctx.db
-          .update(contacts)
-          .set({ totalConversations: contact.totalConversations + 1 })
-          .where(eq(contacts.id, input.contactId));
-      }
+      // Increment total conversations on contact (already verified above)
+      await ctx.db
+        .update(contacts)
+        .set({ totalConversations: contact.totalConversations + 1 })
+        .where(eq(contacts.id, input.contactId));
 
       return conversation;
     }),

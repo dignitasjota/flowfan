@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { signIn } from "next-auth/react";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -14,13 +15,16 @@ export default function RegisterPage() {
     setError("");
 
     const formData = new FormData(e.currentTarget);
+    const email = formData.get("email") as string;
+    const password = formData.get("password") as string;
+
     const res = await fetch("/api/auth/register", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         name: formData.get("name"),
-        email: formData.get("email"),
-        password: formData.get("password"),
+        email,
+        password,
       }),
     });
 
@@ -31,7 +35,18 @@ export default function RegisterPage() {
       return;
     }
 
-    router.push("/login");
+    // Auto-login after successful registration
+    const signInResult = await signIn("credentials", {
+      email,
+      password,
+      redirect: false,
+    });
+
+    if (signInResult?.ok) {
+      router.push("/onboarding");
+    } else {
+      router.push("/login");
+    }
   }
 
   return (
@@ -79,6 +94,9 @@ export default function RegisterPage() {
               className="w-full rounded-lg border border-gray-700 bg-gray-800 px-4 py-2.5 text-white placeholder-gray-500 focus:border-indigo-500 focus:outline-none"
               placeholder="Mínimo 8 caracteres"
             />
+            <p className="mt-1 text-xs text-gray-500">
+              Debe incluir mayúscula, minúscula, número y carácter especial
+            </p>
           </div>
 
           {error && (

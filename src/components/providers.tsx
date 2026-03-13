@@ -6,6 +6,7 @@ import { httpBatchLink } from "@trpc/client";
 import { trpc } from "@/lib/trpc";
 import superjson from "superjson";
 import { SessionProvider } from "next-auth/react";
+import { ToastProvider } from "@/components/ui/toast";
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(() => new QueryClient());
@@ -24,7 +25,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
     <SessionProvider>
       <trpc.Provider client={trpcClient} queryClient={queryClient}>
         <QueryClientProvider client={queryClient}>
-          {children}
+          <ToastProvider>
+            {children}
+          </ToastProvider>
         </QueryClientProvider>
       </trpc.Provider>
     </SessionProvider>
