@@ -219,3 +219,41 @@
   - Verifica en Portainer que se actualizó el container                                                                                                                                                          
                                                                                                                                                                                                                  
   ¿Cuál prefieres: la opción con Watchtower (automática) o la manual con API?       
+
+
+
+
+
+  ✅ CI/CD configurado correctamente.
+
+  El pipeline ahora es:
+
+  Push/PR → Lint ──┐
+            TypeCheck ├→ Build
+            Tests ────┘   Docker
+
+  Tests son obligatorios antes de build.
+
+  ---
+  Ahora protege el main branch en GitHub:
+
+  1. Ve a Settings del repo
+  2. Branches > Add rule
+  3. Branch name pattern: main
+  4. Requiere:
+  ✅ "Require status checks to pass before merging"
+    - Selecciona: lint, typecheck, test, build
+
+  ✅ "Require branches to be up to date before merging"
+
+  ✅ "Require code reviews before merging" (opcional, pero recomendado)
+  5. Guarda
+
+  ---
+  Resultado:
+
+  - Nadie puede mergear a main sin que pasen todos los tests
+  - Pull requests mostrarán el estado de tests en rojo/verde
+  - Si algún test falla → bloquea el merge automáticamente
+
+  Es la protección estándar en equipos profesionales. 🛡️
