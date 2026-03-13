@@ -137,8 +137,9 @@ start() {
         log_info ""
         log_success "FanFlow is ready!"
         log_info "API Health: http://localhost:3000/api/health"
-        log_info "Portainer: http://localhost:9000"
-        log_info "Nginx Proxy Manager: http://localhost:81"
+        log_info "Next: Configure in Nginx Proxy Manager"
+        log_info "  Domain: fanflow.example.com"
+        log_info "  Forward to: localhost:3000"
     else
         log_error "Failed to start services. Check logs:"
         docker compose -f "$COMPOSE_FILE" logs
@@ -269,7 +270,10 @@ ${YELLOW}First time setup:${NC}
   1. ./scripts/deploy.sh setup
   2. Edit .env.prod with your domain and Stripe keys
   3. ./scripts/deploy.sh start
-  4. Open http://localhost/api/health or https://your-domain/api/health
+  4. Configure proxy host in Nginx Proxy Manager:
+     - Domain: fanflow.example.com
+     - Forward to: localhost:3000
+  5. Open https://your-domain/api/health
 
 ${YELLOW}See DEPLOYMENT.md for detailed instructions${NC}
 EOF
