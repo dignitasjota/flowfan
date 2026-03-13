@@ -5,6 +5,8 @@
 - VPS con Ubuntu 22.04+ (mínimo 2GB RAM, 20GB SSD)
 - Docker Engine 20.10+ instalado
 - Docker Compose 2.0+ instalado
+- Portainer instalado (opcional, pero recomendado para UI)
+- **Nginx Proxy Manager ya running** (escuchando en 80/443)
 - Dominio propio (ej: fanflow.example.com)
 - SSH access al VPS
 
@@ -47,9 +49,10 @@ cd /opt/fanflow
 
 ---
 
-## Paso 2: Configurar Portainer (Gestor visual de Docker)
+## Paso 2: Portainer (Opcional - UI para gestionar contenedores)
 
-### 2.1 Desplegar Portainer
+Si quieres interfaz visual para Docker:
+
 ```bash
 docker run -d \
   --name=portainer \
@@ -61,56 +64,26 @@ docker run -d \
   portainer/portainer-ce:latest
 ```
 
-### 2.2 Acceder a Portainer
-- Abrir navegador: `http://tu-vps-ip:9000`
-- Crear usuario admin en primer acceso
-- Seleccionar "Local" como entorno Docker
+Acceder en: `http://tu-vps-ip:9000`
+
+**Si prefieres CLI**, puedes omitir Portainer y usar solo `docker compose` commands.
 
 ---
 
-## Paso 3: Configurar Nginx Proxy Manager (Proxy reverso + SSL)
+## Paso 3: Configurar Nginx Proxy Manager (ya instalado)
 
-### 3.1 Crear docker-compose para NPM
-En `/opt/fanflow/docker-compose.npm.yml`:
+Nginx Proxy Manager ya está running en tu VPS. Solo necesitas:
 
-```yaml
-version: "3.8"
-
-services:
-  npm:
-    image: 'jc21/nginx-proxy-manager:latest'
-    restart: always
-    ports:
-      - '80:80'
-      - '443:443'
-      - '81:81'
-    volumes:
-      - npm_data:/data
-      - npm_letsencrypt:/etc/letsencrypt
-
-volumes:
-  npm_data:
-  npm_letsencrypt:
-
-networks:
-  default:
-    name: npm-network
-```
-
-### 3.2 Desplegar Nginx Proxy Manager
-```bash
-cd /opt/fanflow
-docker compose -f docker-compose.npm.yml up -d
-```
-
-### 3.3 Configurar NPM
+### 3.1 Acceder a NPM
 - Abrir navegador: `http://tu-vps-ip:81`
-- Login (default: `admin@example.com` / `changeme`)
-- Cambiar contraseña en Settings
+- Login con tus credenciales
+
+### 3.2 Verificar que NPM escucha en 80/443
+NPM debe estar manejando ya el tráfico HTTP/HTTPS. Los certificados SSL están configurados centralmente en NPM.
 
 ---
 
-## Paso 4: Desplegar FanFlow con Portainer
+## Paso 4: Desplegar FanFlow en Docker
 
 ### 4.1 Clonar o copiar el proyecto
 ```bash
@@ -177,62 +150,51 @@ LOG_LEVEL=${LOG_LEVEL}  # -> info
 # Asegurarse que el archivo source el .env.prod correcto
 ```
 
-### 4.4 Desplegar en Portainer (UI)
+### 4.4 Desplegar FanFlow
 
-1. **En Portainer → Stacks → Add Stack**
-2. **Name:** `fanflow-prod`
-3. **Paste docker-compose.prod.yml** en el editor
-4. **Configurar variables de entorno:**
-   - Click en "Env"
-   - Agregar cada variable desde .env.prod
-5. **Deploy**
-
-Alternativamente, **vía CLI:**
+**Opción A - Vía CLI (recomendado):**
 ```bash
 cd /opt/fanflow
 docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
 ```
 
+**Opción B - Vía Portainer (si lo tienes):**
+1. Portainer → Stacks → Add Stack
+2. Name: `fanflow-prod`
+3. Paste docker-compose.prod.yml
+4. Configurar variables desde .env.prod
+5. Deploy
+
 ---
 
-## Paso 5: Configurar Nginx Proxy Manager
+## Paso 5: Agregar FanFlow a Nginx Proxy Manager
 
-### 5.1 Agregar Host Proxy
-En Nginx Proxy Manager (http://tu-vps-ip:81):
+En tu Nginx Proxy Manager existente (http://tu-vps-ip:81):
 
 1. **Dashboard → Proxy Hosts → Add Proxy Host**
 2. **Details:**
-   - Domain Names: `fanflow.example.com`
-   - Scheme: `http`
-   - Forward Hostname/IP: `app` (nombre del servicio Docker)
-   - Forward Port: `3000`
+   - **Domain Names:** `fanflow.example.com`
+   - **Scheme:** `http`
+   - **Forward Hostname/IP:** `localhost` (o la IP interna del Docker host)
+   - **Forward Port:** `3000`
 3. **SSL:**
-   - SSL Certificate: `Request a new SSL Certificate`
-   - Email: tu@email.com
-   - Force SSL: ✅
-   - HTTP/2 Support: ✅
-4. **Advanced:**
+   - **SSL Certificate:** Request a new SSL Certificate (Let's Encrypt automático)
+   - **Email:** tu@email.com
+   - **Force SSL:** ✅
+   - **HTTP/2 Support:** ✅
+4. **Advanced (opcional):**
    ```
-   # Headers personalizados
    proxy_set_header X-Real-IP $remote_addr;
    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
    proxy_set_header X-Forwarded-Proto $scheme;
    proxy_set_header Host $host;
-
-   # WebSocket support (si lo necesitas)
    proxy_http_version 1.1;
    proxy_set_header Upgrade $http_upgrade;
    proxy_set_header Connection "upgrade";
    ```
 5. **Save**
 
-### 5.2 Verificar configuración
-```bash
-# Los certificados SSL se descargarán automáticamente via Let's Encrypt
-# Verificar en: https://fanflow.example.com
-
-# Debería redirigir a HTTPS y mostrar la landing page
-```
+Verificar en: `https://fanflow.example.com` → debería mostrar la landing page
 
 ---
 
@@ -364,13 +326,17 @@ docker compose -f /opt/fanflow/docker-compose.prod.yml exec redis redis-cli ping
 docker volume rm fanflow_redis_data
 ```
 
-### SSL certificate no se renueva
+### NPM no alcanza la app (502 Bad Gateway)
 ```bash
-# En Nginx Proxy Manager, ver logs
-docker logs npm
+# Verificar que FanFlow está corriendo
+docker compose -f /opt/fanflow/docker-compose.prod.yml ps app
 
-# Forzar renovación
-docker compose -f /opt/fanflow/docker-compose.prod.yml restart npm
+# Verificar puerta 3000 desde el host
+curl http://localhost:3000/api/health
+
+# En NPM, asegurarse que "Forward Hostname/IP" es correcto:
+# - Si Docker está en localhost: localhost:3000
+# - Si Docker está en otra máquina: ip-del-docker:3000
 ```
 
 ---
@@ -378,16 +344,16 @@ docker compose -f /opt/fanflow/docker-compose.prod.yml restart npm
 ## Checklist Final
 
 - ✅ Docker y Docker Compose instalados
-- ✅ Portainer accesible en puerto 9000
-- ✅ Nginx Proxy Manager accesible en puerto 81
-- ✅ Archivo `.env.prod` con todas las variables
-- ✅ Certificado SSL válido en Nginx Proxy Manager
-- ✅ FanFlow corriendo en docker-compose.prod.yml
-- ✅ Proxy host configurado en Nginx PM
-- ✅ Migraciones de BD ejecutadas
-- ✅ `/api/health` retorna 200
-- ✅ Landing page accesible en `https://fanflow.example.com`
-- ✅ Registro y login funcionan
+- ✅ Portainer configurado (puerto 9000)
+- ✅ Nginx Proxy Manager ya running (puerto 81, 80/443)
+- ✅ `.env.prod` creado con `./scripts/deploy.sh setup`
+- ✅ `.env.prod` editado: dominio + Stripe keys
+- ✅ FanFlow desplegado: `./scripts/deploy.sh start`
+- ✅ Proxy host en NPM: `fanflow.example.com` → `localhost:3000`
+- ✅ SSL en NPM: Let's Encrypt automático
+- ✅ Migraciones de BD ejecutadas (automático)
+- ✅ `http://localhost:3000/api/health` → 200
+- ✅ `https://fanflow.example.com` → landing page
 - ✅ Webhook de Stripe configurado
 
 ---
