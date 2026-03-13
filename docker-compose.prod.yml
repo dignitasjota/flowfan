@@ -80,14 +80,15 @@ services:
 
   redis:
     image: redis:7-alpine
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-}
+    command: redis-server --appendonly yes
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
+      test: ["CMD", "redis-cli", "--raw", "ping"]
+      interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 20s
     networks:
       - fanflow-network
     restart: always
