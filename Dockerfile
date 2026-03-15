@@ -25,10 +25,6 @@ RUN adduser --system --uid 1001 nextjs
 COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
-COPY --from=deps /app/node_modules ./node_modules
-COPY package.json drizzle.config.ts ./
-COPY --from=builder /app/src ./src
-COPY --from=builder /app/drizzle ./drizzle
 
 USER nextjs
 EXPOSE 3000
