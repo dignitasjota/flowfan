@@ -2,7 +2,6 @@ version: "3.8"
 
 services:
   app:
-    image: fanflow:latest
     build:
       context: .
       dockerfile: Dockerfile
@@ -39,7 +38,6 @@ services:
       - "com.example.description=FanFlow App"
 
   worker:
-    image: fanflow:latest
     build:
       context: .
       dockerfile: Dockerfile
