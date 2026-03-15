@@ -4,6 +4,8 @@ FROM node:20-alpine AS base
 FROM base AS deps
 WORKDIR /app
 COPY package.json drizzle.config.ts package-lock.json* ./
+COPY --from=builder /app/src ./src                                                                                                                                                              
+COPY --from=builder /app/drizzle ./drizzle   
 RUN npm ci
 
 # Builder
@@ -12,8 +14,6 @@ WORKDIR /app
 ARG NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
 ENV NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=$NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
 COPY --from=deps /app/node_modules ./node_modules
-COPY --from=builder /app/src ./src                                                                                                                                                              
-COPY --from=builder /app/drizzle ./drizzle   
 COPY . .
 RUN npm run build
 
@@ -31,7 +31,6 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY package.json drizzle.config.ts ./
 COPY --from=builder /app/src ./src
 COPY --from=builder /app/drizzle ./drizzle
-
 
 USER nextjs
 EXPOSE 3000
