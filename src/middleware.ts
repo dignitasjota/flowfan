@@ -4,6 +4,7 @@ import { getToken } from "next-auth/jwt";
 
 const PUBLIC_PATHS = ["/login", "/register", "/forgot-password", "/reset-password"];
 const AUTH_PATHS = ["/login", "/register"];
+const ADMIN_PATHS = ["/admin"];
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -26,6 +27,14 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
+  // Admin routes: require role === "admin"
+  const isAdminPath = ADMIN_PATHS.some((p) => pathname.startsWith(p));
+  if (isAdminPath) {
+    if (!token || (token as any).role !== "admin") {
+      return NextResponse.redirect(new URL("/conversations", request.url));
+    }
+  }
+
   // Auth routes: redirect to dashboard if already logged in
   const isAuthPath = AUTH_PATHS.some((p) => pathname.startsWith(p));
   if (isAuthPath && token) {
@@ -43,6 +52,7 @@ export const config = {
     "/contacts/:path*",
     "/settings/:path*",
     "/dashboard/:path*",
+    "/admin/:path*",
     "/login",
     "/register",
   ],

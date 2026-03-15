@@ -44,4 +44,20 @@ const enforceAuth = t.middleware(({ ctx, next }) => {
   });
 });
 
+const enforceAdmin = t.middleware(({ ctx, next }) => {
+  if (!ctx.session?.user) {
+    throw new TRPCError({ code: "UNAUTHORIZED" });
+  }
+  if (ctx.session.user.role !== "admin") {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Acceso restringido a administradores." });
+  }
+  return next({
+    ctx: {
+      session: ctx.session,
+      creatorId: ctx.session.user.id,
+    },
+  });
+});
+
 export const protectedProcedure = t.procedure.use(enforceAuth);
+export const adminProcedure = t.procedure.use(enforceAdmin);

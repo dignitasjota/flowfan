@@ -35,6 +35,8 @@ export const subscriptionPlanEnum = pgEnum("subscription_plan", [
   "business",
 ]);
 
+export const creatorRoleEnum = pgEnum("creator_role", ["creator", "admin"]);
+
 export const subscriptionStatusEnum = pgEnum("subscription_status", [
   "active",
   "past_due",
@@ -120,6 +122,7 @@ export const creators = pgTable("creators", {
   subscriptionStatus: subscriptionStatusEnum("subscription_status")
     .default("active")
     .notNull(),
+  role: creatorRoleEnum("role").default("creator").notNull(),
   stripeCustomerId: varchar("stripe_customer_id", { length: 255 }),
   stripeSubscriptionId: varchar("stripe_subscription_id", { length: 255 }),
   stripePriceId: varchar("stripe_price_id", { length: 255 }),
@@ -382,6 +385,30 @@ export const notifications = pgTable(
   ]
 );
 
+// --- Admin Audit Log ---
+export const adminAuditLog = pgTable(
+  "admin_audit_log",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    adminId: uuid("admin_id")
+      .notNull()
+      .references(() => creators.id, { onDelete: "cascade" }),
+    targetCreatorId: uuid("target_creator_id").references(() => creators.id, {
+      onDelete: "set null",
+    }),
+    action: varchar("action", { length: 100 }).notNull(),
+    previousValue: jsonb("previous_value"),
+    newValue: jsonb("new_value"),
+    metadata: jsonb("metadata").default({}),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("audit_log_admin_idx").on(table.adminId),
+    index("audit_log_target_idx").on(table.targetCreatorId),
+    index("audit_log_action_idx").on(table.action),
+  ]
+);
+
 // ============================================================
 // RELATIONS
 // ============================================================
@@ -396,6 +423,7 @@ export const creatorsRelations = relations(creators, ({ one, many }) => ({
   notifications: many(notifications),
   responseTemplates: many(responseTemplates),
   aiModelAssignments: many(aiModelAssignments),
+  adminAuditLogs: many(adminAuditLog),
 }));
 
 export const platformsRelations = relations(platforms, ({ one }) => ({
@@ -487,6 +515,18 @@ export const aiModelAssignmentsRelations = relations(aiModelAssignments, ({ one 
 }));
 
 export const passwordResetTokensRelations = relations(passwordResetTokens, () => ({}));
+
+export const adminAuditLogRelations = relations(adminAuditLog, ({ one }) => ({
+  admin: one(creators, {
+    fields: [adminAuditLog.adminId],
+    references: [creators.id],
+  }),
+  targetCreator: one(creators, {
+    fields: [adminAuditLog.targetCreatorId],
+    references: [creators.id],
+    relationName: "auditTarget",
+  }),
+}));
 
 export const notificationsRelations = relations(notifications, ({ one }) => ({
   creator: one(creators, {
