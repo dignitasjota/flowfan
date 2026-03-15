@@ -37,27 +37,27 @@ services:
     labels:
       - "com.example.description=FanFlow App"
 
-  worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    command: ["node", "dist/server/worker.js"]
-    environment:
-      - NODE_ENV=production
-      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
-      - REDIS_URL=redis://redis:6379
-      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
-      - LOG_LEVEL=info
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    networks:
-      - fanflow-network
-    restart: always
-    labels:
-      - "com.example.description=FanFlow Worker (BullMQ)"
+  # worker:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   command: ["node", "dist/server/worker.js"]
+  #   environment:
+  #     - NODE_ENV=production
+  #     - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+  #     - REDIS_URL=redis://redis:6379
+  #     - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+  #     - LOG_LEVEL=info
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+  #   networks:
+  #     - fanflow-network
+  #   restart: always
+  #   labels:
+  #     - "com.example.description=FanFlow Worker (BullMQ)"
 
   postgres:
     image: postgres:16-alpine
