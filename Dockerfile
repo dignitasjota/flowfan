@@ -3,9 +3,7 @@ FROM node:20-alpine AS base
 # Dependencies
 FROM base AS deps
 WORKDIR /app
-COPY package.json drizzle.config.ts package-lock.json* ./
-COPY --from=builder /app/src ./src                                                                                                                                                              
-COPY --from=builder /app/drizzle ./drizzle   
+COPY package.json package-lock.json* ./
 RUN npm ci
 
 # Builder
