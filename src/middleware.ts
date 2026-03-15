@@ -35,6 +35,15 @@ export async function middleware(request: NextRequest) {
     }
   }
 
+  // Onboarding redirect: if logged in and onboarding not completed
+  if (token && !(token as any).onboardingCompleted && !pathname.startsWith("/onboarding")) {
+    const dashboardPaths = ["/conversations", "/contacts", "/settings", "/billing", "/dashboard"];
+    const isDashboardPath = dashboardPaths.some((p) => pathname.startsWith(p));
+    if (isDashboardPath) {
+      return NextResponse.redirect(new URL("/onboarding", request.url));
+    }
+  }
+
   // Auth routes: redirect to dashboard if already logged in
   const isAuthPath = AUTH_PATHS.some((p) => pathname.startsWith(p));
   if (isAuthPath && token) {

@@ -21,6 +21,7 @@ declare module "next-auth/jwt" {
   interface JWT {
     id: string;
     role: "creator" | "admin";
+    onboardingCompleted: boolean;
   }
 }
 
@@ -63,15 +64,20 @@ export const authOptions: NextAuthOptions = {
           email: creator.email,
           name: creator.name,
           role: creator.role as "creator" | "admin",
+          onboardingCompleted: creator.onboardingCompleted,
         };
       },
     }),
   ],
   callbacks: {
-    jwt({ token, user }) {
+    jwt({ token, user, trigger, session }) {
       if (user) {
         token.id = user.id;
         token.role = (user as any).role ?? "creator";
+        token.onboardingCompleted = (user as any).onboardingCompleted ?? false;
+      }
+      if (trigger === "update" && (session as any)?.onboardingCompleted !== undefined) {
+        token.onboardingCompleted = (session as any).onboardingCompleted;
       }
       return token;
     },

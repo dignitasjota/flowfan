@@ -1,5 +1,4 @@
 import { redirect } from "next/navigation";
-import { headers } from "next/headers";
 import { getServerSession } from "next-auth";
 import { eq } from "drizzle-orm";
 import { authOptions } from "@/server/auth";
@@ -27,15 +26,6 @@ export default async function DashboardLayout({
       subscriptionStatus: true,
     },
   });
-
-  // Redirect to onboarding if not completed
-  const headersList = await headers();
-  const pathname = headersList.get("x-next-pathname") ?? "";
-  const isOnboardingPage = pathname.startsWith("/onboarding");
-
-  if (creator && !creator.onboardingCompleted && !isOnboardingPage) {
-    redirect("/onboarding");
-  }
 
   const isPastDue = creator?.subscriptionStatus === "past_due";
 

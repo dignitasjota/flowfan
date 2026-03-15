@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
 import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
 import { StepPlatform } from "./step-platform";
@@ -16,16 +17,19 @@ const steps = [
 
 export function OnboardingWizard() {
   const router = useRouter();
+  const { update } = useSession();
   const [currentStep, setCurrentStep] = useState(0);
   const completeMutation = trpc.billing.completeOnboarding.useMutation();
 
   async function handleFinish() {
     await completeMutation.mutateAsync();
+    await update({ onboardingCompleted: true });
     router.push("/conversations");
   }
 
   async function handleSkipAll() {
     await completeMutation.mutateAsync();
+    await update({ onboardingCompleted: true });
     router.push("/conversations");
   }
 
