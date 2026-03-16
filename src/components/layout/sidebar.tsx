@@ -17,7 +17,7 @@ const navigation = [
 ];
 
 type SidebarProps = {
-  user: { name: string; email: string };
+  user: { name: string; email: string; role?: string };
 };
 
 export function Sidebar({ user }: SidebarProps) {
@@ -86,6 +86,19 @@ export function Sidebar({ user }: SidebarProps) {
         ))}
         <NotificationBell />
       </nav>
+
+      {/* Admin link */}
+      {user.role === "admin" && (
+        <div className="px-3 pb-2">
+          <Link
+            href="/admin"
+            className="flex items-center gap-3 rounded-lg bg-red-600/10 px-3 py-2.5 text-sm font-medium text-red-400 transition-colors hover:bg-red-600/20 hover:text-red-300"
+          >
+            <span>🛡️</span>
+            Panel de Admin
+          </Link>
+        </div>
+      )}
 
       {/* User section */}
       <div className="border-t border-gray-800 p-4">
