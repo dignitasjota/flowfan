@@ -9,6 +9,7 @@ import {
   aiUsageLog,
   aiConfigs,
   adminAuditLog,
+  seoConfig,
 } from "@/server/db/schema";
 import { getStripe } from "@/lib/stripe";
 import { PLAN_LIMITS } from "@/server/services/usage-limits";
@@ -795,5 +796,41 @@ export const adminRouter = createTRPCRouter({
       ]);
 
       return { logs: rows, total };
+    }),
+
+  getSeoConfig: adminProcedure.query(async ({ ctx }) => {
+    const config = await ctx.db.query.seoConfig.findFirst({
+      where: eq(seoConfig.id, "global"),
+    });
+    return config ?? null;
+  }),
+
+  updateSeoConfig: adminProcedure
+    .input(z.object({
+      siteTitle: z.string().min(1).max(255),
+      siteDescription: z.string().min(1),
+      keywords: z.string().optional(),
+      canonicalUrl: z.string().url().optional().or(z.literal("")),
+      ogTitle: z.string().max(255).optional(),
+      ogDescription: z.string().optional(),
+      ogImageUrl: z.string().url().optional().or(z.literal("")),
+      twitterTitle: z.string().max(255).optional(),
+      twitterDescription: z.string().optional(),
+      twitterImageUrl: z.string().url().optional().or(z.literal("")),
+      faviconUrl: z.string().url().optional().or(z.literal("")),
+      robotsIndex: z.boolean(),
+      robotsFollow: z.boolean(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      await ctx.db
+        .insert(seoConfig)
+        .values({ id: "global", ...input, updatedAt: new Date() })
+        .onConflictDoUpdate({
+          target: seoConfig.id,
+          set: { ...input, updatedAt: new Date() },
+        });
+
+      await auditLog(ctx.db, ctx.creatorId, null, "seo_config_updated", null, input);
+      return { success: true };
     }),
 });

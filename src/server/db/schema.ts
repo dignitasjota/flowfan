@@ -409,6 +409,25 @@ export const adminAuditLog = pgTable(
   ]
 );
 
+// --- SEO Config (singleton, id = "global") ---
+export const seoConfig = pgTable("seo_config", {
+  id: varchar("id", { length: 50 }).primaryKey().default("global"),
+  siteTitle: varchar("site_title", { length: 255 }).notNull().default("FanFlow - CRM con IA para Creadores de Contenido"),
+  siteDescription: text("site_description").notNull().default("Gestiona conversaciones con fans usando inteligencia artificial. Scoring automatico, sugerencias de respuesta, analisis de sentimiento y mas. Empieza gratis."),
+  keywords: text("keywords").default("CRM creadores, gestion fans, IA conversacional, OnlyFans CRM, asistente IA"),
+  canonicalUrl: varchar("canonical_url", { length: 255 }).default("https://flowfan.app"),
+  ogTitle: varchar("og_title", { length: 255 }),
+  ogDescription: text("og_description"),
+  ogImageUrl: text("og_image_url"),
+  twitterTitle: varchar("twitter_title", { length: 255 }),
+  twitterDescription: text("twitter_description"),
+  twitterImageUrl: text("twitter_image_url"),
+  faviconUrl: text("favicon_url"),
+  robotsIndex: boolean("robots_index").default(true).notNull(),
+  robotsFollow: boolean("robots_follow").default(true).notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 // ============================================================
 // RELATIONS
 // ============================================================

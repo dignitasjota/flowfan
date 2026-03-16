@@ -8,42 +8,58 @@ import { FAQ } from "@/components/landing/faq";
 import { Footer } from "@/components/landing/footer";
 import Link from "next/link";
 import type { Metadata } from "next";
+import { db } from "@/server/db";
+import { seoConfig } from "@/server/db/schema";
+import { eq } from "drizzle-orm";
 
-export const metadata: Metadata = {
-  title: "FanFlow - CRM con IA para Creadores de Contenido",
-  description:
-    "Gestiona conversaciones con fans usando inteligencia artificial. Scoring automatico, sugerencias de respuesta, analisis de sentimiento y mas. Empieza gratis.",
-  keywords: [
-    "CRM creadores",
-    "gestion fans",
-    "IA conversacional",
-    "OnlyFans CRM",
-    "asistente IA",
-    "scoring fans",
-    "creadores de contenido",
-  ],
-  openGraph: {
-    title: "FanFlow - CRM con IA para Creadores de Contenido",
-    description:
-      "Gestiona conversaciones con fans usando inteligencia artificial. Scoring automatico, sugerencias de respuesta y mas.",
-    type: "website",
-    locale: "es_ES",
-    siteName: "FanFlow",
-  },
-  twitter: {
-    card: "summary_large_image",
-    title: "FanFlow - CRM con IA para Creadores",
-    description:
-      "Gestiona conversaciones con fans usando inteligencia artificial. Empieza gratis.",
-  },
-  robots: {
-    index: true,
-    follow: true,
-  },
-  alternates: {
-    canonical: "/",
-  },
-};
+export const dynamic = "force-dynamic";
+
+async function getSeoConfig() {
+  try {
+    const config = await db.query.seoConfig.findFirst({
+      where: eq(seoConfig.id, "global"),
+    });
+    return config;
+  } catch {
+    return null;
+  }
+}
+
+export async function generateMetadata(): Promise<Metadata> {
+  const seo = await getSeoConfig();
+
+  const title = seo?.siteTitle ?? "FanFlow - CRM con IA para Creadores de Contenido";
+  const description = seo?.siteDescription ?? "Gestiona conversaciones con fans usando inteligencia artificial. Scoring automatico, sugerencias de respuesta, analisis de sentimiento y mas. Empieza gratis.";
+  const canonical = seo?.canonicalUrl ?? "https://flowfan.app";
+
+  return {
+    title,
+    description,
+    keywords: seo?.keywords?.split(",").map((k) => k.trim()) ?? ["CRM creadores", "gestion fans", "IA conversacional"],
+    openGraph: {
+      title: seo?.ogTitle || title,
+      description: seo?.ogDescription || description,
+      type: "website",
+      locale: "es_ES",
+      siteName: "FanFlow",
+      ...(seo?.ogImageUrl ? { images: [{ url: seo.ogImageUrl }] } : {}),
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: seo?.twitterTitle || seo?.ogTitle || title,
+      description: seo?.twitterDescription || seo?.ogDescription || description,
+      ...(seo?.twitterImageUrl ? { images: [seo.twitterImageUrl] } : seo?.ogImageUrl ? { images: [seo.ogImageUrl] } : {}),
+    },
+    robots: {
+      index: seo?.robotsIndex ?? true,
+      follow: seo?.robotsFollow ?? true,
+    },
+    alternates: {
+      canonical,
+    },
+    ...(seo?.faviconUrl ? { icons: { icon: seo.faviconUrl } } : {}),
+  };
+}
 
 export default async function Home() {
   const session = await getServerSession(authOptions);
@@ -52,33 +68,19 @@ export default async function Home() {
     redirect("/conversations");
   }
 
+  const seo = await getSeoConfig();
+
   const jsonLd = {
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
     name: "FanFlow",
     applicationCategory: "BusinessApplication",
     operatingSystem: "Web",
-    description:
-      "CRM con inteligencia artificial para creadores de contenido. Gestiona conversaciones con fans, scoring automatico y sugerencias de respuesta.",
+    description: seo?.siteDescription ?? "CRM con inteligencia artificial para creadores de contenido.",
     offers: [
-      {
-        "@type": "Offer",
-        price: "0",
-        priceCurrency: "USD",
-        name: "Free",
-      },
-      {
-        "@type": "Offer",
-        price: "15",
-        priceCurrency: "USD",
-        name: "Starter",
-      },
-      {
-        "@type": "Offer",
-        price: "29",
-        priceCurrency: "USD",
-        name: "Pro",
-      },
+      { "@type": "Offer", price: "0", priceCurrency: "USD", name: "Free" },
+      { "@type": "Offer", price: "15", priceCurrency: "USD", name: "Starter" },
+      { "@type": "Offer", price: "29", priceCurrency: "USD", name: "Pro" },
     ],
   };
 
