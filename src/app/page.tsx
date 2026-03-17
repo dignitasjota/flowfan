@@ -78,9 +78,9 @@ export default async function Home() {
     operatingSystem: "Web",
     description: seo?.siteDescription ?? "CRM con inteligencia artificial para creadores de contenido.",
     offers: [
-      { "@type": "Offer", price: "0", priceCurrency: "USD", name: "Free" },
-      { "@type": "Offer", price: "15", priceCurrency: "USD", name: "Starter" },
-      { "@type": "Offer", price: "29", priceCurrency: "USD", name: "Pro" },
+      { "@type": "Offer", price: "0", priceCurrency: "EUR", name: "Free" },
+      { "@type": "Offer", price: "14", priceCurrency: "EUR", name: "Starter" },
+      { "@type": "Offer", price: "29", priceCurrency: "EUR", name: "Pro" },
     ],
   };
 

@@ -29,7 +29,7 @@ const plans: PricingPlan[] = [
   },
   {
     name: "Starter",
-    price: "$15",
+    price: "€14",
     priceDetail: "/mes",
     description: "Para creadores en crecimiento",
     features: [
@@ -45,7 +45,7 @@ const plans: PricingPlan[] = [
   },
   {
     name: "Pro",
-    price: "$29",
+    price: "€29",
     priceDetail: "/mes",
     description: "Para creadores profesionales",
     features: [
