@@ -22,6 +22,7 @@ type PlanLimits = {
   priceAdvisor: boolean;
   multiModel: boolean;
   export: "none" | "csv" | "csv_json" | "csv_json_api";
+  revenue: "none" | "basic" | "full" | "full_export";
 };
 
 export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
@@ -34,6 +35,7 @@ export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
     priceAdvisor: false,
     multiModel: false,
     export: "none",
+    revenue: "none",
   },
   starter: {
     contacts: 50,
@@ -44,6 +46,7 @@ export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
     priceAdvisor: false,
     multiModel: false,
     export: "csv",
+    revenue: "basic",
   },
   pro: {
     contacts: -1,
@@ -54,6 +57,7 @@ export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
     priceAdvisor: true,
     multiModel: true,
     export: "csv_json",
+    revenue: "full",
   },
   business: {
     contacts: -1,
@@ -64,6 +68,7 @@ export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
     priceAdvisor: true,
     multiModel: true,
     export: "csv_json_api",
+    revenue: "full_export",
   },
 };
 
@@ -206,6 +211,26 @@ export async function checkFeatureAccess(
     throw new TRPCError({
       code: "FORBIDDEN",
       message: `${featureNames[feature]} no está disponible en el plan ${plan}. Actualiza a Pro o superior para acceder.`,
+    });
+  }
+}
+
+const revenueLevels = { none: 0, basic: 1, full: 2, full_export: 3 } as const;
+
+export async function checkRevenueAccess(
+  db: Db,
+  creatorId: string,
+  requiredLevel: "basic" | "full" | "full_export" = "basic"
+) {
+  const plan = await getCreatorPlan(db, creatorId);
+  const limits = PLAN_LIMITS[plan];
+  const currentLevel = revenueLevels[limits.revenue];
+  const needed = revenueLevels[requiredLevel];
+
+  if (currentLevel < needed) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: `El tracking de revenue no está disponible en el plan ${plan}. Actualiza tu plan para acceder.`,
     });
   }
 }

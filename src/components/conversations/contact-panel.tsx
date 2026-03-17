@@ -254,6 +254,9 @@ export function ContactPanel({ contact, conversationId, onBack }: Props) {
         </div>
       )}
 
+      {/* Revenue */}
+      <RevenueSection contactId={contact.id} />
+
       {/* Price Advice & Report */}
       {profile && (
         <PriceAndReport contactId={contact.id} />
@@ -514,6 +517,141 @@ function ScoringHistoryChart({
         points={paymentPoints}
       />
     </svg>
+  );
+}
+
+const txTypeLabels: Record<string, string> = {
+  tip: "Propina",
+  ppv: "PPV",
+  subscription: "Suscripción",
+  custom: "Otro",
+};
+
+const txTypeColors: Record<string, string> = {
+  tip: "bg-green-500/20 text-green-400",
+  ppv: "bg-purple-500/20 text-purple-400",
+  subscription: "bg-blue-500/20 text-blue-400",
+  custom: "bg-gray-500/20 text-gray-400",
+};
+
+function RevenueSection({ contactId }: { contactId: string }) {
+  const [showForm, setShowForm] = useState(false);
+  const [txType, setTxType] = useState<"tip" | "ppv" | "subscription" | "custom">("tip");
+  const [txAmount, setTxAmount] = useState("");
+  const [txDesc, setTxDesc] = useState("");
+
+  const summary = trpc.revenue.getContactSummary.useQuery(
+    { contactId },
+    { retry: false }
+  );
+
+  const createTx = trpc.revenue.create.useMutation({
+    onSuccess: () => {
+      summary.refetch();
+      setShowForm(false);
+      setTxAmount("");
+      setTxDesc("");
+    },
+  });
+
+  // Si el plan no lo permite, no mostrar nada
+  if (summary.error?.data?.code === "FORBIDDEN") return null;
+
+  return (
+    <div className="border-b border-gray-800 px-4 py-4">
+      <div className="mb-3 flex items-center justify-between">
+        <h4 className="text-xs font-medium uppercase tracking-wider text-gray-400">
+          Revenue
+        </h4>
+        <button
+          onClick={() => setShowForm(!showForm)}
+          className="text-xs text-indigo-400 hover:text-indigo-300"
+        >
+          {showForm ? "Cancelar" : "+ Registrar"}
+        </button>
+      </div>
+
+      {/* Total */}
+      {summary.data && (
+        <>
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-xs text-gray-400">Total</span>
+            <span className="text-lg font-bold text-white">
+              {summary.data.totalEur.toFixed(2)}€
+            </span>
+          </div>
+
+          {/* Por tipo */}
+          {summary.data.byType.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mb-3">
+              {summary.data.byType.map((t) => (
+                <span
+                  key={t.type}
+                  className={cn(
+                    "rounded-full px-2 py-0.5 text-xs",
+                    txTypeColors[t.type] ?? "bg-gray-800 text-gray-400"
+                  )}
+                >
+                  {txTypeLabels[t.type] ?? t.type}: {t.totalEur.toFixed(2)}€
+                </span>
+              ))}
+            </div>
+          )}
+
+          {summary.data.transactionCount === 0 && !showForm && (
+            <p className="text-xs text-gray-600">Sin transacciones registradas</p>
+          )}
+        </>
+      )}
+
+      {/* Formulario inline */}
+      {showForm && (
+        <div className="space-y-2 rounded-lg bg-gray-800/50 p-3">
+          <select
+            value={txType}
+            onChange={(e) => setTxType(e.target.value as typeof txType)}
+            className="w-full rounded bg-gray-800 px-2 py-1.5 text-xs text-white border border-gray-700"
+          >
+            <option value="tip">Propina</option>
+            <option value="ppv">PPV Unlock</option>
+            <option value="subscription">Suscripción</option>
+            <option value="custom">Otro</option>
+          </select>
+          <input
+            type="number"
+            step="0.01"
+            min="0.01"
+            value={txAmount}
+            onChange={(e) => setTxAmount(e.target.value)}
+            placeholder="Monto en EUR"
+            className="w-full rounded bg-gray-800 px-2 py-1.5 text-xs text-white border border-gray-700 placeholder-gray-500"
+          />
+          <input
+            type="text"
+            value={txDesc}
+            onChange={(e) => setTxDesc(e.target.value)}
+            placeholder="Descripción (opcional)"
+            className="w-full rounded bg-gray-800 px-2 py-1.5 text-xs text-white border border-gray-700 placeholder-gray-500"
+          />
+          <button
+            onClick={() => {
+              const amount = parseFloat(txAmount);
+              if (!amount || amount <= 0) return;
+              createTx.mutate({
+                contactId,
+                type: txType,
+                amount,
+                description: txDesc || undefined,
+              });
+            }}
+            disabled={createTx.isPending || !txAmount}
+            className="w-full rounded bg-indigo-600 px-2 py-1.5 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+          >
+            {createTx.isPending ? "Guardando..." : "Guardar"}
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 

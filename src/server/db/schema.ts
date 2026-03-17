@@ -103,6 +103,13 @@ export const aiTaskTypeEnum = pgEnum("ai_task_type", [
   "price_advice",
 ]);
 
+export const transactionTypeEnum = pgEnum("transaction_type", [
+  "tip",
+  "ppv",
+  "subscription",
+  "custom",
+]);
+
 // ============================================================
 // TABLES
 // ============================================================
@@ -428,6 +435,31 @@ export const seoConfig = pgTable("seo_config", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
+// --- Fan Transactions (revenue tracking) ---
+export const fanTransactions = pgTable(
+  "fan_transactions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    creatorId: uuid("creator_id")
+      .notNull()
+      .references(() => creators.id, { onDelete: "cascade" }),
+    contactId: uuid("contact_id")
+      .notNull()
+      .references(() => contacts.id, { onDelete: "cascade" }),
+    type: transactionTypeEnum("type").notNull(),
+    amount: integer("amount").notNull(), // centimos EUR (1500 = 15.00€)
+    description: text("description"),
+    transactionDate: timestamp("transaction_date").defaultNow().notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("fan_transactions_creator_idx").on(table.creatorId),
+    index("fan_transactions_contact_idx").on(table.contactId),
+    index("fan_transactions_creator_contact_idx").on(table.creatorId, table.contactId),
+    index("fan_transactions_date_idx").on(table.creatorId, table.transactionDate),
+  ]
+);
+
 // ============================================================
 // RELATIONS
 // ============================================================
@@ -443,6 +475,7 @@ export const creatorsRelations = relations(creators, ({ one, many }) => ({
   responseTemplates: many(responseTemplates),
   aiModelAssignments: many(aiModelAssignments),
   adminAuditLogs: many(adminAuditLog),
+  fanTransactions: many(fanTransactions),
 }));
 
 export const platformsRelations = relations(platforms, ({ one }) => ({
@@ -460,6 +493,7 @@ export const contactsRelations = relations(contacts, ({ one, many }) => ({
   profile: one(contactProfiles),
   conversations: many(conversations),
   notes: many(notes),
+  fanTransactions: many(fanTransactions),
 }));
 
 export const contactProfilesRelations = relations(
@@ -554,6 +588,17 @@ export const notificationsRelations = relations(notifications, ({ one }) => ({
   }),
   contact: one(contacts, {
     fields: [notifications.contactId],
+    references: [contacts.id],
+  }),
+}));
+
+export const fanTransactionsRelations = relations(fanTransactions, ({ one }) => ({
+  creator: one(creators, {
+    fields: [fanTransactions.creatorId],
+    references: [creators.id],
+  }),
+  contact: one(contacts, {
+    fields: [fanTransactions.contactId],
     references: [contacts.id],
   }),
 }));
