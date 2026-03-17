@@ -6,3 +6,5 @@ dist/
 .env.production
 *.tsbuildinfo
 next-env.d.ts
+uploads/*
+!uploads/.gitkeep

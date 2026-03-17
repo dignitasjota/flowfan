@@ -20,6 +20,8 @@ services:
       - STRIPE_PRO_PRICE_ID=${STRIPE_PRO_PRICE_ID}
       - NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=${NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY}
       - LOG_LEVEL=info
+    volumes:
+      - media_uploads:/app/uploads
     ports:
       - "3000:3000"
     healthcheck:
@@ -102,6 +104,8 @@ volumes:
   postgres_data:
     driver: local
   redis_data:
+    driver: local
+  media_uploads:
     driver: local
 
 networks:

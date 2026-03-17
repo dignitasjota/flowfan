@@ -110,6 +110,12 @@ export const transactionTypeEnum = pgEnum("transaction_type", [
   "custom",
 ]);
 
+export const mediaTypeEnum = pgEnum("media_type", [
+  "image",
+  "video",
+  "gif",
+]);
+
 // ============================================================
 // TABLES
 // ============================================================
@@ -460,6 +466,82 @@ export const fanTransactions = pgTable(
   ]
 );
 
+// --- Media Categories ---
+export const mediaCategories = pgTable(
+  "media_categories",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    creatorId: uuid("creator_id")
+      .notNull()
+      .references(() => creators.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 100 }).notNull(),
+    color: varchar("color", { length: 7 }).default("#6366f1"),
+    sortOrder: integer("sort_order").default(0).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("media_categories_creator_idx").on(table.creatorId),
+    uniqueIndex("media_categories_creator_name_idx").on(table.creatorId, table.name),
+  ]
+);
+
+// --- Media Items (vault) ---
+export const mediaItems = pgTable(
+  "media_items",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    creatorId: uuid("creator_id")
+      .notNull()
+      .references(() => creators.id, { onDelete: "cascade" }),
+    filename: varchar("filename", { length: 500 }).notNull(),
+    originalName: varchar("original_name", { length: 500 }).notNull(),
+    mimeType: varchar("mime_type", { length: 100 }).notNull(),
+    mediaType: mediaTypeEnum("media_type").notNull(),
+    fileSize: integer("file_size").notNull(), // bytes
+    storagePath: text("storage_path").notNull(),
+    thumbnailPath: text("thumbnail_path"),
+    width: integer("width"),
+    height: integer("height"),
+    duration: integer("duration"), // segundos, solo video
+    tags: text("tags").array().default([]),
+    categoryId: uuid("category_id").references(() => mediaCategories.id, {
+      onDelete: "set null",
+    }),
+    isArchived: boolean("is_archived").default(false).notNull(),
+    sendCount: integer("send_count").default(0).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("media_items_creator_idx").on(table.creatorId),
+    index("media_items_creator_category_idx").on(table.creatorId, table.categoryId),
+    index("media_items_creator_type_idx").on(table.creatorId, table.mediaType),
+  ]
+);
+
+// --- Media Sends (tracking de envios a contactos) ---
+export const mediaSends = pgTable(
+  "media_sends",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    mediaItemId: uuid("media_item_id")
+      .notNull()
+      .references(() => mediaItems.id, { onDelete: "cascade" }),
+    contactId: uuid("contact_id")
+      .notNull()
+      .references(() => contacts.id, { onDelete: "cascade" }),
+    conversationId: uuid("conversation_id").references(() => conversations.id, {
+      onDelete: "set null",
+    }),
+    sentAt: timestamp("sent_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("media_sends_media_idx").on(table.mediaItemId),
+    index("media_sends_contact_idx").on(table.contactId),
+    uniqueIndex("media_sends_media_contact_idx").on(table.mediaItemId, table.contactId),
+  ]
+);
+
 // ============================================================
 // RELATIONS
 // ============================================================
@@ -476,6 +558,8 @@ export const creatorsRelations = relations(creators, ({ one, many }) => ({
   aiModelAssignments: many(aiModelAssignments),
   adminAuditLogs: many(adminAuditLog),
   fanTransactions: many(fanTransactions),
+  mediaItems: many(mediaItems),
+  mediaCategories: many(mediaCategories),
 }));
 
 export const platformsRelations = relations(platforms, ({ one }) => ({
@@ -600,5 +684,40 @@ export const fanTransactionsRelations = relations(fanTransactions, ({ one }) => 
   contact: one(contacts, {
     fields: [fanTransactions.contactId],
     references: [contacts.id],
+  }),
+}));
+
+export const mediaCategoriesRelations = relations(mediaCategories, ({ one, many }) => ({
+  creator: one(creators, {
+    fields: [mediaCategories.creatorId],
+    references: [creators.id],
+  }),
+  items: many(mediaItems),
+}));
+
+export const mediaItemsRelations = relations(mediaItems, ({ one, many }) => ({
+  creator: one(creators, {
+    fields: [mediaItems.creatorId],
+    references: [creators.id],
+  }),
+  category: one(mediaCategories, {
+    fields: [mediaItems.categoryId],
+    references: [mediaCategories.id],
+  }),
+  sends: many(mediaSends),
+}));
+
+export const mediaSendsRelations = relations(mediaSends, ({ one }) => ({
+  mediaItem: one(mediaItems, {
+    fields: [mediaSends.mediaItemId],
+    references: [mediaItems.id],
+  }),
+  contact: one(contacts, {
+    fields: [mediaSends.contactId],
+    references: [contacts.id],
+  }),
+  conversation: one(conversations, {
+    fields: [mediaSends.conversationId],
+    references: [conversations.id],
   }),
 }));

@@ -7,6 +7,7 @@ import {
   platforms,
   responseTemplates,
   aiUsageLog,
+  mediaItems,
 } from "@/server/db/schema";
 
 type Db = typeof DbType;
@@ -23,6 +24,8 @@ type PlanLimits = {
   multiModel: boolean;
   export: "none" | "csv" | "csv_json" | "csv_json_api";
   revenue: "none" | "basic" | "full" | "full_export";
+  mediaFiles: number;
+  mediaStorageMB: number;
 };
 
 export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
@@ -36,6 +39,8 @@ export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
     multiModel: false,
     export: "none",
     revenue: "none",
+    mediaFiles: 0,
+    mediaStorageMB: 0,
   },
   starter: {
     contacts: 50,
@@ -47,6 +52,8 @@ export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
     multiModel: false,
     export: "csv",
     revenue: "basic",
+    mediaFiles: 50,
+    mediaStorageMB: 100,
   },
   pro: {
     contacts: -1,
@@ -58,6 +65,8 @@ export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
     multiModel: true,
     export: "csv_json",
     revenue: "full",
+    mediaFiles: 500,
+    mediaStorageMB: 1024,
   },
   business: {
     contacts: -1,
@@ -69,6 +78,8 @@ export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
     multiModel: true,
     export: "csv_json_api",
     revenue: "full_export",
+    mediaFiles: -1,
+    mediaStorageMB: -1,
   },
 };
 
@@ -211,6 +222,52 @@ export async function checkFeatureAccess(
     throw new TRPCError({
       code: "FORBIDDEN",
       message: `${featureNames[feature]} no está disponible en el plan ${plan}. Actualiza a Pro o superior para acceder.`,
+    });
+  }
+}
+
+export async function checkMediaFileLimit(db: Db, creatorId: string) {
+  const plan = await getCreatorPlan(db, creatorId);
+  const limits = PLAN_LIMITS[plan];
+  if (limits.mediaFiles === -1) return;
+
+  if (limits.mediaFiles === 0) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: `El Media Vault no está disponible en el plan ${plan}. Actualiza tu plan para subir archivos.`,
+    });
+  }
+
+  const [result] = await db
+    .select({ count: count() })
+    .from(mediaItems)
+    .where(eq(mediaItems.creatorId, creatorId));
+
+  if ((result?.count ?? 0) >= limits.mediaFiles) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: `Has alcanzado el límite de ${limits.mediaFiles} archivos en el plan ${plan}. Actualiza tu plan para más archivos.`,
+    });
+  }
+}
+
+export async function checkMediaStorageLimit(db: Db, creatorId: string, newFileSizeBytes: number) {
+  const plan = await getCreatorPlan(db, creatorId);
+  const limits = PLAN_LIMITS[plan];
+  if (limits.mediaStorageMB === -1) return;
+
+  const [result] = await db
+    .select({ total: sql<number>`coalesce(sum(${mediaItems.fileSize}), 0)` })
+    .from(mediaItems)
+    .where(eq(mediaItems.creatorId, creatorId));
+
+  const currentBytes = result?.total ?? 0;
+  const limitBytes = limits.mediaStorageMB * 1024 * 1024;
+
+  if (currentBytes + newFileSizeBytes > limitBytes) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: `Has alcanzado el límite de ${limits.mediaStorageMB}MB de almacenamiento en el plan ${plan}. Actualiza tu plan para más espacio.`,
     });
   }
 }
