@@ -1,4 +1,3 @@
-import "dotenv/config";
 import { Worker } from "bullmq";
 import { db } from "./db";
 import { analyzeMessage } from "./services/ai-analysis";
