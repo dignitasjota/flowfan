@@ -21,7 +21,10 @@ FROM base AS worker
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=deps /app/node_modules ./node_modules
-COPY . .
+COPY package.json package-lock.json ./
+COPY drizzle.config.ts ./
+COPY tsconfig.json ./
+COPY src ./src
 RUN addgroup --system --gid 1001 nodejs && adduser --system --uid 1001 nextjs
 USER nextjs
 CMD ["npx", "tsx", "src/server/worker.ts"]
