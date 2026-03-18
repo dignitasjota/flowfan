@@ -167,7 +167,7 @@ export default function BroadcastsPage() {
     );
   }
 
-  const broadcasts = (broadcastsList.data ?? []) as Broadcast[];
+  const broadcasts = ((broadcastsList.data as { items?: Broadcast[] } | undefined)?.items ?? []) as Broadcast[];
 
   // Stats
   const stats = useMemo(() => {
@@ -858,7 +858,7 @@ function BroadcastDetail({
     { retry: false }
   );
 
-  const recipients = (recipientsQuery.data ?? []) as Recipient[];
+  const recipients = ((recipientsQuery.data as { items?: Recipient[] } | undefined)?.items ?? []) as Recipient[];
   const progress = progressPercent(
     broadcast.sentCount,
     broadcast.totalRecipients
