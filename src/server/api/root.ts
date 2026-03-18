@@ -15,6 +15,7 @@ import { mediaRouter } from "./routers/media";
 import { workflowsRouter } from "./routers/workflows";
 import { segmentsRouter } from "./routers/segments";
 import { telegramRouter } from "./routers/telegram";
+import { broadcastsRouter } from "./routers/broadcasts";
 
 export const appRouter = createTRPCRouter({
   contacts: contactsRouter,
@@ -33,6 +34,7 @@ export const appRouter = createTRPCRouter({
   workflows: workflowsRouter,
   segments: segmentsRouter,
   telegram: telegramRouter,
+  broadcasts: broadcastsRouter,
 });
 
 export type AppRouter = typeof appRouter;

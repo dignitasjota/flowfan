@@ -16,6 +16,7 @@ const navigation = [
   { name: "Revenue", href: "/revenue", icon: "💰" },
   { name: "Media Vault", href: "/media", icon: "🖼️" },
   { name: "Automatizaciones", href: "/workflows", icon: "⚡" },
+  { name: "Broadcasts", href: "/broadcasts", icon: "📢" },
   { name: "Billing", href: "/billing", icon: "💳" },
   { name: "Configuración", href: "/settings", icon: "⚙️" },
 ];

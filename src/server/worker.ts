@@ -10,6 +10,8 @@ import type {
   WorkflowJobData,
   TelegramOutgoingJobData,
   TelegramAutoReplyJobData,
+  BroadcastProcessingJobData,
+  BroadcastSendJobData,
 } from "./queues";
 import { createChildLogger } from "@/lib/logger";
 
@@ -280,7 +282,110 @@ telegramAutoReplyWorker.on("ready", () => {
   log.info("Telegram auto-reply worker ready");
 });
 
+// --- Broadcast processing worker ---
+
+const broadcastProcessingWorker = new Worker<BroadcastProcessingJobData>(
+  "broadcast-processing",
+  async (job) => {
+    const { broadcastId } = job.data;
+    log.info({ jobId: job.id, broadcastId }, "Processing broadcast segment");
+
+    try {
+      const { processSegment } = await import("@/server/services/broadcast");
+      await processSegment(db, broadcastId);
+      log.info({ jobId: job.id, broadcastId }, "Broadcast processing completed");
+    } catch (err) {
+      log.error({ jobId: job.id, broadcastId, err }, "Broadcast processing failed");
+      const { eq } = await import("drizzle-orm");
+      const { broadcasts } = await import("@/server/db/schema");
+      await db
+        .update(broadcasts)
+        .set({ status: "failed", updatedAt: new Date() })
+        .where(eq(broadcasts.id, broadcastId));
+      throw err;
+    }
+  },
+  {
+    connection: {
+      host: redisUrl.hostname,
+      port: Number(redisUrl.port) || 6379,
+    },
+    concurrency: 2,
+  }
+);
+
+broadcastProcessingWorker.on("failed", (job, err) => {
+  log.error({ jobId: job?.id, err }, "Broadcast processing job failed");
+});
+
+broadcastProcessingWorker.on("ready", () => {
+  log.info("Broadcast processing worker ready");
+});
+
+// --- Broadcast send worker (rate limited for Telegram API) ---
+
+const broadcastSendWorker = new Worker<BroadcastSendJobData>(
+  "broadcast-send",
+  async (job) => {
+    const { recipientId } = job.data;
+    log.info({ jobId: job.id, recipientId }, "Sending broadcast message");
+
+    const { sendBroadcastMessage } = await import("@/server/services/broadcast-sender");
+    await sendBroadcastMessage(db, recipientId);
+  },
+  {
+    connection: {
+      host: redisUrl.hostname,
+      port: Number(redisUrl.port) || 6379,
+    },
+    concurrency: 10,
+    limiter: {
+      max: 30,
+      duration: 1000,
+    },
+  }
+);
+
+broadcastSendWorker.on("failed", (job, err) => {
+  log.error({ jobId: job?.id, err }, "Broadcast send job failed");
+});
+
+broadcastSendWorker.on("ready", () => {
+  log.info("Broadcast send worker ready");
+});
+
 // --- Periodic no_response_timeout checker (every 5 minutes) ---
+
+async function checkScheduledBroadcasts() {
+  const { eq, and, lte } = await import("drizzle-orm");
+  const { broadcasts } = await import("@/server/db/schema");
+  const { broadcastProcessingQueue } = await import("@/server/queues");
+
+  const now = new Date();
+  const scheduledBroadcasts = await db
+    .select({ id: broadcasts.id, creatorId: broadcasts.creatorId })
+    .from(broadcasts)
+    .where(
+      and(
+        eq(broadcasts.status, "scheduled"),
+        lte(broadcasts.scheduledAt, now)
+      )
+    );
+
+  for (const bc of scheduledBroadcasts) {
+    await db
+      .update(broadcasts)
+      .set({ status: "processing", updatedAt: now })
+      .where(eq(broadcasts.id, bc.id));
+
+    await broadcastProcessingQueue.add("process", {
+      broadcastId: bc.id,
+      creatorId: bc.creatorId,
+    });
+
+    log.info({ broadcastId: bc.id }, "Scheduled broadcast triggered");
+  }
+}
 
 let schedulerInterval: ReturnType<typeof setInterval> | null = null;
 
@@ -298,6 +403,13 @@ async function startScheduler() {
     } catch (err) {
       log.error({ err }, "Error in no_response_timeout check");
     }
+
+    // Check for scheduled broadcasts ready to send
+    try {
+      await checkScheduledBroadcasts();
+    } catch (err) {
+      log.error({ err }, "Error checking scheduled broadcasts");
+    }
   }, 5 * 60 * 1000);
 }
 
@@ -307,13 +419,13 @@ startScheduler();
 process.on("SIGTERM", async () => {
   log.info("SIGTERM received, closing workers...");
   if (schedulerInterval) clearInterval(schedulerInterval);
-  await Promise.all([worker.close(), workflowWorker.close(), telegramOutgoingWorker.close(), telegramAutoReplyWorker.close()]);
+  await Promise.all([worker.close(), workflowWorker.close(), telegramOutgoingWorker.close(), telegramAutoReplyWorker.close(), broadcastProcessingWorker.close(), broadcastSendWorker.close()]);
   process.exit(0);
 });
 
 process.on("SIGINT", async () => {
   log.info("SIGINT received, closing workers...");
   if (schedulerInterval) clearInterval(schedulerInterval);
-  await Promise.all([worker.close(), workflowWorker.close(), telegramOutgoingWorker.close(), telegramAutoReplyWorker.close()]);
+  await Promise.all([worker.close(), workflowWorker.close(), telegramOutgoingWorker.close(), telegramAutoReplyWorker.close(), broadcastProcessingWorker.close(), broadcastSendWorker.close()]);
   process.exit(0);
 });

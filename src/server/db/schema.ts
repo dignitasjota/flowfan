@@ -704,6 +704,80 @@ export const segmentMembers = pgTable(
 );
 
 // ============================================================
+// BROADCASTS
+// ============================================================
+
+export const broadcastStatusEnum = pgEnum("broadcast_status", [
+  "draft",
+  "processing",
+  "sending",
+  "completed",
+  "cancelled",
+  "scheduled",
+  "failed",
+]);
+
+export const broadcastRecipientStatusEnum = pgEnum("broadcast_recipient_status", [
+  "pending",
+  "sent",
+  "failed",
+  "manual",
+]);
+
+export const broadcasts = pgTable(
+  "broadcasts",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    creatorId: uuid("creator_id")
+      .notNull()
+      .references(() => creators.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 255 }).notNull(),
+    content: text("content").notNull(),
+    segmentId: uuid("segment_id").references(() => segments.id, { onDelete: "set null" }),
+    filters: jsonb("filters").default([]),
+    platformType: platformTypeEnum("platform_type"),
+    status: broadcastStatusEnum("status").default("draft").notNull(),
+    totalRecipients: integer("total_recipients").default(0).notNull(),
+    sentCount: integer("sent_count").default(0).notNull(),
+    failedCount: integer("failed_count").default(0).notNull(),
+    manualCount: integer("manual_count").default(0).notNull(),
+    scheduledAt: timestamp("scheduled_at"),
+    startedAt: timestamp("started_at"),
+    completedAt: timestamp("completed_at"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("broadcasts_creator_idx").on(table.creatorId),
+    index("broadcasts_creator_status_idx").on(table.creatorId, table.status),
+  ]
+);
+
+export const broadcastRecipients = pgTable(
+  "broadcast_recipients",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    broadcastId: uuid("broadcast_id")
+      .notNull()
+      .references(() => broadcasts.id, { onDelete: "cascade" }),
+    contactId: uuid("contact_id")
+      .notNull()
+      .references(() => contacts.id, { onDelete: "cascade" }),
+    platformUserId: varchar("platform_user_id", { length: 255 }),
+    resolvedContent: text("resolved_content").notNull(),
+    status: broadcastRecipientStatusEnum("status").default("pending").notNull(),
+    sentAt: timestamp("sent_at"),
+    errorMessage: text("error_message"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("broadcast_recipients_broadcast_idx").on(table.broadcastId),
+    index("broadcast_recipients_broadcast_status_idx").on(table.broadcastId, table.status),
+    uniqueIndex("broadcast_recipients_unique_idx").on(table.broadcastId, table.contactId),
+  ]
+);
+
+// ============================================================
 // RELATIONS
 // ============================================================
 
@@ -725,6 +799,7 @@ export const creatorsRelations = relations(creators, ({ one, many }) => ({
   workflowExecutions: many(workflowExecutions),
   segments: many(segments),
   telegramBotConfig: one(telegramBotConfigs),
+  broadcasts: many(broadcasts),
 }));
 
 export const platformsRelations = relations(platforms, ({ one }) => ({
@@ -937,5 +1012,28 @@ export const telegramBotConfigsRelations = relations(telegramBotConfigs, ({ one 
   creator: one(creators, {
     fields: [telegramBotConfigs.creatorId],
     references: [creators.id],
+  }),
+}));
+
+export const broadcastsRelations = relations(broadcasts, ({ one, many }) => ({
+  creator: one(creators, {
+    fields: [broadcasts.creatorId],
+    references: [creators.id],
+  }),
+  segment: one(segments, {
+    fields: [broadcasts.segmentId],
+    references: [segments.id],
+  }),
+  recipients: many(broadcastRecipients),
+}));
+
+export const broadcastRecipientsRelations = relations(broadcastRecipients, ({ one }) => ({
+  broadcast: one(broadcasts, {
+    fields: [broadcastRecipients.broadcastId],
+    references: [broadcasts.id],
+  }),
+  contact: one(contacts, {
+    fields: [broadcastRecipients.contactId],
+    references: [contacts.id],
   }),
 }));

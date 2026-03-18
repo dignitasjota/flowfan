@@ -1,4 +1,4 @@
-import { eq, and, gte, sql, count } from "drizzle-orm";
+import { eq, and, gte, ne, sql, count } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import type { db as DbType } from "@/server/db";
 import {
@@ -10,6 +10,7 @@ import {
   mediaItems,
   workflows,
   segments,
+  broadcasts,
 } from "@/server/db/schema";
 
 type Db = typeof DbType;
@@ -31,6 +32,9 @@ type PlanLimits = {
   workflows: number;
   segments: number;
   telegramIntegration: boolean;
+  broadcastsPerMonth: number;
+  broadcastMaxRecipients: number;
+  broadcastScheduling: boolean;
 };
 
 export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
@@ -49,6 +53,9 @@ export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
     workflows: 0,
     segments: 0,
     telegramIntegration: false,
+    broadcastsPerMonth: 0,
+    broadcastMaxRecipients: 0,
+    broadcastScheduling: false,
   },
   starter: {
     contacts: 50,
@@ -65,6 +72,9 @@ export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
     workflows: 3,
     segments: 5,
     telegramIntegration: false,
+    broadcastsPerMonth: 2,
+    broadcastMaxRecipients: 25,
+    broadcastScheduling: false,
   },
   pro: {
     contacts: -1,
@@ -81,6 +91,9 @@ export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
     workflows: 15,
     segments: 25,
     telegramIntegration: true,
+    broadcastsPerMonth: 10,
+    broadcastMaxRecipients: 500,
+    broadcastScheduling: false,
   },
   business: {
     contacts: -1,
@@ -97,6 +110,9 @@ export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
     workflows: -1,
     segments: -1,
     telegramIntegration: true,
+    broadcastsPerMonth: -1,
+    broadcastMaxRecipients: -1,
+    broadcastScheduling: true,
   },
 };
 
@@ -347,6 +363,64 @@ export async function checkTelegramAccess(db: Db, creatorId: string) {
     throw new TRPCError({
       code: "FORBIDDEN",
       message: `La integración con Telegram no está disponible en el plan ${plan}. Actualiza a Pro o superior para acceder.`,
+    });
+  }
+}
+
+export async function checkBroadcastLimit(db: Db, creatorId: string) {
+  const plan = await getCreatorPlan(db, creatorId);
+  const limits = PLAN_LIMITS[plan];
+  if (limits.broadcastsPerMonth === -1) return;
+
+  if (limits.broadcastsPerMonth === 0) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: `Los broadcasts no están disponibles en el plan ${plan}. Actualiza tu plan para acceder.`,
+    });
+  }
+
+  const monthStart = startOfMonth();
+  const [result] = await db
+    .select({ count: count() })
+    .from(broadcasts)
+    .where(
+      and(
+        eq(broadcasts.creatorId, creatorId),
+        gte(broadcasts.createdAt, monthStart),
+        ne(broadcasts.status, "draft"),
+        ne(broadcasts.status, "cancelled")
+      )
+    );
+
+  if ((result?.count ?? 0) >= limits.broadcastsPerMonth) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: `Has alcanzado el límite de ${limits.broadcastsPerMonth} broadcasts/mes en el plan ${plan}. Actualiza tu plan para más.`,
+    });
+  }
+}
+
+export async function checkBroadcastRecipientLimit(db: Db, creatorId: string, recipientCount: number) {
+  const plan = await getCreatorPlan(db, creatorId);
+  const limits = PLAN_LIMITS[plan];
+  if (limits.broadcastMaxRecipients === -1) return;
+
+  if (recipientCount > limits.broadcastMaxRecipients) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: `El límite de destinatarios es ${limits.broadcastMaxRecipients} en el plan ${plan}. Reduce el segmento o actualiza tu plan.`,
+    });
+  }
+}
+
+export async function checkBroadcastSchedulingAccess(db: Db, creatorId: string) {
+  const plan = await getCreatorPlan(db, creatorId);
+  const limits = PLAN_LIMITS[plan];
+
+  if (!limits.broadcastScheduling) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: `La programación de broadcasts no está disponible en el plan ${plan}. Actualiza a Business para acceder.`,
     });
   }
 }

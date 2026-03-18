@@ -88,3 +88,42 @@ export type TelegramAutoReplyJobData = {
   chatId: string;
   messageContent: string;
 };
+
+// --- Broadcast queues ---
+
+export const broadcastProcessingQueue = new Queue("broadcast-processing", {
+  connection: {
+    host: new URL(process.env.REDIS_URL ?? "redis://localhost:6379").hostname,
+    port: Number(new URL(process.env.REDIS_URL ?? "redis://localhost:6379").port) || 6379,
+  },
+  defaultJobOptions: {
+    attempts: 2,
+    backoff: { type: "exponential", delay: 5000 },
+    removeOnComplete: { count: 500 },
+    removeOnFail: { count: 2000 },
+  },
+});
+
+export type BroadcastProcessingJobData = {
+  broadcastId: string;
+  creatorId: string;
+};
+
+export const broadcastSendQueue = new Queue("broadcast-send", {
+  connection: {
+    host: new URL(process.env.REDIS_URL ?? "redis://localhost:6379").hostname,
+    port: Number(new URL(process.env.REDIS_URL ?? "redis://localhost:6379").port) || 6379,
+  },
+  defaultJobOptions: {
+    attempts: 3,
+    backoff: { type: "exponential", delay: 2000 },
+    removeOnComplete: { count: 5000 },
+    removeOnFail: { count: 10000 },
+  },
+});
+
+export type BroadcastSendJobData = {
+  recipientId: string;
+  broadcastId: string;
+  creatorId: string;
+};
