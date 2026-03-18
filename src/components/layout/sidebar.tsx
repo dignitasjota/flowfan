@@ -12,6 +12,7 @@ const navigation = [
   { name: "Dashboard", href: "/dashboard", icon: "📊" },
   { name: "Conversaciones", href: "/conversations", icon: "💬" },
   { name: "Contactos", href: "/contacts", icon: "👥" },
+  { name: "Segmentos", href: "/segments", icon: "🎯" },
   { name: "Revenue", href: "/revenue", icon: "💰" },
   { name: "Media Vault", href: "/media", icon: "🖼️" },
   { name: "Automatizaciones", href: "/workflows", icon: "⚡" },

@@ -615,6 +615,64 @@ export const workflowExecutions = pgTable(
   ]
 );
 
+// --- Segments ---
+
+export const segmentTypeEnum = pgEnum("segment_type", [
+  "dynamic",
+  "static",
+  "mixed",
+]);
+
+export const segmentMembershipEnum = pgEnum("segment_membership", [
+  "included",
+  "excluded",
+]);
+
+export const segments = pgTable(
+  "segments",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    creatorId: uuid("creator_id")
+      .notNull()
+      .references(() => creators.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 255 }).notNull(),
+    description: text("description"),
+    type: segmentTypeEnum("type").notNull(),
+    filters: jsonb("filters").default([]).notNull(),
+    color: varchar("color", { length: 7 }).default("#6366f1"),
+    icon: varchar("icon", { length: 10 }),
+    isPredefined: boolean("is_predefined").default(false).notNull(),
+    predefinedKey: varchar("predefined_key", { length: 50 }),
+    contactCount: integer("contact_count").default(0).notNull(),
+    countUpdatedAt: timestamp("count_updated_at"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("segments_creator_idx").on(table.creatorId),
+  ]
+);
+
+export const segmentMembers = pgTable(
+  "segment_members",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    segmentId: uuid("segment_id")
+      .notNull()
+      .references(() => segments.id, { onDelete: "cascade" }),
+    contactId: uuid("contact_id")
+      .notNull()
+      .references(() => contacts.id, { onDelete: "cascade" }),
+    membershipType: segmentMembershipEnum("membership_type").default("included").notNull(),
+    addedAt: timestamp("added_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("segment_members_segment_idx").on(table.segmentId),
+    index("segment_members_contact_idx").on(table.contactId),
+    uniqueIndex("segment_members_unique_idx").on(table.segmentId, table.contactId),
+  ]
+);
+
 // ============================================================
 // RELATIONS
 // ============================================================
@@ -635,6 +693,7 @@ export const creatorsRelations = relations(creators, ({ one, many }) => ({
   mediaCategories: many(mediaCategories),
   workflows: many(workflows),
   workflowExecutions: many(workflowExecutions),
+  segments: many(segments),
 }));
 
 export const platformsRelations = relations(platforms, ({ one }) => ({
@@ -821,5 +880,24 @@ export const workflowExecutionsRelations = relations(workflowExecutions, ({ one 
   conversation: one(conversations, {
     fields: [workflowExecutions.conversationId],
     references: [conversations.id],
+  }),
+}));
+
+export const segmentsRelations = relations(segments, ({ one, many }) => ({
+  creator: one(creators, {
+    fields: [segments.creatorId],
+    references: [creators.id],
+  }),
+  members: many(segmentMembers),
+}));
+
+export const segmentMembersRelations = relations(segmentMembers, ({ one }) => ({
+  segment: one(segments, {
+    fields: [segmentMembers.segmentId],
+    references: [segments.id],
+  }),
+  contact: one(contacts, {
+    fields: [segmentMembers.contactId],
+    references: [contacts.id],
   }),
 }));

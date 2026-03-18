@@ -9,6 +9,7 @@ import {
   aiUsageLog,
   mediaItems,
   workflows,
+  segments,
 } from "@/server/db/schema";
 
 type Db = typeof DbType;
@@ -28,6 +29,7 @@ type PlanLimits = {
   mediaFiles: number;
   mediaStorageMB: number;
   workflows: number;
+  segments: number;
 };
 
 export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
@@ -44,6 +46,7 @@ export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
     mediaFiles: 0,
     mediaStorageMB: 0,
     workflows: 0,
+    segments: 0,
   },
   starter: {
     contacts: 50,
@@ -58,6 +61,7 @@ export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
     mediaFiles: 50,
     mediaStorageMB: 100,
     workflows: 3,
+    segments: 5,
   },
   pro: {
     contacts: -1,
@@ -72,6 +76,7 @@ export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
     mediaFiles: 500,
     mediaStorageMB: 1024,
     workflows: 15,
+    segments: 25,
   },
   business: {
     contacts: -1,
@@ -86,6 +91,7 @@ export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
     mediaFiles: -1,
     mediaStorageMB: -1,
     workflows: -1,
+    segments: -1,
   },
 };
 
@@ -299,6 +305,31 @@ export async function checkWorkflowLimit(db: Db, creatorId: string) {
     throw new TRPCError({
       code: "FORBIDDEN",
       message: `Has alcanzado el límite de ${limits.workflows} automatizaciones activas en el plan ${plan}. Actualiza tu plan para más.`,
+    });
+  }
+}
+
+export async function checkSegmentLimit(db: Db, creatorId: string) {
+  const plan = await getCreatorPlan(db, creatorId);
+  const limits = PLAN_LIMITS[plan];
+  if (limits.segments === -1) return;
+
+  if (limits.segments === 0) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: `Los segmentos no están disponibles en el plan ${plan}. Actualiza tu plan para acceder.`,
+    });
+  }
+
+  const [result] = await db
+    .select({ count: count() })
+    .from(segments)
+    .where(and(eq(segments.creatorId, creatorId), eq(segments.isPredefined, false)));
+
+  if ((result?.count ?? 0) >= limits.segments) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: `Has alcanzado el límite de ${limits.segments} segmentos en el plan ${plan}. Actualiza tu plan para más.`,
     });
   }
 }
