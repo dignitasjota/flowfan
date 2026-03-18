@@ -30,6 +30,7 @@ type PlanLimits = {
   mediaStorageMB: number;
   workflows: number;
   segments: number;
+  telegramIntegration: boolean;
 };
 
 export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
@@ -47,6 +48,7 @@ export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
     mediaStorageMB: 0,
     workflows: 0,
     segments: 0,
+    telegramIntegration: false,
   },
   starter: {
     contacts: 50,
@@ -62,6 +64,7 @@ export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
     mediaStorageMB: 100,
     workflows: 3,
     segments: 5,
+    telegramIntegration: false,
   },
   pro: {
     contacts: -1,
@@ -77,6 +80,7 @@ export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
     mediaStorageMB: 1024,
     workflows: 15,
     segments: 25,
+    telegramIntegration: true,
   },
   business: {
     contacts: -1,
@@ -92,6 +96,7 @@ export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
     mediaStorageMB: -1,
     workflows: -1,
     segments: -1,
+    telegramIntegration: true,
   },
 };
 
@@ -330,6 +335,18 @@ export async function checkSegmentLimit(db: Db, creatorId: string) {
     throw new TRPCError({
       code: "FORBIDDEN",
       message: `Has alcanzado el límite de ${limits.segments} segmentos en el plan ${plan}. Actualiza tu plan para más.`,
+    });
+  }
+}
+
+export async function checkTelegramAccess(db: Db, creatorId: string) {
+  const plan = await getCreatorPlan(db, creatorId);
+  const limits = PLAN_LIMITS[plan];
+
+  if (!limits.telegramIntegration) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: `La integración con Telegram no está disponible en el plan ${plan}. Actualiza a Pro o superior para acceder.`,
     });
   }
 }

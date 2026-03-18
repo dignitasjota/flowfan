@@ -44,3 +44,47 @@ export type WorkflowJobData =
   | { type: "sentiment_change"; creatorId: string; contactId: string; conversationId: string; direction: "positive" | "negative"; delta: number }
   | { type: "keyword_detected"; creatorId: string; contactId: string; conversationId: string; messageContent: string; matchedKeywords: string[] }
   | { type: "new_contact"; creatorId: string; contactId: string; platformType: string };
+
+// --- Telegram queues ---
+
+export const telegramOutgoingQueue = new Queue("telegram-outgoing", {
+  connection: {
+    host: new URL(process.env.REDIS_URL ?? "redis://localhost:6379").hostname,
+    port: Number(new URL(process.env.REDIS_URL ?? "redis://localhost:6379").port) || 6379,
+  },
+  defaultJobOptions: {
+    attempts: 3,
+    backoff: { type: "exponential", delay: 2000 },
+    removeOnComplete: { count: 2000 },
+    removeOnFail: { count: 5000 },
+  },
+});
+
+export type TelegramOutgoingJobData = {
+  creatorId: string;
+  chatId: string;
+  text: string;
+  conversationId: string;
+  messageId: string;
+};
+
+export const telegramAutoReplyQueue = new Queue("telegram-auto-reply", {
+  connection: {
+    host: new URL(process.env.REDIS_URL ?? "redis://localhost:6379").hostname,
+    port: Number(new URL(process.env.REDIS_URL ?? "redis://localhost:6379").port) || 6379,
+  },
+  defaultJobOptions: {
+    attempts: 2,
+    backoff: { type: "exponential", delay: 3000 },
+    removeOnComplete: { count: 2000 },
+    removeOnFail: { count: 5000 },
+  },
+});
+
+export type TelegramAutoReplyJobData = {
+  creatorId: string;
+  contactId: string;
+  conversationId: string;
+  chatId: string;
+  messageContent: string;
+};

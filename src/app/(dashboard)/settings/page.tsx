@@ -5,11 +5,13 @@ import { PlatformSettings } from "@/components/settings/platform-settings";
 import { AIModelSettings } from "@/components/settings/ai-model-settings";
 import { TemplateSettings } from "@/components/settings/template-settings";
 import { AccountSettings } from "@/components/settings/account-settings";
+import { TelegramSettings } from "@/components/settings/telegram-settings";
 
 const tabs = [
   { id: "personality", label: "Personalidad" },
   { id: "ai-model", label: "Modelo IA" },
   { id: "templates", label: "Templates" },
+  { id: "telegram", label: "Telegram" },
   { id: "account", label: "Cuenta" },
 ] as const;
 
@@ -47,6 +49,7 @@ export default function SettingsPage() {
         {activeTab === "personality" && <PlatformSettings />}
         {activeTab === "ai-model" && <AIModelSettings />}
         {activeTab === "templates" && <TemplateSettings />}
+        {activeTab === "telegram" && <TelegramSettings />}
         {activeTab === "account" && <AccountSettings />}
       </div>
     </div>

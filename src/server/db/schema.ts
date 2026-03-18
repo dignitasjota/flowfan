@@ -184,6 +184,7 @@ export const contacts = pgTable(
     totalConversations: integer("total_conversations").default(1).notNull(),
     tags: text("tags").array().default([]),
     metadata: jsonb("metadata").default({}),
+    platformUserId: varchar("platform_user_id", { length: 255 }),
     isArchived: boolean("is_archived").default(false).notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
@@ -192,6 +193,11 @@ export const contacts = pgTable(
     index("contacts_creator_platform_idx").on(
       table.creatorId,
       table.platformType
+    ),
+    index("contacts_platform_user_idx").on(
+      table.creatorId,
+      table.platformType,
+      table.platformUserId
     ),
   ]
 );
@@ -254,6 +260,8 @@ export const messages = pgTable(
     aiSuggestion: text("ai_suggestion"),
     aiSuggestionUsed: boolean("ai_suggestion_used"),
     sentiment: jsonb("sentiment"),
+    externalMessageId: varchar("external_message_id", { length: 255 }),
+    source: varchar("source", { length: 20 }).default("manual"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
   (table) => [
@@ -438,6 +446,28 @@ export const seoConfig = pgTable("seo_config", {
   faviconUrl: text("favicon_url"),
   robotsIndex: boolean("robots_index").default(true).notNull(),
   robotsFollow: boolean("robots_follow").default(true).notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// --- Telegram Bot Configs ---
+
+export const telegramBotConfigs = pgTable("telegram_bot_configs", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  creatorId: uuid("creator_id")
+    .notNull()
+    .unique()
+    .references(() => creators.id, { onDelete: "cascade" }),
+  botToken: text("bot_token").notNull(),
+  botUsername: varchar("bot_username", { length: 255 }),
+  botId: varchar("bot_id", { length: 100 }),
+  webhookSecret: varchar("webhook_secret", { length: 255 }).notNull().unique(),
+  webhookUrl: text("webhook_url"),
+  status: varchar("status", { length: 20 }).default("disconnected").notNull(),
+  autoReplyEnabled: boolean("auto_reply_enabled").default(false).notNull(),
+  autoReplyDelaySec: integer("auto_reply_delay_sec").default(0).notNull(),
+  welcomeMessage: text("welcome_message"),
+  errorMessage: text("error_message"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
@@ -694,6 +724,7 @@ export const creatorsRelations = relations(creators, ({ one, many }) => ({
   workflows: many(workflows),
   workflowExecutions: many(workflowExecutions),
   segments: many(segments),
+  telegramBotConfig: one(telegramBotConfigs),
 }));
 
 export const platformsRelations = relations(platforms, ({ one }) => ({
@@ -899,5 +930,12 @@ export const segmentMembersRelations = relations(segmentMembers, ({ one }) => ({
   contact: one(contacts, {
     fields: [segmentMembers.contactId],
     references: [contacts.id],
+  }),
+}));
+
+export const telegramBotConfigsRelations = relations(telegramBotConfigs, ({ one }) => ({
+  creator: one(creators, {
+    fields: [telegramBotConfigs.creatorId],
+    references: [creators.id],
   }),
 }));

@@ -14,6 +14,7 @@ import { revenueRouter } from "./routers/revenue";
 import { mediaRouter } from "./routers/media";
 import { workflowsRouter } from "./routers/workflows";
 import { segmentsRouter } from "./routers/segments";
+import { telegramRouter } from "./routers/telegram";
 
 export const appRouter = createTRPCRouter({
   contacts: contactsRouter,
@@ -31,6 +32,7 @@ export const appRouter = createTRPCRouter({
   media: mediaRouter,
   workflows: workflowsRouter,
   segments: segmentsRouter,
+  telegram: telegramRouter,
 });
 
 export type AppRouter = typeof appRouter;

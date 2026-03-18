@@ -5,7 +5,12 @@ import { updateContactProfile } from "./services/profile-updater";
 import { resolveAIConfig } from "./services/ai-config-resolver";
 import { evaluateWorkflows } from "./services/workflow-engine";
 import { checkNoResponseTimeouts } from "./services/workflow-scheduler";
-import type { AnalysisJobData, WorkflowJobData } from "./queues";
+import type {
+  AnalysisJobData,
+  WorkflowJobData,
+  TelegramOutgoingJobData,
+  TelegramAutoReplyJobData,
+} from "./queues";
 import { createChildLogger } from "@/lib/logger";
 
 const log = createChildLogger("worker");
@@ -134,6 +139,147 @@ workflowWorker.on("ready", () => {
   log.info("Workflow worker ready");
 });
 
+// --- Telegram outgoing worker ---
+
+const telegramOutgoingWorker = new Worker<TelegramOutgoingJobData>(
+  "telegram-outgoing",
+  async (job) => {
+    const { creatorId, chatId, text, conversationId, messageId } = job.data;
+    log.info({ jobId: job.id, chatId }, "Sending Telegram message");
+
+    const { eq } = await import("drizzle-orm");
+    const { telegramBotConfigs, messages: messagesTable } = await import("@/server/db/schema");
+    const { decrypt } = await import("@/lib/crypto");
+    const { sendMessage } = await import("@/server/services/telegram");
+
+    const config = await db.query.telegramBotConfigs.findFirst({
+      where: eq(telegramBotConfigs.creatorId, creatorId),
+    });
+
+    if (!config) {
+      log.warn({ creatorId }, "No Telegram config found, skipping send");
+      return;
+    }
+
+    const token = decrypt(config.botToken);
+    const result = await sendMessage(token, chatId, text);
+
+    // Update message with external ID
+    await db
+      .update(messagesTable)
+      .set({
+        externalMessageId: String(result.message_id),
+        source: "telegram",
+      })
+      .where(eq(messagesTable.id, messageId));
+
+    log.info({ jobId: job.id, telegramMessageId: result.message_id }, "Telegram message sent");
+  },
+  {
+    connection: {
+      host: redisUrl.hostname,
+      port: Number(redisUrl.port) || 6379,
+    },
+    concurrency: 5,
+  }
+);
+
+telegramOutgoingWorker.on("failed", (job, err) => {
+  log.error({ jobId: job?.id, err }, "Telegram outgoing job failed");
+});
+
+telegramOutgoingWorker.on("ready", () => {
+  log.info("Telegram outgoing worker ready");
+});
+
+// --- Telegram auto-reply worker ---
+
+const telegramAutoReplyWorker = new Worker<TelegramAutoReplyJobData>(
+  "telegram-auto-reply",
+  async (job) => {
+    const { creatorId, contactId, conversationId, chatId, messageContent } = job.data;
+    log.info({ jobId: job.id, chatId }, "Processing Telegram auto-reply");
+
+    const { eq } = await import("drizzle-orm");
+    const { telegramBotConfigs, messages: messagesTable } = await import("@/server/db/schema");
+    const { decrypt } = await import("@/lib/crypto");
+    const { sendMessage } = await import("@/server/services/telegram");
+    const { resolveAIConfig } = await import("@/server/services/ai-config-resolver");
+
+    const config = await db.query.telegramBotConfigs.findFirst({
+      where: eq(telegramBotConfigs.creatorId, creatorId),
+    });
+
+    if (!config || !config.autoReplyEnabled) {
+      return;
+    }
+
+    // Get AI config
+    const aiConfig = await resolveAIConfig(db, creatorId, "suggestion");
+    if (!aiConfig) {
+      log.warn({ creatorId }, "No AI config for auto-reply");
+      return;
+    }
+
+    // Get recent conversation history
+    const recentMessages = await db.query.messages.findMany({
+      where: eq(messagesTable.conversationId, conversationId),
+      orderBy: (m, { desc }) => [desc(m.createdAt)],
+      limit: 10,
+    });
+
+    // Build a simple prompt for auto-reply
+    const { callAIProvider } = await import("@/server/services/ai");
+    const systemPrompt =
+      "Eres un asistente de conversación para un creador de contenido en Telegram. " +
+      "Responde de forma amigable y natural al mensaje del fan. " +
+      "Sé conciso y conversacional. No reveles que eres una IA.";
+
+    const conversationMsgs = recentMessages.reverse().map((m) => ({
+      role: (m.role === "fan" ? "user" : "assistant") as "user" | "assistant",
+      content: m.content,
+    }));
+
+    const result = await callAIProvider(aiConfig, systemPrompt, conversationMsgs, 512);
+
+    if (!result.text) {
+      return;
+    }
+
+    // Send via Telegram
+    const token = decrypt(config.botToken);
+    const tgResult = await sendMessage(token, chatId, result.text);
+
+    // Save as creator message
+    await db.insert(messagesTable).values({
+      conversationId,
+      role: "creator",
+      content: result.text,
+      aiSuggestion: result.text,
+      aiSuggestionUsed: true,
+      externalMessageId: String(tgResult.message_id),
+      source: "telegram",
+    });
+
+    log.info({ jobId: job.id, chatId }, "Auto-reply sent");
+  },
+  {
+    connection: {
+      host: redisUrl.hostname,
+      port: Number(redisUrl.port) || 6379,
+    },
+    concurrency: 3,
+  }
+);
+
+telegramAutoReplyWorker.on("failed", (job, err) => {
+  log.error({ jobId: job?.id, err }, "Telegram auto-reply job failed");
+});
+
+telegramAutoReplyWorker.on("ready", () => {
+  log.info("Telegram auto-reply worker ready");
+});
+
 // --- Periodic no_response_timeout checker (every 5 minutes) ---
 
 let schedulerInterval: ReturnType<typeof setInterval> | null = null;
@@ -161,13 +307,13 @@ startScheduler();
 process.on("SIGTERM", async () => {
   log.info("SIGTERM received, closing workers...");
   if (schedulerInterval) clearInterval(schedulerInterval);
-  await Promise.all([worker.close(), workflowWorker.close()]);
+  await Promise.all([worker.close(), workflowWorker.close(), telegramOutgoingWorker.close(), telegramAutoReplyWorker.close()]);
   process.exit(0);
 });
 
 process.on("SIGINT", async () => {
   log.info("SIGINT received, closing workers...");
   if (schedulerInterval) clearInterval(schedulerInterval);
-  await Promise.all([worker.close(), workflowWorker.close()]);
+  await Promise.all([worker.close(), workflowWorker.close(), telegramOutgoingWorker.close(), telegramAutoReplyWorker.close()]);
   process.exit(0);
 });

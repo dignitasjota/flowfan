@@ -6,7 +6,7 @@ import { createChildLogger } from "@/lib/logger";
 
 const log = createChildLogger("messages-router");
 import { messages, conversations, contacts } from "@/server/db/schema";
-import { analysisQueue } from "@/server/queues";
+import { analysisQueue, telegramOutgoingQueue } from "@/server/queues";
 
 export const messagesRouter = createTRPCRouter({
   list: protectedProcedure
@@ -143,6 +143,28 @@ export const messagesRouter = createTRPCRouter({
         .update(conversations)
         .set({ lastMessageAt: new Date() })
         .where(eq(conversations.id, input.conversationId));
+
+      // If conversation is on Telegram, enqueue outgoing message
+      if (conversation.platformType === "telegram" && message) {
+        const contact = await ctx.db.query.contacts.findFirst({
+          where: eq(contacts.id, conversation.contactId),
+          columns: { platformUserId: true },
+        });
+
+        if (contact?.platformUserId) {
+          telegramOutgoingQueue
+            .add("send", {
+              creatorId: ctx.creatorId,
+              chatId: contact.platformUserId,
+              text: input.content,
+              conversationId: input.conversationId,
+              messageId: message.id,
+            })
+            .catch((err) => {
+              log.error({ err }, "Failed to enqueue Telegram outgoing message");
+            });
+        }
+      }
 
       return message;
     }),
