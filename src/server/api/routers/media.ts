@@ -259,6 +259,105 @@ export const mediaRouter = createTRPCRouter({
       return result;
     }),
 
+  // --- Operaciones en lote ---
+
+  bulkUpdateCategory: protectedProcedure
+    .input(
+      z.object({
+        ids: z.array(z.string().uuid()),
+        categoryId: z.string().uuid().nullable(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const result = await ctx.db
+        .update(mediaItems)
+        .set({ categoryId: input.categoryId, updatedAt: new Date() })
+        .where(
+          and(
+            inArray(mediaItems.id, input.ids),
+            eq(mediaItems.creatorId, ctx.creatorId)
+          )
+        )
+        .returning();
+
+      return { updated: result.length };
+    }),
+
+  bulkAddTags: protectedProcedure
+    .input(
+      z.object({
+        ids: z.array(z.string().uuid()),
+        tags: z.array(z.string()),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const existing = await ctx.db
+        .select({ id: mediaItems.id, tags: mediaItems.tags })
+        .from(mediaItems)
+        .where(
+          and(
+            inArray(mediaItems.id, input.ids),
+            eq(mediaItems.creatorId, ctx.creatorId)
+          )
+        );
+
+      let updated = 0;
+      for (const item of existing) {
+        const currentTags = item.tags ?? [];
+        const merged = [...new Set([...currentTags, ...input.tags])];
+        await ctx.db
+          .update(mediaItems)
+          .set({ tags: merged, updatedAt: new Date() })
+          .where(eq(mediaItems.id, item.id));
+        updated++;
+      }
+
+      return { updated };
+    }),
+
+  bulkDelete: protectedProcedure
+    .input(
+      z.object({
+        ids: z.array(z.string().uuid()),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const toDelete = await ctx.db
+        .select()
+        .from(mediaItems)
+        .where(
+          and(
+            inArray(mediaItems.id, input.ids),
+            eq(mediaItems.creatorId, ctx.creatorId)
+          )
+        );
+
+      if (toDelete.length === 0) return { deleted: 0 };
+
+      await ctx.db
+        .delete(mediaItems)
+        .where(
+          and(
+            inArray(mediaItems.id, input.ids),
+            eq(mediaItems.creatorId, ctx.creatorId)
+          )
+        );
+
+      // Intentar borrar archivos del filesystem (no crítico)
+      for (const item of toDelete) {
+        try {
+          await unlink(join(UPLOADS_DIR, item.storagePath));
+          if (item.thumbnailPath) {
+            await unlink(join(UPLOADS_DIR, item.thumbnailPath));
+          }
+        } catch {
+          // Si falla borrar archivo, no es crítico
+        }
+      }
+
+      return { deleted: toDelete.length };
+    }),
+
   // --- Categorías ---
 
   listCategories: protectedProcedure.query(async ({ ctx }) => {

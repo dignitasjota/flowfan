@@ -542,6 +542,79 @@ export const mediaSends = pgTable(
   ]
 );
 
+// --- Workflows ---
+
+export const workflowTriggerTypeEnum = pgEnum("workflow_trigger_type", [
+  "no_response_timeout",
+  "funnel_stage_change",
+  "sentiment_change",
+  "keyword_detected",
+  "new_contact",
+]);
+
+export const workflowActionTypeEnum = pgEnum("workflow_action_type", [
+  "send_message",
+  "send_template",
+  "create_notification",
+  "change_tags",
+]);
+
+export const workflows = pgTable(
+  "workflows",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    creatorId: uuid("creator_id")
+      .notNull()
+      .references(() => creators.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 255 }).notNull(),
+    description: text("description"),
+    triggerType: workflowTriggerTypeEnum("trigger_type").notNull(),
+    triggerConfig: jsonb("trigger_config").default({}).notNull(),
+    conditions: jsonb("conditions").default([]).notNull(),
+    actionType: workflowActionTypeEnum("action_type").notNull(),
+    actionConfig: jsonb("action_config").default({}).notNull(),
+    isActive: boolean("is_active").default(true).notNull(),
+    cooldownMinutes: integer("cooldown_minutes").default(60).notNull(),
+    executionCount: integer("execution_count").default(0).notNull(),
+    lastExecutedAt: timestamp("last_executed_at"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("workflows_creator_idx").on(table.creatorId),
+    index("workflows_creator_active_idx").on(table.creatorId, table.isActive),
+  ]
+);
+
+export const workflowExecutions = pgTable(
+  "workflow_executions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workflowId: uuid("workflow_id")
+      .notNull()
+      .references(() => workflows.id, { onDelete: "cascade" }),
+    creatorId: uuid("creator_id")
+      .notNull()
+      .references(() => creators.id, { onDelete: "cascade" }),
+    contactId: uuid("contact_id").references(() => contacts.id, {
+      onDelete: "set null",
+    }),
+    conversationId: uuid("conversation_id").references(() => conversations.id, {
+      onDelete: "set null",
+    }),
+    triggerData: jsonb("trigger_data").default({}).notNull(),
+    actionResult: jsonb("action_result").default({}).notNull(),
+    status: varchar("status", { length: 20 }).notNull(), // success, failed, skipped
+    errorMessage: text("error_message"),
+    executedAt: timestamp("executed_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("workflow_executions_workflow_idx").on(table.workflowId),
+    index("workflow_executions_creator_idx").on(table.creatorId, table.executedAt),
+    index("workflow_executions_contact_idx").on(table.contactId),
+  ]
+);
+
 // ============================================================
 // RELATIONS
 // ============================================================
@@ -560,6 +633,8 @@ export const creatorsRelations = relations(creators, ({ one, many }) => ({
   fanTransactions: many(fanTransactions),
   mediaItems: many(mediaItems),
   mediaCategories: many(mediaCategories),
+  workflows: many(workflows),
+  workflowExecutions: many(workflowExecutions),
 }));
 
 export const platformsRelations = relations(platforms, ({ one }) => ({
@@ -718,6 +793,33 @@ export const mediaSendsRelations = relations(mediaSends, ({ one }) => ({
   }),
   conversation: one(conversations, {
     fields: [mediaSends.conversationId],
+    references: [conversations.id],
+  }),
+}));
+
+export const workflowsRelations = relations(workflows, ({ one, many }) => ({
+  creator: one(creators, {
+    fields: [workflows.creatorId],
+    references: [creators.id],
+  }),
+  executions: many(workflowExecutions),
+}));
+
+export const workflowExecutionsRelations = relations(workflowExecutions, ({ one }) => ({
+  workflow: one(workflows, {
+    fields: [workflowExecutions.workflowId],
+    references: [workflows.id],
+  }),
+  creator: one(creators, {
+    fields: [workflowExecutions.creatorId],
+    references: [creators.id],
+  }),
+  contact: one(contacts, {
+    fields: [workflowExecutions.contactId],
+    references: [contacts.id],
+  }),
+  conversation: one(conversations, {
+    fields: [workflowExecutions.conversationId],
     references: [conversations.id],
   }),
 }));

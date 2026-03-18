@@ -15,10 +15,34 @@ export default function MediaPage() {
   const [showUploader, setShowUploader] = useState(false);
   const [showDetail, setShowDetail] = useState<string | null>(null);
   const [showCategories, setShowCategories] = useState(false);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [showBulkCatDropdown, setShowBulkCatDropdown] = useState(false);
+  const [showBulkTagInput, setShowBulkTagInput] = useState(false);
+  const [bulkTagValue, setBulkTagValue] = useState("");
 
   const stats = trpc.media.getStats.useQuery(undefined, { retry: false });
   const categories = trpc.media.listCategories.useQuery();
   const items = trpc.media.list.useQuery({ ...filter, limit: 100 }, { retry: false });
+
+  const bulkUpdateCat = trpc.media.bulkUpdateCategory.useMutation({
+    onSuccess: () => { items.refetch(); setSelectedIds(new Set()); setSelectionMode(false); },
+  });
+  const bulkAddTagsMut = trpc.media.bulkAddTags.useMutation({
+    onSuccess: () => { items.refetch(); setSelectedIds(new Set()); setSelectionMode(false); },
+  });
+  const bulkDeleteMut = trpc.media.bulkDelete.useMutation({
+    onSuccess: () => { items.refetch(); stats.refetch(); setSelectedIds(new Set()); setSelectionMode(false); },
+  });
+
+  const toggleSelection = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   // Plan no lo permite
   if (items.error?.data?.code === "FORBIDDEN") {
@@ -45,6 +69,24 @@ export default function MediaPage() {
           <p className="mt-1 text-sm text-gray-400">Biblioteca de contenido</p>
         </div>
         <div className="flex gap-2">
+          <button
+            onClick={() => {
+              if (selectionMode) {
+                setSelectionMode(false);
+                setSelectedIds(new Set());
+              } else {
+                setSelectionMode(true);
+              }
+            }}
+            className={cn(
+              "rounded-lg border px-3 py-2 text-sm transition-colors",
+              selectionMode
+                ? "border-indigo-500 text-indigo-400 hover:text-indigo-300"
+                : "border-gray-700 text-gray-400 hover:text-white"
+            )}
+          >
+            {selectionMode ? "Cancelar" : "Seleccionar"}
+          </button>
           <button
             onClick={() => setShowCategories(true)}
             className="rounded-lg border border-gray-700 px-3 py-2 text-sm text-gray-400 hover:text-white"
@@ -113,9 +155,39 @@ export default function MediaPage() {
         {items.data?.items.map((item) => (
           <button
             key={item.id}
-            onClick={() => setShowDetail(item.id)}
-            className="group relative aspect-square overflow-hidden rounded-lg border border-gray-800 bg-gray-900 hover:border-gray-600 transition-colors"
+            onClick={() => {
+              if (selectionMode) {
+                toggleSelection(item.id);
+              } else {
+                setShowDetail(item.id);
+              }
+            }}
+            className={cn(
+              "group relative aspect-square overflow-hidden rounded-lg border bg-gray-900 transition-colors",
+              selectionMode && selectedIds.has(item.id)
+                ? "border-indigo-500 ring-2 ring-indigo-500/40"
+                : "border-gray-800 hover:border-gray-600"
+            )}
           >
+            {/* Selection checkbox */}
+            {selectionMode && (
+              <div className="absolute left-1.5 top-1.5 z-10">
+                <div
+                  className={cn(
+                    "flex h-5 w-5 items-center justify-center rounded border-2 transition-colors",
+                    selectedIds.has(item.id)
+                      ? "border-indigo-500 bg-indigo-600"
+                      : "border-gray-500 bg-gray-900/80"
+                  )}
+                >
+                  {selectedIds.has(item.id) && (
+                    <svg className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                    </svg>
+                  )}
+                </div>
+              </div>
+            )}
             {item.thumbnailPath ? (
               <img
                 src={`/api/media/${item.id}?thumb=1`}
@@ -165,6 +237,125 @@ export default function MediaPage() {
           >
             + Subir archivo
           </button>
+        </div>
+      )}
+
+      {/* Floating bulk action bar */}
+      {selectionMode && selectedIds.size > 0 && (
+        <div className="fixed bottom-6 left-1/2 z-40 -translate-x-1/2">
+          <div className="flex items-center gap-3 rounded-xl border border-gray-700 bg-gray-900 px-4 py-3 shadow-2xl">
+            <span className="text-sm font-medium text-white">
+              {selectedIds.size} seleccionado{selectedIds.size !== 1 ? "s" : ""}
+            </span>
+
+            <div className="h-5 w-px bg-gray-700" />
+
+            <button
+              onClick={() => {
+                const allIds = items.data?.items.map((i) => i.id) ?? [];
+                if (selectedIds.size === allIds.length) {
+                  setSelectedIds(new Set());
+                } else {
+                  setSelectedIds(new Set(allIds));
+                }
+              }}
+              className="text-xs text-indigo-400 hover:text-indigo-300"
+            >
+              {selectedIds.size === (items.data?.items.length ?? 0) ? "Deseleccionar" : "Seleccionar todo"}
+            </button>
+
+            <div className="h-5 w-px bg-gray-700" />
+
+            {/* Mover categoria */}
+            <div className="relative">
+              <button
+                onClick={() => { setShowBulkCatDropdown(!showBulkCatDropdown); setShowBulkTagInput(false); }}
+                className="rounded-lg border border-gray-700 px-3 py-1.5 text-xs text-gray-300 hover:text-white"
+              >
+                Mover categoria
+              </button>
+              {showBulkCatDropdown && (
+                <div className="absolute bottom-full left-0 mb-2 w-48 rounded-lg border border-gray-700 bg-gray-800 py-1 shadow-xl">
+                  <button
+                    onClick={() => {
+                      bulkUpdateCat.mutate({ ids: [...selectedIds], categoryId: null });
+                      setShowBulkCatDropdown(false);
+                    }}
+                    className="w-full px-3 py-1.5 text-left text-xs text-gray-400 hover:bg-gray-700 hover:text-white"
+                  >
+                    Sin categoria
+                  </button>
+                  {categories.data?.map((c) => (
+                    <button
+                      key={c.id}
+                      onClick={() => {
+                        bulkUpdateCat.mutate({ ids: [...selectedIds], categoryId: c.id });
+                        setShowBulkCatDropdown(false);
+                      }}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-gray-300 hover:bg-gray-700 hover:text-white"
+                    >
+                      <span className="h-2 w-2 rounded-full" style={{ backgroundColor: c.color ?? "#6366f1" }} />
+                      {c.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Añadir tags */}
+            <div className="relative">
+              <button
+                onClick={() => { setShowBulkTagInput(!showBulkTagInput); setShowBulkCatDropdown(false); }}
+                className="rounded-lg border border-gray-700 px-3 py-1.5 text-xs text-gray-300 hover:text-white"
+              >
+                Añadir tags
+              </button>
+              {showBulkTagInput && (
+                <div className="absolute bottom-full left-0 mb-2 flex gap-2 rounded-lg border border-gray-700 bg-gray-800 p-2 shadow-xl">
+                  <input
+                    type="text"
+                    value={bulkTagValue}
+                    onChange={(e) => setBulkTagValue(e.target.value)}
+                    placeholder="tag1, tag2"
+                    className="w-40 rounded border border-gray-600 bg-gray-900 px-2 py-1 text-xs text-white placeholder-gray-500"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && bulkTagValue.trim()) {
+                        const tags = bulkTagValue.split(",").map((t) => t.trim()).filter(Boolean);
+                        bulkAddTagsMut.mutate({ ids: [...selectedIds], tags });
+                        setBulkTagValue("");
+                        setShowBulkTagInput(false);
+                      }
+                    }}
+                  />
+                  <button
+                    onClick={() => {
+                      if (bulkTagValue.trim()) {
+                        const tags = bulkTagValue.split(",").map((t) => t.trim()).filter(Boolean);
+                        bulkAddTagsMut.mutate({ ids: [...selectedIds], tags });
+                        setBulkTagValue("");
+                        setShowBulkTagInput(false);
+                      }
+                    }}
+                    className="rounded bg-indigo-600 px-2 py-1 text-xs text-white hover:bg-indigo-500"
+                  >
+                    OK
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Eliminar */}
+            <button
+              onClick={() => {
+                if (confirm(`¿Eliminar ${selectedIds.size} archivo${selectedIds.size !== 1 ? "s" : ""}?`)) {
+                  bulkDeleteMut.mutate({ ids: [...selectedIds] });
+                }
+              }}
+              className="rounded-lg border border-red-800 px-3 py-1.5 text-xs text-red-400 hover:bg-red-900/20"
+            >
+              Eliminar
+            </button>
+          </div>
         </div>
       )}
 

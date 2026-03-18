@@ -70,8 +70,37 @@ export async function POST(request: Request) {
     // Crear directorio
     await mkdir(creatorDir, { recursive: true });
 
-    // Escribir archivo
-    const buffer = Buffer.from(await file.arrayBuffer());
+    // Escribir archivo (con optimización para imágenes)
+    let buffer: Buffer = Buffer.from(await file.arrayBuffer());
+    let optimizedSize = file.size;
+
+    if (mimeInfo.mediaType === "image" && mimeInfo.ext !== "gif") {
+      try {
+        const metadata = await sharp(buffer).metadata();
+        const maxDim = 2048;
+        let pipeline = sharp(buffer);
+
+        // Redimensionar si excede 2048px en cualquier lado
+        if ((metadata.width && metadata.width > maxDim) || (metadata.height && metadata.height > maxDim)) {
+          pipeline = pipeline.resize(maxDim, maxDim, { fit: "inside", withoutEnlargement: true });
+        }
+
+        // Optimizar calidad según formato
+        if (mimeInfo.ext === "jpg") {
+          buffer = await pipeline.jpeg({ quality: 85, mozjpeg: true }).toBuffer();
+        } else if (mimeInfo.ext === "png") {
+          buffer = await pipeline.png({ compressionLevel: 8 }).toBuffer();
+        } else if (mimeInfo.ext === "webp") {
+          buffer = await pipeline.webp({ quality: 85 }).toBuffer();
+        } else {
+          buffer = await pipeline.toBuffer();
+        }
+        optimizedSize = buffer.length;
+      } catch {
+        // Si falla la optimización, usar buffer original
+      }
+    }
+
     await writeFile(filePath, buffer);
 
     // Generar thumbnail + obtener dimensiones
@@ -111,7 +140,7 @@ export async function POST(request: Request) {
         originalName: file.name,
         mimeType: file.type,
         mediaType: mimeInfo.mediaType,
-        fileSize: file.size,
+        fileSize: optimizedSize,
         storagePath,
         thumbnailPath,
         width,

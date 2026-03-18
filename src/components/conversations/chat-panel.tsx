@@ -5,6 +5,7 @@ import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
 import { useTrpcErrorHandler } from "@/hooks/useTrpcErrorHandler";
 import { useToast } from "@/components/ui/toast";
+import { MediaPicker } from "@/components/media/media-picker";
 
 type Message = {
   id: string;
@@ -16,8 +17,10 @@ type Message = {
 
 type Conversation = {
   id: string;
+  contactId: string;
   platformType: string;
   contact: {
+    id: string;
     username: string;
     displayName: string | null;
   };
@@ -46,6 +49,7 @@ export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const [manualMode, setManualMode] = useState(false);
   const [isSendingManual, setIsSendingManual] = useState(false);
+  const [showMediaPicker, setShowMediaPicker] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const utils = trpc.useUtils();
@@ -413,18 +417,38 @@ export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact
                 disabled={isSendingManual}
               />
             </div>
-            <button
-              onClick={handleSendManual}
-              disabled={isSendingManual || (!fanMessage.trim() && !creatorMessage.trim())}
-              className="w-full rounded-lg bg-amber-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50"
-            >
-              {isSendingManual ? "Guardando..." : "Guardar mensajes"}
-            </button>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowMediaPicker(true)}
+                className="flex-shrink-0 rounded-lg border border-gray-700 p-2.5 text-gray-400 hover:border-indigo-500 hover:text-indigo-400 transition-colors"
+                title="Adjuntar media"
+              >
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0 0 22.5 18.75V5.25A2.25 2.25 0 0 0 20.25 3H3.75A2.25 2.25 0 0 0 1.5 5.25v13.5A2.25 2.25 0 0 0 3.75 21Z" />
+                </svg>
+              </button>
+              <button
+                onClick={handleSendManual}
+                disabled={isSendingManual || (!fanMessage.trim() && !creatorMessage.trim())}
+                className="flex-1 rounded-lg bg-amber-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+              >
+                {isSendingManual ? "Guardando..." : "Guardar mensajes"}
+              </button>
+            </div>
           </div>
         ) : (
           /* AI mode: single input */
           <>
             <div className="flex gap-3">
+              <button
+                onClick={() => setShowMediaPicker(true)}
+                className="flex-shrink-0 rounded-lg border border-gray-700 p-2.5 text-gray-400 hover:border-indigo-500 hover:text-indigo-400 transition-colors"
+                title="Adjuntar media"
+              >
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0 0 22.5 18.75V5.25A2.25 2.25 0 0 0 20.25 3H3.75A2.25 2.25 0 0 0 1.5 5.25v13.5A2.25 2.25 0 0 0 3.75 21Z" />
+                </svg>
+              </button>
               <input
                 value={fanMessage}
                 onChange={(e) => setFanMessage(e.target.value)}
@@ -464,6 +488,24 @@ export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact
           </>
         )}
       </div>
+
+      {/* Media Picker */}
+      {showMediaPicker && (
+        <MediaPicker
+          contactId={conversation.contactId}
+          conversationId={conversation.id}
+          onSelect={(mediaItem) => {
+            setShowMediaPicker(false);
+            // Register as creator message with media reference
+            addCreatorMessage.mutate({
+              conversationId: conversation.id,
+              content: `[Media enviado: ${mediaItem.originalName}]`,
+            });
+            onMessageSent();
+          }}
+          onClose={() => setShowMediaPicker(false)}
+        />
+      )}
     </div>
   );
 }

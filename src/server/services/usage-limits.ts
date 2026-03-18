@@ -8,6 +8,7 @@ import {
   responseTemplates,
   aiUsageLog,
   mediaItems,
+  workflows,
 } from "@/server/db/schema";
 
 type Db = typeof DbType;
@@ -26,6 +27,7 @@ type PlanLimits = {
   revenue: "none" | "basic" | "full" | "full_export";
   mediaFiles: number;
   mediaStorageMB: number;
+  workflows: number;
 };
 
 export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
@@ -41,6 +43,7 @@ export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
     revenue: "none",
     mediaFiles: 0,
     mediaStorageMB: 0,
+    workflows: 0,
   },
   starter: {
     contacts: 50,
@@ -54,6 +57,7 @@ export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
     revenue: "basic",
     mediaFiles: 50,
     mediaStorageMB: 100,
+    workflows: 3,
   },
   pro: {
     contacts: -1,
@@ -67,6 +71,7 @@ export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
     revenue: "full",
     mediaFiles: 500,
     mediaStorageMB: 1024,
+    workflows: 15,
   },
   business: {
     contacts: -1,
@@ -80,6 +85,7 @@ export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
     revenue: "full_export",
     mediaFiles: -1,
     mediaStorageMB: -1,
+    workflows: -1,
   },
 };
 
@@ -268,6 +274,31 @@ export async function checkMediaStorageLimit(db: Db, creatorId: string, newFileS
     throw new TRPCError({
       code: "FORBIDDEN",
       message: `Has alcanzado el límite de ${limits.mediaStorageMB}MB de almacenamiento en el plan ${plan}. Actualiza tu plan para más espacio.`,
+    });
+  }
+}
+
+export async function checkWorkflowLimit(db: Db, creatorId: string) {
+  const plan = await getCreatorPlan(db, creatorId);
+  const limits = PLAN_LIMITS[plan];
+  if (limits.workflows === -1) return;
+
+  if (limits.workflows === 0) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: `Las automatizaciones no están disponibles en el plan ${plan}. Actualiza tu plan para acceder.`,
+    });
+  }
+
+  const [result] = await db
+    .select({ count: count() })
+    .from(workflows)
+    .where(and(eq(workflows.creatorId, creatorId), eq(workflows.isActive, true)));
+
+  if ((result?.count ?? 0) >= limits.workflows) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: `Has alcanzado el límite de ${limits.workflows} automatizaciones activas en el plan ${plan}. Actualiza tu plan para más.`,
     });
   }
 }

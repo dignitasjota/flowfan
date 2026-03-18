@@ -3,6 +3,7 @@ import { eq, and, desc, ilike, or, sql, count } from "drizzle-orm";
 import { createTRPCRouter, protectedProcedure } from "../trpc";
 import { contacts, contactProfiles } from "@/server/db/schema";
 import { checkContactLimit } from "@/server/services/usage-limits";
+import { workflowQueue } from "@/server/queues";
 import { platformTypeSchema, funnelStageSchema } from "@/lib/constants";
 
 export const contactsRouter = createTRPCRouter({
@@ -101,6 +102,18 @@ export const contactsRouter = createTRPCRouter({
       await ctx.db.insert(contactProfiles).values({
         contactId: contact!.id,
       });
+
+      // Dispatch workflow event for new contact
+      try {
+        await workflowQueue.add("new_contact", {
+          type: "new_contact",
+          creatorId: ctx.creatorId,
+          contactId: contact!.id,
+          platformType: input.platformType,
+        });
+      } catch {
+        // Non-critical: workflow event dispatch failure shouldn't block contact creation
+      }
 
       return contact;
     }),

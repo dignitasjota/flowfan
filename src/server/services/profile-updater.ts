@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import type { SentimentResult } from "./ai-analysis";
 import { updateSignals, calculateScores, type BehavioralSignals } from "./scoring";
 import { contactProfiles, messages, contacts, notifications } from "@/server/db/schema";
+import { workflowQueue } from "@/server/queues";
 import { createChildLogger } from "@/lib/logger";
 
 const log = createChildLogger("profile-updater");
@@ -132,6 +133,36 @@ export async function updateContactProfile(
           message: `${username} paso de ${FUNNEL_LABELS[prevFunnel] ?? prevFunnel} a ${FUNNEL_LABELS[scores.funnelStage] ?? scores.funnelStage}.`,
           data: { from: prevFunnel, to: scores.funnelStage },
         });
+
+        // Dispatch workflow event for funnel change
+        try {
+          await workflowQueue.add("funnel_stage_change", {
+            type: "funnel_stage_change",
+            creatorId: resolvedCreatorId,
+            contactId,
+            previousStage: prevFunnel,
+            newStage: scores.funnelStage,
+          });
+        } catch (e) {
+          log.warn({ err: e }, "Failed to enqueue funnel_stage_change workflow event");
+        }
+      }
+
+      // Dispatch workflow event for significant sentiment change
+      const sentimentDelta = analysis.score - (prevEngagement / 100);
+      if (Math.abs(sentimentDelta) >= 0.2) {
+        try {
+          await workflowQueue.add("sentiment_change", {
+            type: "sentiment_change",
+            creatorId: resolvedCreatorId,
+            contactId,
+            conversationId: "",
+            direction: sentimentDelta > 0 ? "positive" : "negative",
+            delta: Math.abs(sentimentDelta),
+          });
+        } catch (e) {
+          log.warn({ err: e }, "Failed to enqueue sentiment_change workflow event");
+        }
       }
     }
   } catch (error) {

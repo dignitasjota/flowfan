@@ -14,6 +14,7 @@ const navigation = [
   { name: "Contactos", href: "/contacts", icon: "👥" },
   { name: "Revenue", href: "/revenue", icon: "💰" },
   { name: "Media Vault", href: "/media", icon: "🖼️" },
+  { name: "Automatizaciones", href: "/workflows", icon: "⚡" },
   { name: "Billing", href: "/billing", icon: "💳" },
   { name: "Configuración", href: "/settings", icon: "⚙️" },
 ];
