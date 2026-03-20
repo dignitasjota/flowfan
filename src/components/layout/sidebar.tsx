@@ -7,18 +7,22 @@ import { signOut } from "next-auth/react";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/lib/trpc";
 import { useTheme } from "@/hooks/useTheme";
+import { useSession } from "next-auth/react";
+import { TeamSwitcher } from "./team-switcher";
 
+// access: "all" = any team member, "manager" = owner+manager, "owner" = owner only
 const navigation = [
-  { name: "Dashboard", href: "/dashboard", icon: "📊" },
-  { name: "Conversaciones", href: "/conversations", icon: "💬" },
-  { name: "Contactos", href: "/contacts", icon: "👥" },
-  { name: "Segmentos", href: "/segments", icon: "🎯" },
-  { name: "Revenue", href: "/revenue", icon: "💰" },
-  { name: "Media Vault", href: "/media", icon: "🖼️" },
-  { name: "Automatizaciones", href: "/workflows", icon: "⚡" },
-  { name: "Broadcasts", href: "/broadcasts", icon: "📢" },
-  { name: "Billing", href: "/billing", icon: "💳" },
-  { name: "Configuración", href: "/settings", icon: "⚙️" },
+  { name: "Dashboard", href: "/dashboard", icon: "📊", access: "all" as const },
+  { name: "Conversaciones", href: "/conversations", icon: "💬", access: "all" as const },
+  { name: "Contactos", href: "/contacts", icon: "👥", access: "all" as const },
+  { name: "Segmentos", href: "/segments", icon: "🎯", access: "manager" as const },
+  { name: "Revenue", href: "/revenue", icon: "💰", access: "manager" as const },
+  { name: "Media Vault", href: "/media", icon: "🖼️", access: "manager" as const },
+  { name: "Automatizaciones", href: "/workflows", icon: "⚡", access: "manager" as const },
+  { name: "Broadcasts", href: "/broadcasts", icon: "📢", access: "manager" as const },
+  { name: "Equipo", href: "/team", icon: "👤", access: "owner" as const },
+  { name: "Billing", href: "/billing", icon: "💳", access: "owner" as const },
+  { name: "Configuración", href: "/settings", icon: "⚙️", access: "owner" as const },
 ];
 
 type SidebarProps = {
@@ -29,6 +33,17 @@ export function Sidebar({ user }: SidebarProps) {
   const pathname = usePathname();
   const [isOpen, setIsOpen] = useState(false);
   const { theme, toggleTheme } = useTheme();
+  const { data: session } = useSession();
+  const teamRole = session?.user?.teamRole ?? null;
+
+  // Filter navigation based on team role
+  const filteredNav = navigation.filter((item) => {
+    if (!teamRole) return true; // owner/direct creator sees everything
+    if (item.access === "all") return true;
+    if (item.access === "manager") return teamRole === "owner" || teamRole === "manager";
+    if (item.access === "owner") return teamRole === "owner";
+    return true;
+  });
 
   // Close sidebar on route change
   useEffect(() => {
@@ -72,9 +87,12 @@ export function Sidebar({ user }: SidebarProps) {
         </button>
       </div>
 
+      {/* Team Switcher */}
+      <TeamSwitcher />
+
       {/* Navigation */}
       <nav className="flex-1 space-y-1 px-3 py-4">
-        {navigation.map((item) => (
+        {filteredNav.map((item) => (
           <Link
             key={item.href}
             href={item.href}

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { eq, and } from "drizzle-orm";
-import { createTRPCRouter, protectedProcedure } from "../trpc";
+import { createTRPCRouter, protectedProcedure, ownerProcedure } from "../trpc";
 import { platforms } from "@/server/db/schema";
 import { checkPlatformLimit } from "@/server/services/usage-limits";
 import { platformTypeSchema } from "@/lib/constants";
@@ -22,7 +22,7 @@ export const platformsRouter = createTRPCRouter({
     });
   }),
 
-  upsert: protectedProcedure
+  upsert: ownerProcedure
     .input(
       z.object({
         platformType: platformTypeSchema,
@@ -66,7 +66,7 @@ export const platformsRouter = createTRPCRouter({
       return created;
     }),
 
-  delete: protectedProcedure
+  delete: ownerProcedure
     .input(z.object({ platformType: platformTypeSchema }))
     .mutation(async ({ ctx, input }) => {
       await ctx.db

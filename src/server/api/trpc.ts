@@ -39,7 +39,9 @@ const enforceAuth = t.middleware(({ ctx, next }) => {
   return next({
     ctx: {
       session: ctx.session,
-      creatorId: ctx.session.user.id,
+      creatorId: ctx.session.user.activeCreatorId ?? ctx.session.user.id,
+      actingUserId: ctx.session.user.id,
+      teamRole: ctx.session.user.teamRole ?? null,
     },
   });
 });
@@ -54,10 +56,38 @@ const enforceAdmin = t.middleware(({ ctx, next }) => {
   return next({
     ctx: {
       session: ctx.session,
-      creatorId: ctx.session.user.id,
+      creatorId: ctx.session.user.activeCreatorId ?? ctx.session.user.id,
+      actingUserId: ctx.session.user.id,
+      teamRole: ctx.session.user.teamRole ?? null,
     },
   });
 });
 
+// Only the creator/owner can access
+const enforceOwner = t.middleware(({ ctx, next }) => {
+  const role = ctx.session?.user?.teamRole ?? null;
+  if (role && role !== "owner") {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "Solo el propietario puede realizar esta acción.",
+    });
+  }
+  return next({ ctx });
+});
+
+// Owner or manager can access
+const enforceManager = t.middleware(({ ctx, next }) => {
+  const role = ctx.session?.user?.teamRole ?? null;
+  if (role && role !== "owner" && role !== "manager") {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "No tienes permisos para realizar esta acción.",
+    });
+  }
+  return next({ ctx });
+});
+
 export const protectedProcedure = t.procedure.use(enforceAuth);
+export const ownerProcedure = t.procedure.use(enforceAuth).use(enforceOwner);
+export const managerProcedure = t.procedure.use(enforceAuth).use(enforceManager);
 export const adminProcedure = t.procedure.use(enforceAdmin);

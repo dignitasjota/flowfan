@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { eq, and } from "drizzle-orm";
-import { createTRPCRouter, protectedProcedure } from "../trpc";
+import { createTRPCRouter, protectedProcedure, ownerProcedure } from "../trpc";
 import { aiConfigs, aiModelAssignments } from "@/server/db/schema";
 import { PROVIDER_MODELS } from "@/server/services/ai";
 import { checkFeatureAccess } from "@/server/services/usage-limits";
@@ -22,7 +22,7 @@ export const aiConfigRouter = createTRPCRouter({
     };
   }),
 
-  upsert: protectedProcedure
+  upsert: ownerProcedure
     .input(
       z.object({
         provider: z.enum(["anthropic", "openai", "google", "minimax", "kimi"]),
@@ -72,7 +72,7 @@ export const aiConfigRouter = createTRPCRouter({
     return PROVIDER_MODELS;
   }),
 
-  testConnection: protectedProcedure
+  testConnection: ownerProcedure
     .input(
       z.object({
         provider: z.enum(["anthropic", "openai", "google", "minimax", "kimi"]),
@@ -124,7 +124,7 @@ export const aiConfigRouter = createTRPCRouter({
     });
   }),
 
-  upsertAssignment: protectedProcedure
+  upsertAssignment: ownerProcedure
     .input(
       z.object({
         taskType: z.enum(["suggestion", "analysis", "summary", "report", "price_advice"]),
@@ -178,7 +178,7 @@ export const aiConfigRouter = createTRPCRouter({
       return created;
     }),
 
-  deleteAssignment: protectedProcedure
+  deleteAssignment: ownerProcedure
     .input(z.object({
       taskType: z.enum(["suggestion", "analysis", "summary", "report", "price_advice"]),
     }))

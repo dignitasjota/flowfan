@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
-import { createTRPCRouter, protectedProcedure } from "../trpc";
+import { createTRPCRouter, protectedProcedure, ownerProcedure } from "../trpc";
 import { creators } from "@/server/db/schema";
 import { getStripe, PLAN_PRICE_IDS } from "@/lib/stripe";
 import { PLAN_LIMITS, getUsageSummary } from "@/server/services/usage-limits";
@@ -39,7 +39,7 @@ export const billingRouter = createTRPCRouter({
     return getUsageSummary(ctx.db, ctx.creatorId);
   }),
 
-  createCheckoutSession: protectedProcedure
+  createCheckoutSession: ownerProcedure
     .input(z.object({ plan: z.enum(["starter", "pro"]) }))
     .mutation(async ({ ctx, input }) => {
       const creator = await ctx.db.query.creators.findFirst({
@@ -84,7 +84,7 @@ export const billingRouter = createTRPCRouter({
       return { url: session.url };
     }),
 
-  createPortalSession: protectedProcedure.mutation(async ({ ctx }) => {
+  createPortalSession: ownerProcedure.mutation(async ({ ctx }) => {
     const creator = await ctx.db.query.creators.findFirst({
       where: eq(creators.id, ctx.creatorId),
       columns: { stripeCustomerId: true },

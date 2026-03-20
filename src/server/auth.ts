@@ -13,6 +13,8 @@ declare module "next-auth" {
       email: string;
       name: string;
       role: "creator" | "admin";
+      activeCreatorId: string;
+      teamRole: "owner" | "manager" | "chatter" | null;
     };
   }
 }
@@ -22,6 +24,8 @@ declare module "next-auth/jwt" {
     id: string;
     role: "creator" | "admin";
     onboardingCompleted: boolean;
+    activeCreatorId: string;
+    teamRole: "owner" | "manager" | "chatter" | null;
   }
 }
 
@@ -70,20 +74,47 @@ export const authOptions: NextAuthOptions = {
     }),
   ],
   callbacks: {
-    jwt({ token, user, trigger, session }) {
+    async jwt({ token, user, trigger, session }) {
       if (user) {
         token.id = user.id;
         token.role = (user as any).role ?? "creator";
         token.onboardingCompleted = (user as any).onboardingCompleted ?? false;
+        token.activeCreatorId = user.id; // default: act as self
+        token.teamRole = null;
       }
-      if (trigger === "update" && (session as any)?.onboardingCompleted !== undefined) {
-        token.onboardingCompleted = (session as any).onboardingCompleted;
+      if (trigger === "update") {
+        const s = session as any;
+        if (s?.onboardingCompleted !== undefined) {
+          token.onboardingCompleted = s.onboardingCompleted;
+        }
+        // Team switch: validate membership before updating
+        if (s?.activeCreatorId && s.activeCreatorId !== token.id) {
+          const { teamMembers } = await import("./db/schema");
+          const { and, eq: eqOp } = await import("drizzle-orm");
+          const membership = await db.query.teamMembers.findFirst({
+            where: and(
+              eqOp(teamMembers.creatorId, s.activeCreatorId),
+              eqOp(teamMembers.userId, token.id),
+              eqOp(teamMembers.isActive, true)
+            ),
+          });
+          if (membership) {
+            token.activeCreatorId = s.activeCreatorId;
+            token.teamRole = membership.role as "owner" | "manager" | "chatter";
+          }
+        } else if (s?.activeCreatorId === token.id) {
+          // Switch back to own account
+          token.activeCreatorId = token.id;
+          token.teamRole = null;
+        }
       }
       return token;
     },
     session({ session, token }) {
       session.user.id = token.id;
       session.user.role = token.role ?? "creator";
+      session.user.activeCreatorId = token.activeCreatorId ?? token.id;
+      session.user.teamRole = token.teamRole ?? null;
       return session;
     },
   },

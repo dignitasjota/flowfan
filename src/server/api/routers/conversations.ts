@@ -1,8 +1,8 @@
 import { z } from "zod";
-import { eq, and, desc, ilike, or } from "drizzle-orm";
+import { eq, and, desc, ilike, or, inArray, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { createTRPCRouter, protectedProcedure } from "../trpc";
-import { conversations, contacts } from "@/server/db/schema";
+import { conversations, contacts, conversationAssignments } from "@/server/db/schema";
 import { platformTypeSchema } from "@/lib/constants";
 
 export const conversationsRouter = createTRPCRouter({
@@ -22,6 +22,16 @@ export const conversationsRouter = createTRPCRouter({
       }
       if (input?.status) {
         conditions.push(eq(conversations.status, input.status));
+      }
+
+      // Chatters only see their assigned conversations
+      if (ctx.teamRole === "chatter") {
+        conditions.push(
+          inArray(
+            conversations.id,
+            sql`(SELECT ${conversationAssignments.conversationId} FROM ${conversationAssignments} WHERE ${conversationAssignments.assignedToUserId} = ${ctx.actingUserId})`
+          )
+        );
       }
 
       const results = await ctx.db.query.conversations.findMany({

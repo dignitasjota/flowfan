@@ -262,6 +262,7 @@ export const messages = pgTable(
     sentiment: jsonb("sentiment"),
     externalMessageId: varchar("external_message_id", { length: 255 }),
     source: varchar("source", { length: 20 }).default("manual"),
+    sentById: uuid("sent_by_id").references(() => creators.id),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
   (table) => [
@@ -778,6 +779,76 @@ export const broadcastRecipients = pgTable(
 );
 
 // ============================================================
+// TEAM MANAGEMENT
+// ============================================================
+
+export const teamRoleEnum = pgEnum("team_role", ["owner", "manager", "chatter"]);
+
+export const teamMembers = pgTable(
+  "team_members",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    creatorId: uuid("creator_id")
+      .notNull()
+      .references(() => creators.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => creators.id, { onDelete: "cascade" }),
+    role: teamRoleEnum("role").default("chatter").notNull(),
+    isActive: boolean("is_active").default(true).notNull(),
+    joinedAt: timestamp("joined_at").defaultNow().notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("team_members_unique_idx").on(table.creatorId, table.userId),
+    index("team_members_user_idx").on(table.userId),
+  ]
+);
+
+export const teamInvites = pgTable(
+  "team_invites",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    creatorId: uuid("creator_id")
+      .notNull()
+      .references(() => creators.id, { onDelete: "cascade" }),
+    email: varchar("email", { length: 255 }).notNull(),
+    role: teamRoleEnum("role").default("chatter").notNull(),
+    token: varchar("token", { length: 255 }).notNull().unique(),
+    expiresAt: timestamp("expires_at").notNull(),
+    acceptedAt: timestamp("accepted_at"),
+    acceptedByUserId: uuid("accepted_by_user_id").references(() => creators.id),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("team_invites_token_idx").on(table.token),
+    index("team_invites_creator_idx").on(table.creatorId),
+  ]
+);
+
+export const conversationAssignments = pgTable(
+  "conversation_assignments",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    assignedToUserId: uuid("assigned_to_user_id")
+      .notNull()
+      .references(() => creators.id, { onDelete: "cascade" }),
+    assignedByUserId: uuid("assigned_by_user_id")
+      .notNull()
+      .references(() => creators.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("conv_assignments_unique_idx").on(table.conversationId, table.assignedToUserId),
+    index("conv_assignments_user_idx").on(table.assignedToUserId),
+  ]
+);
+
+// ============================================================
 // RELATIONS
 // ============================================================
 
@@ -800,6 +871,8 @@ export const creatorsRelations = relations(creators, ({ one, many }) => ({
   segments: many(segments),
   telegramBotConfig: one(telegramBotConfigs),
   broadcasts: many(broadcasts),
+  teamMembers: many(teamMembers),
+  teamInvites: many(teamInvites),
 }));
 
 export const platformsRelations = relations(platforms, ({ one }) => ({
@@ -849,6 +922,10 @@ export const messagesRelations = relations(messages, ({ one }) => ({
   conversation: one(conversations, {
     fields: [messages.conversationId],
     references: [conversations.id],
+  }),
+  sentBy: one(creators, {
+    fields: [messages.sentById],
+    references: [creators.id],
   }),
 }));
 
@@ -1035,5 +1112,42 @@ export const broadcastRecipientsRelations = relations(broadcastRecipients, ({ on
   contact: one(contacts, {
     fields: [broadcastRecipients.contactId],
     references: [contacts.id],
+  }),
+}));
+
+export const teamMembersRelations = relations(teamMembers, ({ one }) => ({
+  creator: one(creators, {
+    fields: [teamMembers.creatorId],
+    references: [creators.id],
+    relationName: "teamOwner",
+  }),
+  user: one(creators, {
+    fields: [teamMembers.userId],
+    references: [creators.id],
+    relationName: "teamUser",
+  }),
+}));
+
+export const teamInvitesRelations = relations(teamInvites, ({ one }) => ({
+  creator: one(creators, {
+    fields: [teamInvites.creatorId],
+    references: [creators.id],
+  }),
+}));
+
+export const conversationAssignmentsRelations = relations(conversationAssignments, ({ one }) => ({
+  conversation: one(conversations, {
+    fields: [conversationAssignments.conversationId],
+    references: [conversations.id],
+  }),
+  assignedTo: one(creators, {
+    fields: [conversationAssignments.assignedToUserId],
+    references: [creators.id],
+    relationName: "assignedTo",
+  }),
+  assignedBy: one(creators, {
+    fields: [conversationAssignments.assignedByUserId],
+    references: [creators.id],
+    relationName: "assignedBy",
   }),
 }));

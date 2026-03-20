@@ -136,6 +136,7 @@ export const messagesRouter = createTRPCRouter({
           content: input.content,
           aiSuggestion: input.aiSuggestion,
           aiSuggestionUsed: input.aiSuggestionUsed,
+          sentById: ctx.actingUserId,
         })
         .returning();
 

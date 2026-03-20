@@ -11,6 +11,7 @@ import {
   workflows,
   segments,
   broadcasts,
+  teamMembers,
 } from "@/server/db/schema";
 
 type Db = typeof DbType;
@@ -35,6 +36,8 @@ type PlanLimits = {
   broadcastsPerMonth: number;
   broadcastMaxRecipients: number;
   broadcastScheduling: boolean;
+  teamMembersLimit: number;
+  assignments: boolean;
 };
 
 export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
@@ -56,6 +59,8 @@ export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
     broadcastsPerMonth: 0,
     broadcastMaxRecipients: 0,
     broadcastScheduling: false,
+    teamMembersLimit: 0,
+    assignments: false,
   },
   starter: {
     contacts: 50,
@@ -75,6 +80,8 @@ export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
     broadcastsPerMonth: 2,
     broadcastMaxRecipients: 25,
     broadcastScheduling: false,
+    teamMembersLimit: 0,
+    assignments: false,
   },
   pro: {
     contacts: -1,
@@ -94,6 +101,8 @@ export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
     broadcastsPerMonth: 10,
     broadcastMaxRecipients: 500,
     broadcastScheduling: false,
+    teamMembersLimit: 3,
+    assignments: true,
   },
   business: {
     contacts: -1,
@@ -113,6 +122,8 @@ export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
     broadcastsPerMonth: -1,
     broadcastMaxRecipients: -1,
     broadcastScheduling: true,
+    teamMembersLimit: 10,
+    assignments: true,
   },
 };
 
@@ -421,6 +432,44 @@ export async function checkBroadcastSchedulingAccess(db: Db, creatorId: string) 
     throw new TRPCError({
       code: "FORBIDDEN",
       message: `La programación de broadcasts no está disponible en el plan ${plan}. Actualiza a Business para acceder.`,
+    });
+  }
+}
+
+export async function checkTeamMemberLimit(db: Db, creatorId: string) {
+  const plan = await getCreatorPlan(db, creatorId);
+  const limits = PLAN_LIMITS[plan];
+
+  if (limits.teamMembersLimit === 0) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: `La gestión de equipo no está disponible en el plan ${plan}. Actualiza a Pro o superior para acceder.`,
+    });
+  }
+
+  if (limits.teamMembersLimit === -1) return;
+
+  const [result] = await db
+    .select({ count: count() })
+    .from(teamMembers)
+    .where(and(eq(teamMembers.creatorId, creatorId), eq(teamMembers.isActive, true)));
+
+  if ((result?.count ?? 0) >= limits.teamMembersLimit) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: `Has alcanzado el límite de ${limits.teamMembersLimit} miembros de equipo en el plan ${plan}. Actualiza tu plan para más.`,
+    });
+  }
+}
+
+export async function checkAssignmentAccess(db: Db, creatorId: string) {
+  const plan = await getCreatorPlan(db, creatorId);
+  const limits = PLAN_LIMITS[plan];
+
+  if (!limits.assignments) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: `Las asignaciones de conversación no están disponibles en el plan ${plan}. Actualiza a Pro o superior.`,
     });
   }
 }

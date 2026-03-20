@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { eq, and, desc, ilike, or, sql, count } from "drizzle-orm";
-import { createTRPCRouter, protectedProcedure } from "../trpc";
+import { createTRPCRouter, protectedProcedure, managerProcedure } from "../trpc";
 import { contacts, contactProfiles } from "@/server/db/schema";
 import { checkContactLimit } from "@/server/services/usage-limits";
 import { workflowQueue } from "@/server/queues";
@@ -77,7 +77,7 @@ export const contactsRouter = createTRPCRouter({
       });
     }),
 
-  create: protectedProcedure
+  create: managerProcedure
     .input(
       z.object({
         username: z.string().min(1).max(255),
@@ -118,7 +118,7 @@ export const contactsRouter = createTRPCRouter({
       return contact;
     }),
 
-  update: protectedProcedure
+  update: managerProcedure
     .input(
       z.object({
         id: z.string().uuid(),
