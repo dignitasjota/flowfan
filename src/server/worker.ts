@@ -12,6 +12,7 @@ import type {
   TelegramAutoReplyJobData,
   BroadcastProcessingJobData,
   BroadcastSendJobData,
+  ScheduledMessageJobData,
 } from "./queues";
 import { createChildLogger } from "@/lib/logger";
 
@@ -354,7 +355,141 @@ broadcastSendWorker.on("ready", () => {
   log.info("Broadcast send worker ready");
 });
 
+// --- Scheduled message send worker ---
+
+const scheduledMessageWorker = new Worker<ScheduledMessageJobData>(
+  "scheduled-message-send",
+  async (job) => {
+    const { scheduledMessageId, creatorId } = job.data;
+    log.info({ jobId: job.id, scheduledMessageId }, "Processing scheduled message");
+
+    const { eq } = await import("drizzle-orm");
+    const {
+      scheduledMessages,
+      messages: messagesTable,
+      conversations,
+      contacts,
+    } = await import("@/server/db/schema");
+
+    const scheduled = await db.query.scheduledMessages.findFirst({
+      where: eq(scheduledMessages.id, scheduledMessageId),
+    });
+
+    if (!scheduled || scheduled.status !== "pending") {
+      log.warn({ scheduledMessageId }, "Scheduled message not found or not pending, skipping");
+      return;
+    }
+
+    try {
+      // Insert as a real message
+      const [message] = await db
+        .insert(messagesTable)
+        .values({
+          conversationId: scheduled.conversationId,
+          role: "creator",
+          content: scheduled.content,
+          aiSuggestion: scheduled.aiSuggestion,
+          aiSuggestionUsed: scheduled.aiSuggestionUsed,
+          sentById: scheduled.sentById,
+        })
+        .returning();
+
+      // Update conversation lastMessageAt
+      await db
+        .update(conversations)
+        .set({ lastMessageAt: new Date() })
+        .where(eq(conversations.id, scheduled.conversationId));
+
+      // Mark scheduled message as sent
+      await db
+        .update(scheduledMessages)
+        .set({
+          status: "sent",
+          sentMessageId: message?.id,
+          updatedAt: new Date(),
+        })
+        .where(eq(scheduledMessages.id, scheduledMessageId));
+
+      // If conversation is on Telegram, enqueue outgoing message
+      const conversation = await db.query.conversations.findFirst({
+        where: eq(conversations.id, scheduled.conversationId),
+        columns: { platformType: true, contactId: true },
+      });
+
+      if (conversation?.platformType === "telegram" && message) {
+        const contact = await db.query.contacts.findFirst({
+          where: eq(contacts.id, conversation.contactId),
+          columns: { platformUserId: true },
+        });
+
+        if (contact?.platformUserId) {
+          const { telegramOutgoingQueue } = await import("@/server/queues");
+          await telegramOutgoingQueue.add("send", {
+            creatorId,
+            chatId: contact.platformUserId,
+            text: scheduled.content,
+            conversationId: scheduled.conversationId,
+            messageId: message.id,
+          });
+        }
+      }
+
+      log.info({ jobId: job.id, scheduledMessageId }, "Scheduled message sent");
+    } catch (err) {
+      await db
+        .update(scheduledMessages)
+        .set({
+          status: "failed",
+          errorMessage: err instanceof Error ? err.message : "Unknown error",
+          updatedAt: new Date(),
+        })
+        .where(eq(scheduledMessages.id, scheduledMessageId));
+      throw err;
+    }
+  },
+  {
+    connection: {
+      host: redisUrl.hostname,
+      port: Number(redisUrl.port) || 6379,
+    },
+    concurrency: 5,
+  }
+);
+
+scheduledMessageWorker.on("failed", (job, err) => {
+  log.error({ jobId: job?.id, err }, "Scheduled message job failed");
+});
+
+scheduledMessageWorker.on("ready", () => {
+  log.info("Scheduled message worker ready");
+});
+
 // --- Periodic no_response_timeout checker (every 5 minutes) ---
+
+async function checkScheduledMessagesToSend() {
+  const { eq, and, lte } = await import("drizzle-orm");
+  const { scheduledMessages } = await import("@/server/db/schema");
+  const { scheduledMessageQueue } = await import("@/server/queues");
+
+  const now = new Date();
+  const pendingMessages = await db
+    .select({ id: scheduledMessages.id, creatorId: scheduledMessages.creatorId })
+    .from(scheduledMessages)
+    .where(
+      and(
+        eq(scheduledMessages.status, "pending"),
+        lte(scheduledMessages.scheduledAt, now)
+      )
+    );
+
+  for (const msg of pendingMessages) {
+    await scheduledMessageQueue.add("send", {
+      scheduledMessageId: msg.id,
+      creatorId: msg.creatorId,
+    });
+    log.info({ scheduledMessageId: msg.id }, "Scheduled message enqueued for sending");
+  }
+}
 
 async function checkScheduledBroadcasts() {
   const { eq, and, lte } = await import("drizzle-orm");
@@ -410,6 +545,13 @@ async function startScheduler() {
     } catch (err) {
       log.error({ err }, "Error checking scheduled broadcasts");
     }
+
+    // Check for scheduled messages ready to send
+    try {
+      await checkScheduledMessagesToSend();
+    } catch (err) {
+      log.error({ err }, "Error checking scheduled messages");
+    }
   }, 5 * 60 * 1000);
 }
 
@@ -419,13 +561,13 @@ startScheduler();
 process.on("SIGTERM", async () => {
   log.info("SIGTERM received, closing workers...");
   if (schedulerInterval) clearInterval(schedulerInterval);
-  await Promise.all([worker.close(), workflowWorker.close(), telegramOutgoingWorker.close(), telegramAutoReplyWorker.close(), broadcastProcessingWorker.close(), broadcastSendWorker.close()]);
+  await Promise.all([worker.close(), workflowWorker.close(), telegramOutgoingWorker.close(), telegramAutoReplyWorker.close(), broadcastProcessingWorker.close(), broadcastSendWorker.close(), scheduledMessageWorker.close()]);
   process.exit(0);
 });
 
 process.on("SIGINT", async () => {
   log.info("SIGINT received, closing workers...");
   if (schedulerInterval) clearInterval(schedulerInterval);
-  await Promise.all([worker.close(), workflowWorker.close(), telegramOutgoingWorker.close(), telegramAutoReplyWorker.close(), broadcastProcessingWorker.close(), broadcastSendWorker.close()]);
+  await Promise.all([worker.close(), workflowWorker.close(), telegramOutgoingWorker.close(), telegramAutoReplyWorker.close(), broadcastProcessingWorker.close(), broadcastSendWorker.close(), scheduledMessageWorker.close()]);
   process.exit(0);
 });

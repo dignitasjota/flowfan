@@ -127,3 +127,23 @@ export type BroadcastSendJobData = {
   broadcastId: string;
   creatorId: string;
 };
+
+// --- Scheduled messages queue ---
+
+export const scheduledMessageQueue = new Queue("scheduled-message-send", {
+  connection: {
+    host: new URL(process.env.REDIS_URL ?? "redis://localhost:6379").hostname,
+    port: Number(new URL(process.env.REDIS_URL ?? "redis://localhost:6379").port) || 6379,
+  },
+  defaultJobOptions: {
+    attempts: 3,
+    backoff: { type: "exponential", delay: 2000 },
+    removeOnComplete: { count: 2000 },
+    removeOnFail: { count: 5000 },
+  },
+});
+
+export type ScheduledMessageJobData = {
+  scheduledMessageId: string;
+  creatorId: string;
+};

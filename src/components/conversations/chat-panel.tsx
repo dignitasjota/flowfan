@@ -50,6 +50,10 @@ export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact
   const [manualMode, setManualMode] = useState(false);
   const [isSendingManual, setIsSendingManual] = useState(false);
   const [showMediaPicker, setShowMediaPicker] = useState(false);
+  const [showScheduleFor, setShowScheduleFor] = useState<number | null>(null);
+  const [scheduleDate, setScheduleDate] = useState("");
+  const [showScheduleManual, setShowScheduleManual] = useState(false);
+  const [scheduleManualDate, setScheduleManualDate] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const utils = trpc.useUtils();
@@ -73,6 +77,19 @@ export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact
       utils.conversations.getById.invalidate({ id: conversation.id });
     },
   });
+  const scheduleMutation = trpc.scheduledMessages.create.useMutation({
+    onSuccess: () => {
+      toastSuccess("Mensaje programado correctamente");
+      setShowScheduleFor(null);
+      setScheduleDate("");
+      setShowScheduleManual(false);
+      setScheduleManualDate("");
+    },
+  });
+  const optimalTimeQuery = trpc.scheduledMessages.suggestOptimalTime.useQuery(
+    { contactId: conversation.contactId },
+    { enabled: false }
+  );
   const usageQuery = trpc.billing.getUsage.useQuery(undefined, {
     refetchInterval: 60000,
   });
@@ -347,34 +364,75 @@ export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact
                     >
                       {variant.label}
                     </span>
-                    <button
-                      onClick={() => handleUseSuggestion(variant.content, i)}
-                      disabled={addCreatorMessage.isPending}
-                      className="flex flex-shrink-0 items-center gap-1.5 rounded bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
-                    >
-                      {copiedIndex === i ? (
-                        "Copiado!"
-                      ) : (
-                        <>
-                          <svg
-                            className="h-3 w-3"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke="currentColor"
-                            strokeWidth={2}
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"
-                            />
-                          </svg>
-                          Usar
-                        </>
-                      )}
-                    </button>
+                    <div className="flex gap-1.5">
+                      <button
+                        onClick={() => handleUseSuggestion(variant.content, i)}
+                        disabled={addCreatorMessage.isPending}
+                        className="flex flex-shrink-0 items-center gap-1.5 rounded bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+                      >
+                        {copiedIndex === i ? (
+                          "Copiado!"
+                        ) : (
+                          <>
+                            <svg
+                              className="h-3 w-3"
+                              fill="none"
+                              viewBox="0 0 24 24"
+                              stroke="currentColor"
+                              strokeWidth={2}
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"
+                              />
+                            </svg>
+                            Usar
+                          </>
+                        )}
+                      </button>
+                      <button
+                        onClick={() => {
+                          setShowScheduleFor(showScheduleFor === i ? null : i);
+                          setScheduleDate("");
+                        }}
+                        className="flex flex-shrink-0 items-center gap-1 rounded border border-gray-600 px-2 py-1.5 text-xs text-gray-400 hover:bg-gray-700 hover:text-white"
+                        title="Programar envio"
+                      >
+                        <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                        </svg>
+                      </button>
+                    </div>
                   </div>
                   <p className="text-sm text-gray-200">{variant.content}</p>
+                  {showScheduleFor === i && (
+                    <div className="mt-2 flex items-center gap-2 rounded-lg border border-gray-600 bg-gray-900 p-2">
+                      <input
+                        type="datetime-local"
+                        value={scheduleDate}
+                        onChange={(e) => setScheduleDate(e.target.value)}
+                        min={new Date().toISOString().slice(0, 16)}
+                        className="flex-1 rounded border border-gray-700 bg-gray-800 px-2 py-1 text-xs text-white focus:border-indigo-500 focus:outline-none"
+                      />
+                      <button
+                        onClick={() => {
+                          if (!scheduleDate) return;
+                          scheduleMutation.mutate({
+                            conversationId: conversation.id,
+                            content: variant.content,
+                            scheduledAt: new Date(scheduleDate).toISOString(),
+                            aiSuggestion: variant.content,
+                            aiSuggestionUsed: true,
+                          });
+                        }}
+                        disabled={!scheduleDate || scheduleMutation.isPending}
+                        className="rounded bg-blue-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                      >
+                        {scheduleMutation.isPending ? "..." : "Programar"}
+                      </button>
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -434,7 +492,46 @@ export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact
               >
                 {isSendingManual ? "Guardando..." : "Guardar mensajes"}
               </button>
+              <button
+                onClick={() => setShowScheduleManual(!showScheduleManual)}
+                disabled={!creatorMessage.trim()}
+                className="flex-shrink-0 rounded-lg border border-gray-700 p-2.5 text-gray-400 hover:border-blue-500 hover:text-blue-400 transition-colors disabled:opacity-50"
+                title="Programar envio"
+              >
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                </svg>
+              </button>
             </div>
+            {showScheduleManual && creatorMessage.trim() && (
+              <div className="mt-2 flex items-center gap-2 rounded-lg border border-blue-500/30 bg-blue-500/5 p-2.5">
+                <svg className="h-4 w-4 flex-shrink-0 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                </svg>
+                <input
+                  type="datetime-local"
+                  value={scheduleManualDate}
+                  onChange={(e) => setScheduleManualDate(e.target.value)}
+                  min={new Date().toISOString().slice(0, 16)}
+                  className="flex-1 rounded border border-gray-700 bg-gray-800 px-2 py-1 text-xs text-white focus:border-indigo-500 focus:outline-none"
+                />
+                <button
+                  onClick={() => {
+                    if (!scheduleManualDate || !creatorMessage.trim()) return;
+                    scheduleMutation.mutate({
+                      conversationId: conversation.id,
+                      content: creatorMessage.trim(),
+                      scheduledAt: new Date(scheduleManualDate).toISOString(),
+                    });
+                    setCreatorMessage("");
+                  }}
+                  disabled={!scheduleManualDate || scheduleMutation.isPending}
+                  className="rounded bg-blue-600 px-3 py-1 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {scheduleMutation.isPending ? "..." : "Programar"}
+                </button>
+              </div>
+            )}
           </div>
         ) : (
           /* AI mode: single input */

@@ -12,6 +12,7 @@ import {
   segments,
   broadcasts,
   teamMembers,
+  scheduledMessages,
 } from "@/server/db/schema";
 
 type Db = typeof DbType;
@@ -38,6 +39,8 @@ type PlanLimits = {
   broadcastScheduling: boolean;
   teamMembersLimit: number;
   assignments: boolean;
+  scheduledMessagesPerMonth: number;
+  optimalTimeSuggestion: boolean;
 };
 
 export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
@@ -61,6 +64,8 @@ export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
     broadcastScheduling: false,
     teamMembersLimit: 0,
     assignments: false,
+    scheduledMessagesPerMonth: 0,
+    optimalTimeSuggestion: false,
   },
   starter: {
     contacts: 50,
@@ -82,6 +87,8 @@ export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
     broadcastScheduling: false,
     teamMembersLimit: 0,
     assignments: false,
+    scheduledMessagesPerMonth: 5,
+    optimalTimeSuggestion: false,
   },
   pro: {
     contacts: -1,
@@ -103,6 +110,8 @@ export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
     broadcastScheduling: false,
     teamMembersLimit: 3,
     assignments: true,
+    scheduledMessagesPerMonth: 50,
+    optimalTimeSuggestion: true,
   },
   business: {
     contacts: -1,
@@ -124,6 +133,8 @@ export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
     broadcastScheduling: true,
     teamMembersLimit: 10,
     assignments: true,
+    scheduledMessagesPerMonth: -1,
+    optimalTimeSuggestion: true,
   },
 };
 
@@ -470,6 +481,50 @@ export async function checkAssignmentAccess(db: Db, creatorId: string) {
     throw new TRPCError({
       code: "FORBIDDEN",
       message: `Las asignaciones de conversación no están disponibles en el plan ${plan}. Actualiza a Pro o superior.`,
+    });
+  }
+}
+
+export async function checkScheduledMessageLimit(db: Db, creatorId: string) {
+  const plan = await getCreatorPlan(db, creatorId);
+  const limits = PLAN_LIMITS[plan];
+  if (limits.scheduledMessagesPerMonth === -1) return;
+
+  if (limits.scheduledMessagesPerMonth === 0) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: `Los mensajes programados no están disponibles en el plan ${plan}. Actualiza tu plan para acceder.`,
+    });
+  }
+
+  const monthStart = startOfMonth();
+  const [result] = await db
+    .select({ count: count() })
+    .from(scheduledMessages)
+    .where(
+      and(
+        eq(scheduledMessages.creatorId, creatorId),
+        gte(scheduledMessages.createdAt, monthStart),
+        ne(scheduledMessages.status, "cancelled")
+      )
+    );
+
+  if ((result?.count ?? 0) >= limits.scheduledMessagesPerMonth) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: `Has alcanzado el límite de ${limits.scheduledMessagesPerMonth} mensajes programados/mes en el plan ${plan}. Actualiza tu plan para más.`,
+    });
+  }
+}
+
+export async function checkOptimalTimeSuggestion(db: Db, creatorId: string) {
+  const plan = await getCreatorPlan(db, creatorId);
+  const limits = PLAN_LIMITS[plan];
+
+  if (!limits.optimalTimeSuggestion) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: `La sugerencia de horario óptimo no está disponible en el plan ${plan}. Actualiza a Pro o superior para acceder.`,
     });
   }
 }

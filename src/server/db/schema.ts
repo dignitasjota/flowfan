@@ -779,6 +779,48 @@ export const broadcastRecipients = pgTable(
 );
 
 // ============================================================
+// SCHEDULED MESSAGES
+// ============================================================
+
+export const scheduledMessageStatusEnum = pgEnum("scheduled_message_status", [
+  "pending",
+  "sent",
+  "cancelled",
+  "failed",
+]);
+
+export const scheduledMessages = pgTable(
+  "scheduled_messages",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    creatorId: uuid("creator_id")
+      .notNull()
+      .references(() => creators.id, { onDelete: "cascade" }),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    contactId: uuid("contact_id")
+      .notNull()
+      .references(() => contacts.id, { onDelete: "cascade" }),
+    content: text("content").notNull(),
+    scheduledAt: timestamp("scheduled_at").notNull(),
+    status: scheduledMessageStatusEnum("status").default("pending").notNull(),
+    sentMessageId: uuid("sent_message_id").references(() => messages.id),
+    aiSuggestion: text("ai_suggestion"),
+    aiSuggestionUsed: boolean("ai_suggestion_used"),
+    sentById: uuid("sent_by_id").references(() => creators.id),
+    errorMessage: text("error_message"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("scheduled_messages_creator_idx").on(table.creatorId),
+    index("scheduled_messages_status_idx").on(table.status, table.scheduledAt),
+    index("scheduled_messages_conversation_idx").on(table.conversationId),
+  ]
+);
+
+// ============================================================
 // TEAM MANAGEMENT
 // ============================================================
 
@@ -871,6 +913,7 @@ export const creatorsRelations = relations(creators, ({ one, many }) => ({
   segments: many(segments),
   telegramBotConfig: one(telegramBotConfigs),
   broadcasts: many(broadcasts),
+  scheduledMessages: many(scheduledMessages),
   teamMembers: many(teamMembers),
   teamInvites: many(teamInvites),
 }));
@@ -1112,6 +1155,25 @@ export const broadcastRecipientsRelations = relations(broadcastRecipients, ({ on
   contact: one(contacts, {
     fields: [broadcastRecipients.contactId],
     references: [contacts.id],
+  }),
+}));
+
+export const scheduledMessagesRelations = relations(scheduledMessages, ({ one }) => ({
+  creator: one(creators, {
+    fields: [scheduledMessages.creatorId],
+    references: [creators.id],
+  }),
+  conversation: one(conversations, {
+    fields: [scheduledMessages.conversationId],
+    references: [conversations.id],
+  }),
+  contact: one(contacts, {
+    fields: [scheduledMessages.contactId],
+    references: [contacts.id],
+  }),
+  sentMessage: one(messages, {
+    fields: [scheduledMessages.sentMessageId],
+    references: [messages.id],
   }),
 }));
 
