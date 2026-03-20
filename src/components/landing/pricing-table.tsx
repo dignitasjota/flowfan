@@ -241,7 +241,7 @@ export function PricingTable({ currentPlan, onSelectPlan, isLanding }: Props) {
                     </button>
                   ) : plan.name === "Business" ? (
                     <a
-                      href="mailto:hello@flowfan.app"
+                      href="mailto:info@flowfan.app"
                       className="block w-full rounded-lg bg-gray-800 py-2.5 text-center text-sm font-semibold text-white hover:bg-gray-700 transition-colors"
                     >
                       {plan.cta}

@@ -22,7 +22,7 @@ export function Footer() {
             <a href="#faq" className="text-sm text-gray-400 hover:text-white transition-colors">
               FAQ
             </a>
-            <a href="mailto:hello@flowfan.app" className="text-sm text-gray-400 hover:text-white transition-colors">
+            <a href="mailto:info@flowfan.app" className="text-sm text-gray-400 hover:text-white transition-colors">
               Contacto
             </a>
           </div>
