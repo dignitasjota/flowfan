@@ -5,6 +5,7 @@ import { Hero } from "@/components/landing/hero";
 import { Features } from "@/components/landing/features";
 import { PricingTable } from "@/components/landing/pricing-table";
 import { FAQ } from "@/components/landing/faq";
+import { Showcase } from "@/components/landing/showcase";
 import { Footer } from "@/components/landing/footer";
 import Link from "next/link";
 import type { Metadata } from "next";
@@ -113,6 +114,7 @@ export default async function Home() {
 
       <Hero />
       <Features />
+      <Showcase />
       <PricingTable isLanding />
       <FAQ />
       <Footer />

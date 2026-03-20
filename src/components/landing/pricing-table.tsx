@@ -7,7 +7,7 @@ type PricingPlan = {
   price: string;
   priceDetail: string;
   description: string;
-  features: string[];
+  features: { text: string; included: boolean; highlight?: boolean }[];
   cta: string;
   popular?: boolean;
   planId?: "starter" | "pro";
@@ -20,10 +20,21 @@ const plans: PricingPlan[] = [
     priceDetail: "para siempre",
     description: "Para probar FanFlow",
     features: [
-      "5 contactos",
-      "20 mensajes IA/mes",
-      "1 plataforma",
-      "3 templates",
+      { text: "5 contactos", included: true },
+      { text: "20 mensajes IA/mes", included: true },
+      { text: "1 plataforma", included: true },
+      { text: "3 templates", included: true },
+      { text: "Scoring automatico", included: true },
+      { text: "Reportes IA", included: false },
+      { text: "Price Advisor", included: false },
+      { text: "Telegram Bot", included: false },
+      { text: "Broadcasts", included: false },
+      { text: "Mensajes programados", included: false },
+      { text: "Equipo / Chatters", included: false },
+      { text: "Revenue tracking", included: false },
+      { text: "Media Vault", included: false },
+      { text: "Automatizaciones", included: false },
+      { text: "Segmentos", included: false },
     ],
     cta: "Empezar gratis",
   },
@@ -33,12 +44,21 @@ const plans: PricingPlan[] = [
     priceDetail: "/mes",
     description: "Para creadores en crecimiento",
     features: [
-      "50 contactos",
-      "200 mensajes IA/mes",
-      "3 plataformas",
-      "20 templates",
-      "5 reportes IA/mes",
-      "Export CSV",
+      { text: "50 contactos", included: true },
+      { text: "200 mensajes IA/mes", included: true },
+      { text: "3 plataformas", included: true },
+      { text: "20 templates", included: true },
+      { text: "Scoring automatico", included: true },
+      { text: "5 reportes IA/mes", included: true },
+      { text: "Price Advisor", included: false },
+      { text: "Telegram Bot", included: false },
+      { text: "2 broadcasts/mes (25 dest.)", included: true },
+      { text: "5 mensajes programados/mes", included: true },
+      { text: "Equipo / Chatters", included: false },
+      { text: "Revenue basico", included: true },
+      { text: "50 archivos media (100MB)", included: true },
+      { text: "3 automatizaciones", included: true },
+      { text: "5 segmentos", included: true },
     ],
     cta: "Elegir Starter",
     planId: "starter",
@@ -49,14 +69,21 @@ const plans: PricingPlan[] = [
     priceDetail: "/mes",
     description: "Para creadores profesionales",
     features: [
-      "Contactos ilimitados",
-      "2,000 mensajes IA/mes",
-      "Plataformas ilimitadas",
-      "Templates ilimitados",
-      "Reportes ilimitados",
-      "Price Advisor",
-      "Multi-modelo IA",
-      "Export CSV + JSON",
+      { text: "Contactos ilimitados", included: true, highlight: true },
+      { text: "2,000 mensajes IA/mes", included: true },
+      { text: "Plataformas ilimitadas", included: true, highlight: true },
+      { text: "Templates ilimitados", included: true },
+      { text: "Scoring automatico", included: true },
+      { text: "Reportes ilimitados", included: true, highlight: true },
+      { text: "Price Advisor", included: true, highlight: true },
+      { text: "Telegram Bot + auto-reply", included: true, highlight: true },
+      { text: "10 broadcasts/mes (500 dest.)", included: true },
+      { text: "50 mensajes prog. + horario optimo", included: true, highlight: true },
+      { text: "3 miembros de equipo", included: true, highlight: true },
+      { text: "Revenue completo", included: true },
+      { text: "500 archivos media (1GB)", included: true },
+      { text: "15 automatizaciones", included: true },
+      { text: "25 segmentos", included: true },
     ],
     cta: "Elegir Pro",
     popular: true,
@@ -66,13 +93,23 @@ const plans: PricingPlan[] = [
     name: "Business",
     price: "Custom",
     priceDetail: "contactanos",
-    description: "Para agencias y equipos",
+    description: "Para agencias y equipos grandes",
     features: [
-      "Todo en Pro",
-      "Mensajes IA ilimitados",
-      "API access",
-      "Soporte prioritario",
-      "Onboarding dedicado",
+      { text: "Todo en Pro +", included: true, highlight: true },
+      { text: "Mensajes IA ilimitados", included: true, highlight: true },
+      { text: "Plataformas ilimitadas", included: true },
+      { text: "Templates ilimitados", included: true },
+      { text: "Scoring automatico", included: true },
+      { text: "Reportes ilimitados", included: true },
+      { text: "Price Advisor", included: true },
+      { text: "Telegram Bot + auto-reply ilim.", included: true },
+      { text: "Broadcasts ilimitados + programacion", included: true, highlight: true },
+      { text: "Mensajes programados ilimitados", included: true },
+      { text: "10 miembros de equipo", included: true, highlight: true },
+      { text: "Revenue + export completo", included: true },
+      { text: "Media ilimitada", included: true },
+      { text: "Automatizaciones ilimitadas", included: true },
+      { text: "Segmentos ilimitados + API access", included: true, highlight: true },
     ],
     cta: "Contactar",
   },
@@ -94,7 +131,7 @@ export function PricingTable({ currentPlan, onSelectPlan, isLanding }: Props) {
               Planes simples y transparentes
             </h2>
             <p className="mt-4 text-lg text-gray-400">
-              Empieza gratis. Actualiza cuando lo necesites.
+              Empieza gratis. Actualiza cuando lo necesites. Cancela cuando quieras.
             </p>
           </div>
         )}
@@ -108,9 +145,7 @@ export function PricingTable({ currentPlan, onSelectPlan, isLanding }: Props) {
         <div
           className={cn(
             "mt-4 sm:mt-16",
-            // Mobile: horizontal scroll
             "flex gap-4 overflow-x-auto pb-4 snap-x snap-mandatory sm:overflow-visible sm:pb-0",
-            // Desktop: grid
             "sm:grid sm:grid-cols-2 lg:grid-cols-4"
           )}
         >
@@ -120,9 +155,8 @@ export function PricingTable({ currentPlan, onSelectPlan, isLanding }: Props) {
               <div
                 key={plan.name}
                 className={cn(
-                  "relative flex-shrink-0 snap-center rounded-xl border p-5 transition-colors sm:p-6",
-                  // Mobile: fixed width cards
-                  "w-[280px] sm:w-auto",
+                  "relative flex flex-shrink-0 snap-center flex-col rounded-xl border p-5 transition-colors sm:p-6",
+                  "w-[300px] sm:w-auto",
                   plan.popular
                     ? "border-indigo-500 bg-gray-900 shadow-lg shadow-indigo-500/10"
                     : "border-gray-800 bg-gray-900 hover:border-gray-700"
@@ -144,31 +178,46 @@ export function PricingTable({ currentPlan, onSelectPlan, isLanding }: Props) {
                     {plan.price}
                   </span>
                   <span className="text-sm text-gray-400">
-                    {" "}
-                    {plan.priceDetail}
+                    {" "}{plan.priceDetail}
                   </span>
                 </div>
 
-                <ul className="mt-6 space-y-2.5">
+                <ul className="mt-6 flex-1 space-y-2">
                   {plan.features.map((feature) => (
                     <li
-                      key={feature}
-                      className="flex items-start gap-2 text-sm text-gray-300"
+                      key={feature.text}
+                      className={cn(
+                        "flex items-start gap-2 text-[13px]",
+                        feature.included
+                          ? feature.highlight ? "text-white" : "text-gray-300"
+                          : "text-gray-600"
+                      )}
                     >
-                      <svg
-                        className="mt-0.5 h-4 w-4 flex-shrink-0 text-indigo-400"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                        strokeWidth={2}
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          d="M5 13l4 4L19 7"
-                        />
-                      </svg>
-                      {feature}
+                      {feature.included ? (
+                        <svg
+                          className={cn(
+                            "mt-0.5 h-4 w-4 flex-shrink-0",
+                            feature.highlight ? "text-indigo-400" : "text-gray-500"
+                          )}
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                          strokeWidth={2}
+                        >
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                        </svg>
+                      ) : (
+                        <svg
+                          className="mt-0.5 h-4 w-4 flex-shrink-0 text-gray-700"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                          strokeWidth={2}
+                        >
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      )}
+                      {feature.text}
                     </li>
                   ))}
                 </ul>
@@ -215,6 +264,13 @@ export function PricingTable({ currentPlan, onSelectPlan, isLanding }: Props) {
             );
           })}
         </div>
+
+        {/* Comparison note */}
+        {isLanding && (
+          <p className="mt-8 text-center text-xs text-gray-600">
+            Todos los planes incluyen: cifrado AES-256, multi-tenant aislado, acceso web responsive y soporte por email.
+          </p>
+        )}
       </div>
     </section>
   );
