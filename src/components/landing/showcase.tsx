@@ -277,7 +277,7 @@ export function Showcase() {
       <div className="mx-auto max-w-5xl">
         <div className="text-center">
           <h2 className="text-3xl font-bold tracking-tight text-white sm:text-4xl">
-            Mira FanFlow en accion
+            Mira FlowFan en accion
           </h2>
           <p className="mt-4 text-lg text-gray-400">
             Explora las pantallas principales del panel de control.

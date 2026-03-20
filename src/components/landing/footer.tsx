@@ -4,7 +4,7 @@ export function Footer() {
       <div className="mx-auto max-w-5xl">
         <div className="flex flex-col items-center gap-8 sm:flex-row sm:justify-between">
           <div>
-            <span className="text-lg font-bold text-white">FanFlow</span>
+            <span className="text-lg font-bold text-white">FlowFan</span>
             <p className="mt-1 text-xs text-gray-500">
               CRM con IA para creadores de contenido.
             </p>
@@ -22,13 +22,13 @@ export function Footer() {
             <a href="#faq" className="text-sm text-gray-400 hover:text-white transition-colors">
               FAQ
             </a>
-            <a href="mailto:hello@fanflow.app" className="text-sm text-gray-400 hover:text-white transition-colors">
+            <a href="mailto:hello@flowfan.app" className="text-sm text-gray-400 hover:text-white transition-colors">
               Contacto
             </a>
           </div>
         </div>
         <div className="mt-8 border-t border-gray-800 pt-6 text-center text-xs text-gray-600">
-          &copy; {new Date().getFullYear()} FanFlow. Todos los derechos reservados.
+          &copy; {new Date().getFullYear()} FlowFan. Todos los derechos reservados.
         </div>
       </div>
     </footer>

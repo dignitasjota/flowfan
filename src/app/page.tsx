@@ -29,7 +29,7 @@ async function getSeoConfig() {
 export async function generateMetadata(): Promise<Metadata> {
   const seo = await getSeoConfig();
 
-  const title = seo?.siteTitle ?? "FanFlow - CRM con IA para Creadores de Contenido";
+  const title = seo?.siteTitle ?? "FlowFan - CRM con IA para Creadores de Contenido";
   const description = seo?.siteDescription ?? "Gestiona conversaciones con fans usando inteligencia artificial. Scoring automatico, sugerencias de respuesta, analisis de sentimiento y mas. Empieza gratis.";
   const canonical = seo?.canonicalUrl ?? "https://flowfan.app";
 
@@ -42,7 +42,7 @@ export async function generateMetadata(): Promise<Metadata> {
       description: seo?.ogDescription || description,
       type: "website",
       locale: "es_ES",
-      siteName: "FanFlow",
+      siteName: "FlowFan",
       ...(seo?.ogImageUrl ? { images: [{ url: seo.ogImageUrl }] } : {}),
     },
     twitter: {
@@ -74,7 +74,7 @@ export default async function Home() {
   const jsonLd = {
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
-    name: "FanFlow",
+    name: "FlowFan",
     applicationCategory: "BusinessApplication",
     operatingSystem: "Web",
     description: seo?.siteDescription ?? "CRM con inteligencia artificial para creadores de contenido.",
@@ -94,7 +94,7 @@ export default async function Home() {
       {/* Navbar */}
       <nav className="sticky top-0 z-50 border-b border-gray-800/50 bg-gray-950/80 backdrop-blur-lg">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-          <span className="text-xl font-bold text-white">FanFlow</span>
+          <span className="text-xl font-bold text-white">FlowFan</span>
           <div className="flex items-center gap-4">
             <Link
               href="/login"

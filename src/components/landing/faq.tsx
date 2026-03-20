@@ -5,9 +5,9 @@ import { cn } from "@/lib/utils";
 
 const faqs = [
   {
-    question: "¿Que es FanFlow?",
+    question: "¿Que es FlowFan?",
     answer:
-      "FanFlow es un CRM todo-en-uno con inteligencia artificial diseñado para creadores de contenido. Gestiona conversaciones con fans, genera respuestas inteligentes, automatiza envios masivos, administra tu equipo de chatters y trackea revenue — todo desde un solo panel.",
+      "FlowFan es un CRM todo-en-uno con inteligencia artificial diseñado para creadores de contenido. Gestiona conversaciones con fans, genera respuestas inteligentes, automatiza envios masivos, administra tu equipo de chatters y trackea revenue — todo desde un solo panel.",
   },
   {
     question: "¿Como funciona la IA?",
@@ -17,12 +17,12 @@ const faqs = [
   {
     question: "¿Que proveedores de IA soporta?",
     answer:
-      "FanFlow soporta Anthropic (Claude), OpenAI (GPT-4o), Google (Gemini), Minimax y Kimi. Configuras tu propia API key y puedes asignar modelos distintos a cada tarea: un modelo para sugerencias, otro para analisis, otro para reportes.",
+      "FlowFan soporta Anthropic (Claude), OpenAI (GPT-4o), Google (Gemini), Minimax y Kimi. Configuras tu propia API key y puedes asignar modelos distintos a cada tarea: un modelo para sugerencias, otro para analisis, otro para reportes.",
   },
   {
     question: "¿Como funciona la integracion con Telegram?",
     answer:
-      "Conectas tu bot de Telegram desde la configuracion. Los mensajes de tus fans llegan en tiempo real a FanFlow, y puedes responder directamente desde el panel (o activar auto-respuestas con IA). Tambien puedes enviar broadcasts masivos automaticamente via Telegram.",
+      "Conectas tu bot de Telegram desde la configuracion. Los mensajes de tus fans llegan en tiempo real a FlowFan, y puedes responder directamente desde el panel (o activar auto-respuestas con IA). Tambien puedes enviar broadcasts masivos automaticamente via Telegram.",
   },
   {
     question: "¿Puedo tener chatters trabajando conmigo?",
@@ -61,7 +61,7 @@ export function FAQ() {
           Preguntas frecuentes
         </h2>
         <p className="mt-4 text-center text-gray-400">
-          Todo lo que necesitas saber sobre FanFlow.
+          Todo lo que necesitas saber sobre FlowFan.
         </p>
 
         <div className="mt-12 space-y-2">

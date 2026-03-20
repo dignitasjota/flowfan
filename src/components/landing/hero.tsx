@@ -75,7 +75,7 @@ export function Hero() {
           <div className="flex gap-3 sm:gap-4">
             {/* Sidebar mockup */}
             <div className="hidden w-40 flex-shrink-0 space-y-1.5 rounded-lg bg-gray-950 p-3 sm:block">
-              <div className="mb-3 text-sm font-bold text-white">FanFlow</div>
+              <div className="mb-3 text-sm font-bold text-white">FlowFan</div>
               {["Dashboard", "Conversaciones", "Contactos", "Segmentos", "Broadcasts", "Programados"].map((item, i) => (
                 <div
                   key={item}

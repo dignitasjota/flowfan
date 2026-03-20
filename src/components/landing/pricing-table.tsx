@@ -18,7 +18,7 @@ const plans: PricingPlan[] = [
     name: "Free",
     price: "$0",
     priceDetail: "para siempre",
-    description: "Para probar FanFlow",
+    description: "Para probar FlowFan",
     features: [
       { text: "5 contactos", included: true },
       { text: "20 mensajes IA/mes", included: true },
@@ -241,7 +241,7 @@ export function PricingTable({ currentPlan, onSelectPlan, isLanding }: Props) {
                     </button>
                   ) : plan.name === "Business" ? (
                     <a
-                      href="mailto:hello@fanflow.app"
+                      href="mailto:hello@flowfan.app"
                       className="block w-full rounded-lg bg-gray-800 py-2.5 text-center text-sm font-semibold text-white hover:bg-gray-700 transition-colors"
                     >
                       {plan.cta}
