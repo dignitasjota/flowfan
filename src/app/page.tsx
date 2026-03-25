@@ -8,6 +8,7 @@ import { FAQ } from "@/components/landing/faq";
 import { Showcase } from "@/components/landing/showcase";
 import { Footer } from "@/components/landing/footer";
 import Link from "next/link";
+import Image from "next/image";
 import type { Metadata } from "next";
 import { db } from "@/server/db";
 import { seoConfig } from "@/server/db/schema";
@@ -94,7 +95,10 @@ export default async function Home() {
       {/* Navbar */}
       <nav className="sticky top-0 z-50 border-b border-gray-800/50 bg-gray-950/80 backdrop-blur-lg">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-          <span className="text-xl font-bold text-white">FlowFan</span>
+          <div className="flex items-center gap-3">
+            <Image src="/logo.png" alt="FlowFan Logo" width={32} height={32} className="rounded-md" />
+            <span className="text-xl font-bold text-white">FlowFan</span>
+          </div>
           <div className="flex items-center gap-4">
             <Link
               href="/login"

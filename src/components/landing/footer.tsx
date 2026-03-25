@@ -1,10 +1,15 @@
+import Image from "next/image";
+
 export function Footer() {
   return (
     <footer className="border-t border-gray-800 px-6 py-12 lg:px-8">
       <div className="mx-auto max-w-5xl">
         <div className="flex flex-col items-center gap-8 sm:flex-row sm:justify-between">
           <div>
-            <span className="text-lg font-bold text-white">FlowFan</span>
+            <div className="flex items-center gap-3">
+              <Image src="/logo.png" alt="FlowFan Logo" width={32} height={32} className="rounded-md" />
+              <span className="text-lg font-bold text-white">FlowFan</span>
+            </div>
             <p className="mt-1 text-xs text-gray-500">
               CRM con IA para creadores de contenido.
             </p>
