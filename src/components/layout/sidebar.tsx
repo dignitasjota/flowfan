@@ -9,6 +9,7 @@ import { trpc } from "@/lib/trpc";
 import { useTheme } from "@/hooks/useTheme";
 import { useSession } from "next-auth/react";
 import { TeamSwitcher } from "./team-switcher";
+import Image from "next/image";
 
 // access: "all" = any team member, "manager" = owner+manager, "owner" = owner only
 const navigation = [
@@ -76,7 +77,10 @@ export function Sidebar({ user }: SidebarProps) {
     <>
       {/* Logo */}
       <div className="flex h-16 items-center justify-between px-6">
-        <h1 className="text-xl font-bold text-white">FanFlow</h1>
+        <div className="flex items-center gap-3">
+          <Image src="/logo.png" alt="FanFlow Logo" width={32} height={32} className="rounded-md" />
+          <h1 className="text-xl font-bold text-white">FanFlow</h1>
+        </div>
         {/* Close button (mobile only) */}
         <button
           onClick={() => setIsOpen(false)}
