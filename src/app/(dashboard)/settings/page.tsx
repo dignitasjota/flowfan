@@ -30,7 +30,7 @@ export default function SettingsPage() {
       </div>
 
       {/* Tab navigation */}
-      <div className="flex gap-1 overflow-x-auto border-b border-gray-800 px-6">
+      <div className="flex flex-shrink-0 gap-1 overflow-x-auto border-b border-gray-800 px-6">
         {tabs.map((tab) => (
           <button
             key={tab.id}

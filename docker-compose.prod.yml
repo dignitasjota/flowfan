@@ -5,6 +5,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      cache_from: []
       args:
         - NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=${NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY}
     environment:
@@ -45,6 +46,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      cache_from: []
       target: worker
     environment:
       - NODE_ENV=production
