@@ -22,6 +22,35 @@ export const accountRouter = createTRPCRouter({
     return creator;
   }),
 
+  /** Get global instructions */
+  getGlobalInstructions: protectedProcedure.query(async ({ ctx }) => {
+    const creator = await ctx.db.query.creators.findFirst({
+      where: eq(creators.id, ctx.creatorId),
+      columns: { settings: true },
+    });
+    const settings = (creator?.settings ?? {}) as Record<string, unknown>;
+    return { globalInstructions: (settings.globalInstructions as string) ?? "" };
+  }),
+
+  /** Save global instructions */
+  saveGlobalInstructions: protectedProcedure
+    .input(z.object({ globalInstructions: z.string().max(2000) }))
+    .mutation(async ({ ctx, input }) => {
+      const creator = await ctx.db.query.creators.findFirst({
+        where: eq(creators.id, ctx.creatorId),
+        columns: { settings: true },
+      });
+      const currentSettings = (creator?.settings ?? {}) as Record<string, unknown>;
+      await ctx.db
+        .update(creators)
+        .set({
+          settings: { ...currentSettings, globalInstructions: input.globalInstructions },
+          updatedAt: new Date(),
+        })
+        .where(eq(creators.id, ctx.creatorId));
+      return { success: true };
+    }),
+
   /** Delete account and all associated data (cascading deletes handle the rest) */
   deleteAccount: protectedProcedure
     .input(

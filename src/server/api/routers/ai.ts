@@ -14,6 +14,7 @@ import {
   notes,
   aiUsageLog,
   aiConfigs,
+  creators,
 } from "@/server/db/schema";
 import { generateSuggestion } from "@/server/services/ai";
 import { analyzeMessage } from "@/server/services/ai-analysis";
@@ -64,13 +65,22 @@ export const aiRouter = createTRPCRouter({
         throw new TRPCError({ code: "NOT_FOUND", message: "Conversation not found" });
       }
 
-      // Get platform personality
-      const platform = await ctx.db.query.platforms.findFirst({
-        where: and(
-          eq(platforms.creatorId, ctx.creatorId),
-          eq(platforms.platformType, conversation.platformType)
-        ),
-      });
+      // Get platform personality + creator settings in parallel
+      const [platform, creator] = await Promise.all([
+        ctx.db.query.platforms.findFirst({
+          where: and(
+            eq(platforms.creatorId, ctx.creatorId),
+            eq(platforms.platformType, conversation.platformType)
+          ),
+        }),
+        ctx.db.query.creators.findFirst({
+          where: eq(creators.id, ctx.creatorId),
+          columns: { settings: true },
+        }),
+      ]);
+
+      const creatorSettings = (creator?.settings ?? {}) as Record<string, unknown>;
+      const globalInstructions = (creatorSettings.globalInstructions as string) || undefined;
 
       // Get contact notes
       const contactNotes = await ctx.db.query.notes.findMany({
@@ -113,6 +123,7 @@ export const aiRouter = createTRPCRouter({
           platformType: conversation.platformType,
           personality:
             (platform?.personalityConfig as Record<string, unknown>) ?? {},
+          globalInstructions,
           contactProfile: conversation.contact.profile as Parameters<typeof generateSuggestion>[1]["contactProfile"],
           conversationHistory,
           contactNotes: contactNotes.map((n) => n.content),
@@ -210,12 +221,21 @@ export const aiRouter = createTRPCRouter({
         });
       }
 
-      const platform = await ctx.db.query.platforms.findFirst({
-        where: and(
-          eq(platforms.creatorId, ctx.creatorId),
-          eq(platforms.platformType, conversation.platformType)
-        ),
-      });
+      const [platform, creator] = await Promise.all([
+        ctx.db.query.platforms.findFirst({
+          where: and(
+            eq(platforms.creatorId, ctx.creatorId),
+            eq(platforms.platformType, conversation.platformType)
+          ),
+        }),
+        ctx.db.query.creators.findFirst({
+          where: eq(creators.id, ctx.creatorId),
+          columns: { settings: true },
+        }),
+      ]);
+
+      const creatorSettings = (creator?.settings ?? {}) as Record<string, unknown>;
+      const globalInstructions = (creatorSettings.globalInstructions as string) || undefined;
 
       const contactNotes = await ctx.db.query.notes.findMany({
         where: and(
@@ -236,6 +256,7 @@ export const aiRouter = createTRPCRouter({
           platformType: conversation.platformType,
           personality:
             (platform?.personalityConfig as Record<string, unknown>) ?? {},
+          globalInstructions,
           contactProfile: conversation.contact.profile as Parameters<typeof generateSuggestion>[1]["contactProfile"],
           conversationHistory: historyMessages.map((m) => ({
             role: m.role,

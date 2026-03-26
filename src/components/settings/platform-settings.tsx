@@ -7,6 +7,7 @@ import { PLATFORM_OPTIONS, type PlatformType } from "@/lib/constants";
 export function PlatformSettings() {
   const [selectedPlatform, setSelectedPlatform] =
     useState<PlatformType>("instagram");
+  const [role, setRole] = useState("");
   const [tone, setTone] = useState("");
   const [style, setStyle] = useState("");
   const [messageLength, setMessageLength] = useState<
@@ -51,6 +52,7 @@ export function PlatformSettings() {
       unknown
     >;
 
+    setRole((config.role as string) ?? "");
     setTone((config.tone as string) ?? "");
     setStyle((config.style as string) ?? "");
     setMessageLength(
@@ -71,6 +73,7 @@ export function PlatformSettings() {
     upsertPlatform.mutate({
       platformType: selectedPlatform,
       personalityConfig: {
+        role,
         tone,
         style,
         messageLength,
@@ -115,6 +118,19 @@ export function PlatformSettings() {
 
       {/* Config form */}
       <form onSubmit={handleSave} className="max-w-2xl space-y-5">
+        <div>
+          <label className="mb-1 block text-sm text-gray-300">Rol</label>
+          <input
+            value={role}
+            onChange={(e) => setRole(e.target.value)}
+            placeholder="ej: novia virtual, asistente personal, modelo, influencer..."
+            className="w-full rounded-lg border border-gray-700 bg-gray-800 px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:border-indigo-500 focus:outline-none"
+          />
+          <p className="mt-1 text-xs text-gray-500">
+            Define el papel que interpretas en esta plataforma
+          </p>
+        </div>
+
         <div>
           <label className="mb-1 block text-sm text-gray-300">Tono</label>
           <input

@@ -14,6 +14,7 @@ export type AIConfig = {
 };
 
 type PersonalityConfig = {
+  role?: string;
   tone?: string;
   style?: string;
   messageLength?: string;
@@ -38,6 +39,7 @@ type Message = {
 export type SuggestionInput = {
   platformType: string;
   personality: PersonalityConfig;
+  globalInstructions?: string;
   contactProfile: ContactProfile | null;
   conversationHistory: Message[];
   contactNotes: string[];
@@ -162,6 +164,7 @@ REGLAS IMPORTANTES:
 
   if (input.personality) {
     const p = input.personality;
+    if (p.role) parts.push(`ROL EN ESTA PLATAFORMA: ${p.role}`);
     if (p.tone) parts.push(`TONO: ${p.tone}`);
     if (p.style) parts.push(`ESTILO: ${p.style}`);
     if (p.messageLength) parts.push(`LONGITUD DE MENSAJES: ${p.messageLength}`);
@@ -175,6 +178,9 @@ REGLAS IMPORTANTES:
     if (p.customInstructions)
       parts.push(`INSTRUCCIONES ADICIONALES: ${p.customInstructions}`);
   }
+
+  if (input.globalInstructions)
+    parts.push(`\nINSTRUCCIONES GLOBALES DEL CREADOR (aplican siempre, en cualquier plataforma):\n${input.globalInstructions}`);
 
   if (input.contactProfile) {
     const cp = input.contactProfile;

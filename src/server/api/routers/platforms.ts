@@ -6,6 +6,7 @@ import { checkPlatformLimit } from "@/server/services/usage-limits";
 import { platformTypeSchema } from "@/lib/constants";
 
 const personalityConfigSchema = z.object({
+  role: z.string().optional(),
   tone: z.string().optional(),
   style: z.string().optional(),
   messageLength: z.enum(["short", "medium", "long"]).optional(),
