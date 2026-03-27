@@ -159,4 +159,20 @@ export const conversationsRouter = createTRPCRouter({
         .returning();
       return updated;
     }),
+
+  togglePin: protectedProcedure
+    .input(z.object({ id: z.string().uuid(), isPinned: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      const [updated] = await ctx.db
+        .update(conversations)
+        .set({ isPinned: input.isPinned })
+        .where(
+          and(
+            eq(conversations.id, input.id),
+            eq(conversations.creatorId, ctx.creatorId)
+          )
+        )
+        .returning();
+      return updated;
+    }),
 });

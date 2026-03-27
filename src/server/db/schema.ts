@@ -279,6 +279,7 @@ export const conversations = pgTable(
       .references(() => contacts.id, { onDelete: "cascade" }),
     platformType: platformTypeEnum("platform_type").notNull(),
     status: conversationStatusEnum("status").default("active").notNull(),
+    isPinned: boolean("is_pinned").default(false).notNull(),
     summary: text("summary"),
     startedAt: timestamp("started_at").defaultNow().notNull(),
     lastMessageAt: timestamp("last_message_at").defaultNow().notNull(),
