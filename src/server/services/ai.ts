@@ -36,6 +36,12 @@ type Message = {
   content: string;
 };
 
+export type ConversationModeContext = {
+  modeType: string;
+  modeName: string;
+  modeDescription: string | null;
+};
+
 export type SuggestionInput = {
   platformType: string;
   personality: PersonalityConfig;
@@ -44,6 +50,7 @@ export type SuggestionInput = {
   conversationHistory: Message[];
   contactNotes: string[];
   fanMessage: string;
+  conversationMode?: ConversationModeContext;
 };
 
 type SuggestionResult = {
@@ -100,8 +107,85 @@ export type SuggestionVariant = {
   content: string;
 };
 
-function getVariantInstructions(funnelStage: string): string {
-  // Adapt variant types based on funnel stage
+function getVariantInstructions(
+  funnelStage: string,
+  conversationMode?: ConversationModeContext
+): string {
+  // OnlyFans conversation modes have specialized variants
+  if (conversationMode) {
+    const mode = conversationMode.modeType;
+
+    if (mode === "LOW_VALUE") {
+      return `Genera exactamente 3 variantes de respuesta con estos enfoques:
+1. CASUAL: Respuesta minima y cordial
+2. ENGAGEMENT: Intento sutil de reactivar interes
+3. RETENTION: Cortar conversacion educadamente
+
+Formato OBLIGATORIO - cada variante debe empezar con su etiqueta:
+[CASUAL] <mensaje>
+---
+[ENGAGEMENT] <mensaje>
+---
+[RETENTION] <mensaje>`;
+    }
+
+    if (mode === "BASE") {
+      return `Genera exactamente 3 variantes de respuesta con estos enfoques:
+1. CASUAL: Tono misterioso y distante, generar curiosidad
+2. ENGAGEMENT: Observar sin dar demasiado, dejar que pregunte
+3. RETENTION: Mantener interes con misterio, sin presion
+
+Formato OBLIGATORIO - cada variante debe empezar con su etiqueta:
+[CASUAL] <mensaje>
+---
+[ENGAGEMENT] <mensaje>
+---
+[RETENTION] <mensaje>`;
+    }
+
+    if (mode === "POTENCIAL_PREMIUM") {
+      return `Genera exactamente 3 variantes de respuesta con estos enfoques:
+1. CASUAL: Tono selectivo y coqueto, crear vinculo
+2. SALES: Insinuar exclusividad y progresion sin ofrecer directamente
+3. RETENTION: Reforzar que la paciencia tiene recompensa
+
+Formato OBLIGATORIO - cada variante debe empezar con su etiqueta:
+[CASUAL] <mensaje>
+---
+[SALES] <mensaje>
+---
+[RETENTION] <mensaje>`;
+    }
+
+    if (mode === "CONVERSION") {
+      return `Genera exactamente 3 variantes de respuesta con estos enfoques:
+1. CASUAL: Tono seguro y misterioso, hablar de estructura
+2. SALES: Orientar hacia acceso premium con lenguaje de exclusividad (nunca comercial)
+3. RETENTION: Mantener tension y deseo sin cerrar del todo
+
+Formato OBLIGATORIO - cada variante debe empezar con su etiqueta:
+[CASUAL] <mensaje>
+---
+[SALES] <mensaje>
+---
+[RETENTION] <mensaje>`;
+    }
+
+    // VIP
+    return `Genera exactamente 3 variantes de respuesta con estos enfoques:
+1. CASUAL: Tono intimo y cercano, fortalecer relacion
+2. SALES: Orientada a upsell o experiencia premium exclusiva
+3. RETENTION: Hacer sentir unico y especial para fidelizar
+
+Formato OBLIGATORIO - cada variante debe empezar con su etiqueta:
+[CASUAL] <mensaje>
+---
+[SALES] <mensaje>
+---
+[RETENTION] <mensaje>`;
+  }
+
+  // Default behavior for non-OnlyFans platforms
   if (funnelStage === "cold" || funnelStage === "curious") {
     return `Genera exactamente 3 variantes de respuesta con estos enfoques:
 1. CASUAL: Tono relajado y amistoso para generar confianza
@@ -148,7 +232,7 @@ function buildSystemPrompt(input: SuggestionInput): string {
   const parts: string[] = [];
 
   const funnelStage = input.contactProfile?.funnelStage ?? "cold";
-  const variantInstructions = getVariantInstructions(funnelStage);
+  const variantInstructions = getVariantInstructions(funnelStage, input.conversationMode);
 
   parts.push(`Eres un asistente de conversación para un creador de contenido.
 Tu rol es generar sugerencias de respuesta que el creador copiará y enviará manualmente.
@@ -177,6 +261,13 @@ REGLAS IMPORTANTES:
       );
     if (p.customInstructions)
       parts.push(`INSTRUCCIONES ADICIONALES: ${p.customInstructions}`);
+  }
+
+  if (input.conversationMode) {
+    parts.push(`\nMODO DE CONVERSACIÓN ACTIVO: ${input.conversationMode.modeName}`);
+    if (input.conversationMode.modeDescription)
+      parts.push(`DESCRIPCIÓN DEL MODO: ${input.conversationMode.modeDescription}`);
+    parts.push(`TIPO DE MODO: ${input.conversationMode.modeType}`);
   }
 
   if (input.globalInstructions)

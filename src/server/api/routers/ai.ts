@@ -17,6 +17,7 @@ import {
   creators,
 } from "@/server/db/schema";
 import { generateSuggestion } from "@/server/services/ai";
+import type { ConversationModeContext } from "@/server/services/ai";
 import { analyzeMessage } from "@/server/services/ai-analysis";
 import { summarizeConversation } from "@/server/services/conversation-summary";
 import { analysisQueue } from "@/server/queues";
@@ -25,6 +26,13 @@ import { getPriceAdvice } from "@/server/services/price-advisor";
 import { resolveAIConfig } from "@/server/services/ai-config-resolver";
 import type { BehavioralSignals } from "@/server/services/scoring";
 import { checkAIMessageLimit, checkReportLimit, checkFeatureAccess } from "@/server/services/usage-limits";
+import {
+  resolveConversationMode,
+  mergePersonalityWithMode,
+  DEFAULT_CONVERSATION_MODES,
+} from "@/server/services/conversation-mode-resolver";
+import type { ConversationMode } from "@/server/services/conversation-mode-resolver";
+import { conversationModes as conversationModesTable } from "@/server/db/schema";
 
 export const aiRouter = createTRPCRouter({
   suggest: protectedProcedure
@@ -116,18 +124,73 @@ export const aiRouter = createTRPCRouter({
         content: m.content,
       }));
 
+      // Resolve conversation mode for OnlyFans
+      let finalPersonality = (platform?.personalityConfig as Record<string, unknown>) ?? {};
+      let conversationMode: ConversationModeContext | undefined;
+
+      if (conversation.platformType === "onlyfans" && conversation.contact.profile) {
+        const profile = conversation.contact.profile;
+        const signals = (profile.behavioralSignals ?? {}) as BehavioralSignals;
+
+        const dbModes = await ctx.db.query.conversationModes.findMany({
+          where: eq(conversationModesTable.creatorId, ctx.creatorId),
+        });
+
+        const modes: ConversationMode[] = dbModes.length > 0
+          ? dbModes.map((m) => ({
+              modeType: m.modeType as ConversationMode["modeType"],
+              name: m.name,
+              description: m.description,
+              tone: m.tone,
+              style: m.style,
+              messageLength: m.messageLength,
+              objectives: (m.objectives as string[]) ?? [],
+              restrictions: (m.restrictions as string[]) ?? [],
+              additionalInstructions: m.additionalInstructions,
+              activationCriteria: (m.activationCriteria as ConversationMode["activationCriteria"]) ?? {},
+              priority: m.priority,
+              isActive: m.isActive,
+            }))
+          : Object.values(DEFAULT_CONVERSATION_MODES).map((m) => ({ ...m, isActive: true }));
+
+        const contactData = {
+          engagementLevel: profile.engagementLevel ?? 0,
+          paymentProbability: profile.paymentProbability ?? 0,
+          funnelStage: profile.funnelStage ?? "cold",
+          behavioralSignals: {
+            messageCount: signals?.messageCount,
+            sentimentTrend: signals?.sentimentTrend,
+            lastMessageAt: signals?.lastMessageAt as string | undefined,
+          },
+          totalSpentCents: (profile as unknown as { totalSpentCents?: number }).totalSpentCents ?? 0,
+        };
+
+        const resolvedMode = resolveConversationMode(modes, contactData);
+        if (resolvedMode) {
+          finalPersonality = mergePersonalityWithMode(
+            finalPersonality as { role?: string; tone?: string; style?: string; messageLength?: string; goals?: string[]; restrictions?: string[]; customInstructions?: string },
+            resolvedMode
+          );
+          conversationMode = {
+            modeType: resolvedMode.modeType,
+            modeName: resolvedMode.name,
+            modeDescription: resolvedMode.description,
+          };
+        }
+      }
+
       // Run suggestion + analysis in parallel (each may use different model)
       const analysisConfigResolved = analysisConfig ?? suggestionConfig;
       const [suggestionResult, analysisResult] = await Promise.all([
         generateSuggestion(suggestionConfig, {
           platformType: conversation.platformType,
-          personality:
-            (platform?.personalityConfig as Record<string, unknown>) ?? {},
+          personality: finalPersonality,
           globalInstructions,
           contactProfile: conversation.contact.profile as Parameters<typeof generateSuggestion>[1]["contactProfile"],
           conversationHistory,
           contactNotes: contactNotes.map((n) => n.content),
           fanMessage: input.fanMessage,
+          conversationMode,
         }),
         analyzeMessage(analysisConfigResolved, {
           message: input.fanMessage,
@@ -250,12 +313,66 @@ export const aiRouter = createTRPCRouter({
       );
       const historyMessages = conversation.messages.slice(0, lastFanIndex);
 
+      // Resolve conversation mode for OnlyFans
+      let finalPersonality = (platform?.personalityConfig as Record<string, unknown>) ?? {};
+      let conversationMode: ConversationModeContext | undefined;
+
+      if (conversation.platformType === "onlyfans" && conversation.contact.profile) {
+        const profile = conversation.contact.profile;
+        const signals = (profile.behavioralSignals ?? {}) as BehavioralSignals;
+
+        const dbModes = await ctx.db.query.conversationModes.findMany({
+          where: eq(conversationModesTable.creatorId, ctx.creatorId),
+        });
+
+        const modes: ConversationMode[] = dbModes.length > 0
+          ? dbModes.map((m) => ({
+              modeType: m.modeType as ConversationMode["modeType"],
+              name: m.name,
+              description: m.description,
+              tone: m.tone,
+              style: m.style,
+              messageLength: m.messageLength,
+              objectives: (m.objectives as string[]) ?? [],
+              restrictions: (m.restrictions as string[]) ?? [],
+              additionalInstructions: m.additionalInstructions,
+              activationCriteria: (m.activationCriteria as ConversationMode["activationCriteria"]) ?? {},
+              priority: m.priority,
+              isActive: m.isActive,
+            }))
+          : Object.values(DEFAULT_CONVERSATION_MODES).map((m) => ({ ...m, isActive: true }));
+
+        const contactData = {
+          engagementLevel: profile.engagementLevel ?? 0,
+          paymentProbability: profile.paymentProbability ?? 0,
+          funnelStage: profile.funnelStage ?? "cold",
+          behavioralSignals: {
+            messageCount: signals?.messageCount,
+            sentimentTrend: signals?.sentimentTrend,
+            lastMessageAt: signals?.lastMessageAt as string | undefined,
+          },
+          totalSpentCents: (profile as unknown as { totalSpentCents?: number }).totalSpentCents ?? 0,
+        };
+
+        const resolvedMode = resolveConversationMode(modes, contactData);
+        if (resolvedMode) {
+          finalPersonality = mergePersonalityWithMode(
+            finalPersonality as { role?: string; tone?: string; style?: string; messageLength?: string; goals?: string[]; restrictions?: string[]; customInstructions?: string },
+            resolvedMode
+          );
+          conversationMode = {
+            modeType: resolvedMode.modeType,
+            modeName: resolvedMode.name,
+            modeDescription: resolvedMode.description,
+          };
+        }
+      }
+
       const result = await generateSuggestion(
         config,
         {
           platformType: conversation.platformType,
-          personality:
-            (platform?.personalityConfig as Record<string, unknown>) ?? {},
+          personality: finalPersonality,
           globalInstructions,
           contactProfile: conversation.contact.profile as Parameters<typeof generateSuggestion>[1]["contactProfile"],
           conversationHistory: historyMessages.map((m) => ({
@@ -264,6 +381,7 @@ export const aiRouter = createTRPCRouter({
           })),
           contactNotes: contactNotes.map((n) => n.content),
           fanMessage: lastFanMessage.content,
+          conversationMode,
         }
       );
 

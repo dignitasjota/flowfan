@@ -116,6 +116,14 @@ export const mediaTypeEnum = pgEnum("media_type", [
   "gif",
 ]);
 
+export const conversationModeTypeEnum = pgEnum("conversation_mode_type", [
+  "BASE",
+  "POTENCIAL_PREMIUM",
+  "CONVERSION",
+  "VIP",
+  "LOW_VALUE",
+]);
+
 // ============================================================
 // TABLES
 // ============================================================
@@ -221,8 +229,42 @@ export const contactProfiles = pgTable("contact_profiles", {
   funnelStage: funnelStageEnum("funnel_stage").default("cold").notNull(),
   scoringHistory: jsonb("scoring_history").default([]),
   behavioralSignals: jsonb("behavioral_signals").default({}),
+  currentConversationMode: conversationModeTypeEnum("current_conversation_mode"),
+  modeChangedAt: timestamp("mode_changed_at"),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
+
+// --- Conversation Modes (OnlyFans only) ---
+export const conversationModes = pgTable(
+  "conversation_modes",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    creatorId: uuid("creator_id")
+      .notNull()
+      .references(() => creators.id, { onDelete: "cascade" }),
+    modeType: conversationModeTypeEnum("mode_type").notNull(),
+    name: varchar("name", { length: 100 }).notNull(),
+    description: text("description"),
+    tone: varchar("tone", { length: 255 }),
+    style: varchar("style", { length: 255 }),
+    messageLength: varchar("message_length", { length: 20 }),
+    objectives: jsonb("objectives").default([]),
+    restrictions: jsonb("restrictions").default([]),
+    additionalInstructions: text("additional_instructions"),
+    activationCriteria: jsonb("activation_criteria").default({}).notNull(),
+    priority: integer("priority").default(0).notNull(),
+    isActive: boolean("is_active").default(true).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("conversation_modes_creator_mode_idx").on(
+      table.creatorId,
+      table.modeType
+    ),
+    index("conversation_modes_creator_idx").on(table.creatorId),
+  ]
+);
 
 // --- Conversations ---
 export const conversations = pgTable(
@@ -916,7 +958,18 @@ export const creatorsRelations = relations(creators, ({ one, many }) => ({
   scheduledMessages: many(scheduledMessages),
   teamMembers: many(teamMembers),
   teamInvites: many(teamInvites),
+  conversationModes: many(conversationModes),
 }));
+
+export const conversationModesRelations = relations(
+  conversationModes,
+  ({ one }) => ({
+    creator: one(creators, {
+      fields: [conversationModes.creatorId],
+      references: [creators.id],
+    }),
+  })
+);
 
 export const platformsRelations = relations(platforms, ({ one }) => ({
   creator: one(creators, {

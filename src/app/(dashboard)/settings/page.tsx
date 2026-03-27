@@ -7,10 +7,12 @@ import { TemplateSettings } from "@/components/settings/template-settings";
 import { AccountSettings } from "@/components/settings/account-settings";
 import { TelegramSettings } from "@/components/settings/telegram-settings";
 import { GlobalInstructionsSettings } from "@/components/settings/global-instructions-settings";
+import { ConversationModesSettings } from "@/components/settings/conversation-modes-settings";
 
 const tabs = [
   { id: "personality", label: "Personalidad" },
   { id: "global", label: "Instrucciones globales" },
+  { id: "conversation-modes", label: "Modos conversacion" },
   { id: "ai-model", label: "Modelo IA" },
   { id: "templates", label: "Templates" },
   { id: "telegram", label: "Telegram" },
@@ -50,6 +52,7 @@ export default function SettingsPage() {
       <div className="flex-1 px-6 py-6">
         {activeTab === "personality" && <PlatformSettings />}
         {activeTab === "global" && <GlobalInstructionsSettings />}
+        {activeTab === "conversation-modes" && <ConversationModesSettings />}
         {activeTab === "ai-model" && <AIModelSettings />}
         {activeTab === "templates" && <TemplateSettings />}
         {activeTab === "telegram" && <TelegramSettings />}
