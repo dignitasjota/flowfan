@@ -116,6 +116,7 @@ export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact
       setSuggestions(result.suggestions);
       setVariants(result.variants ?? []);
       setFanMessage("");
+      utils.conversationModes.resolveForContact.invalidate({ contactId: conversation.contactId });
       onMessageSent();
     } catch (error) {
       if (!handleError(error)) {
@@ -149,6 +150,7 @@ export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact
 
       setFanMessage("");
       setCreatorMessage("");
+      utils.conversationModes.resolveForContact.invalidate({ contactId: conversation.contactId });
       onMessageSent();
     } catch {
       // Error handled by tRPC

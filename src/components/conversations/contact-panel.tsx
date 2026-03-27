@@ -93,6 +93,11 @@ export function ContactPanel({ contact, conversationId, onBack }: Props) {
         </div>
       </div>
 
+      {/* Conversation Mode (OnlyFans only) */}
+      {contact.platformType === "onlyfans" && (
+        <ConversationModeBadge contactId={contact.id} />
+      )}
+
       {/* Score */}
       {profile && (
         <div className="border-b border-gray-800 px-4 py-4">
@@ -709,5 +714,38 @@ function SentimentSparkline({ data }: { data: number[] }) {
         return <circle cx={lastX} cy={lastY} r={3} fill={strokeColor} />;
       })()}
     </svg>
+  );
+}
+
+const modeColors: Record<string, string> = {
+  BASE: "bg-gray-500/20 text-gray-400 border-gray-500/30",
+  POTENCIAL_PREMIUM: "bg-blue-500/20 text-blue-400 border-blue-500/30",
+  CONVERSION: "bg-yellow-500/20 text-yellow-400 border-yellow-500/30",
+  VIP: "bg-purple-500/20 text-purple-400 border-purple-500/30",
+  LOW_VALUE: "bg-red-500/20 text-red-400 border-red-500/30",
+};
+
+function ConversationModeBadge({ contactId }: { contactId: string }) {
+  const { data: mode, isLoading } = trpc.conversationModes.resolveForContact.useQuery(
+    { contactId }
+  );
+
+  if (isLoading) return null;
+  if (!mode) return null;
+
+  const colorClass = modeColors[mode.modeType] ?? modeColors.BASE;
+
+  return (
+    <div className="border-b border-gray-800 px-4 py-3">
+      <h4 className="mb-2 text-xs font-medium uppercase tracking-wider text-gray-400">
+        Modo de conversacion
+      </h4>
+      <div className={cn("inline-flex items-center gap-1.5 rounded-full border px-3 py-1", colorClass)}>
+        <span className="text-xs font-medium">{mode.name}</span>
+      </div>
+      {mode.description && (
+        <p className="mt-1.5 text-xs text-gray-500">{mode.description}</p>
+      )}
+    </div>
   );
 }

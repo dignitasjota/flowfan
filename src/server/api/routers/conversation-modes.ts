@@ -2,9 +2,16 @@ import { z } from "zod";
 import { eq, and } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { createTRPCRouter, protectedProcedure } from "../trpc";
-import { conversationModes } from "@/server/db/schema";
-import { DEFAULT_CONVERSATION_MODES } from "@/server/services/conversation-mode-resolver";
-import type { ConversationModeType } from "@/server/services/conversation-mode-resolver";
+import { conversationModes, contacts, contactProfiles } from "@/server/db/schema";
+import {
+  DEFAULT_CONVERSATION_MODES,
+  resolveConversationMode,
+} from "@/server/services/conversation-mode-resolver";
+import type {
+  ConversationModeType,
+  ConversationMode,
+} from "@/server/services/conversation-mode-resolver";
+import type { BehavioralSignals } from "@/server/services/scoring";
 
 const activationCriteriaSchema = z.object({
   minEngagement: z.number().optional(),
@@ -28,19 +35,39 @@ export const conversationModesRouter = createTRPCRouter({
     // If no custom modes, return defaults
     if (modes.length === 0) {
       return Object.values(DEFAULT_CONVERSATION_MODES).map((m) => ({
-        id: null,
+        id: null as string | null,
         creatorId: ctx.creatorId,
-        ...m,
+        modeType: m.modeType,
+        name: m.name,
+        description: m.description,
+        tone: m.tone,
+        style: m.style,
+        messageLength: m.messageLength,
+        objectives: m.objectives,
+        restrictions: m.restrictions,
+        additionalInstructions: m.additionalInstructions,
+        activationCriteria: m.activationCriteria as Record<string, unknown>,
+        priority: m.priority,
         isActive: true,
         isDefault: true,
       }));
     }
 
     return modes.map((m) => ({
-      ...m,
+      id: m.id as string | null,
+      creatorId: m.creatorId,
+      modeType: m.modeType,
+      name: m.name,
+      description: m.description,
+      tone: m.tone,
+      style: m.style,
+      messageLength: m.messageLength,
       objectives: (m.objectives as string[]) ?? [],
       restrictions: (m.restrictions as string[]) ?? [],
+      additionalInstructions: m.additionalInstructions,
       activationCriteria: (m.activationCriteria as Record<string, unknown>) ?? {},
+      priority: m.priority,
+      isActive: m.isActive,
       isDefault: false,
     }));
   }),
@@ -178,5 +205,73 @@ export const conversationModesRouter = createTRPCRouter({
         .where(eq(conversationModes.id, existing.id))
         .returning();
       return updated;
+    }),
+
+  resolveForContact: protectedProcedure
+    .input(z.object({ contactId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const contact = await ctx.db.query.contacts.findFirst({
+        where: and(
+          eq(contacts.id, input.contactId),
+          eq(contacts.creatorId, ctx.creatorId)
+        ),
+        with: { profile: true },
+      });
+
+      if (!contact) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Contacto no encontrado." });
+      }
+
+      if (contact.platformType !== "onlyfans") {
+        return null;
+      }
+
+      if (!contact.profile) {
+        return null;
+      }
+
+      const dbModes = await ctx.db.query.conversationModes.findMany({
+        where: eq(conversationModes.creatorId, ctx.creatorId),
+      });
+
+      const modes: ConversationMode[] = dbModes.length > 0
+        ? dbModes.map((m) => ({
+            modeType: m.modeType as ConversationMode["modeType"],
+            name: m.name,
+            description: m.description,
+            tone: m.tone,
+            style: m.style,
+            messageLength: m.messageLength,
+            objectives: (m.objectives as string[]) ?? [],
+            restrictions: (m.restrictions as string[]) ?? [],
+            additionalInstructions: m.additionalInstructions,
+            activationCriteria: (m.activationCriteria as ConversationMode["activationCriteria"]) ?? {},
+            priority: m.priority,
+            isActive: m.isActive,
+          }))
+        : Object.values(DEFAULT_CONVERSATION_MODES).map((m) => ({ ...m, isActive: true }));
+
+      const signals = (contact.profile.behavioralSignals ?? {}) as BehavioralSignals;
+
+      const contactData = {
+        engagementLevel: contact.profile.engagementLevel ?? 0,
+        paymentProbability: contact.profile.paymentProbability ?? 0,
+        funnelStage: contact.profile.funnelStage ?? "cold",
+        behavioralSignals: {
+          messageCount: signals?.messageCount,
+          sentimentTrend: signals?.sentimentTrend,
+          lastMessageAt: signals?.lastMessageAt as string | undefined,
+        },
+        totalSpentCents: (contact.profile as unknown as { totalSpentCents?: number }).totalSpentCents ?? 0,
+      };
+
+      const resolved = resolveConversationMode(modes, contactData);
+      if (!resolved) return null;
+
+      return {
+        modeType: resolved.modeType,
+        name: resolved.name,
+        description: resolved.description,
+      };
     }),
 });

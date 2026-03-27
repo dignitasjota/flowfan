@@ -87,6 +87,7 @@ export const PROVIDER_MODELS: Record<AIProvider, { value: string; label: string 
     { value: "gemini-2.0-flash", label: "Gemini 2.0 Flash" },
   ],
   minimax: [
+    { value: "MiniMax-M1", label: "MiniMax-M2.7" },
     { value: "minimax-m2.5", label: "MiniMax-M2.5" },
     { value: "minimax-m2.5-chat", label: "MiniMax-M2.5 Chat" },
   ],

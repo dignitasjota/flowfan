@@ -135,6 +135,14 @@ export function ConversationModesSettings() {
     return <div className="text-sm text-gray-400">Cargando modos...</div>;
   }
 
+  if (query.isError) {
+    return (
+      <div className="text-sm text-red-400">
+        Error al cargar los modos: {query.error.message}
+      </div>
+    );
+  }
+
   return (
     <div>
       <h3 className="mb-1 text-base font-semibold text-white">
