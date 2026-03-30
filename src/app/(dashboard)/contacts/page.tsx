@@ -351,7 +351,7 @@ export default function ContactsPage() {
                   <td className="px-6 py-3">
                     <button
                       onClick={() => setDeleteTarget({ id: contact.id, username: contact.username })}
-                      className="rounded p-1 text-gray-600 opacity-0 transition-all hover:text-red-400 group-hover:opacity-100"
+                      className="rounded p-1 text-gray-400 transition-all hover:text-red-400"
                       title="Eliminar contacto"
                     >
                       <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

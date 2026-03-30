@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/lib/trpc";
+import { useToast } from "@/components/ui/toast";
 
 type Contact = {
   id: string;
@@ -58,6 +59,28 @@ export function ContactPanel({ contact, conversationId, onBack }: Props) {
     { conversationId: conversationId! },
     { enabled: !!conversationId }
   );
+
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const { success: toastSuccess } = useToast();
+  const utils = trpc.useUtils();
+
+  const deleteContact = trpc.contacts.delete.useMutation({
+    onSuccess: (result) => {
+      utils.conversations.list.invalidate();
+      utils.contacts.list.invalidate();
+      setDeleteTarget(null);
+      if (result.action === "archived") {
+        toastSuccess("Este contacto ha pagado anteriormente. Se ha archivado en lugar de eliminarlo.");
+      } else {
+        toastSuccess("Contacto eliminado correctamente");
+      }
+      if (onBack) {
+        onBack();
+      } else {
+        window.location.href = "/conversations";
+      }
+    },
+  });
 
   return (
     <div className="flex h-full flex-col overflow-y-auto">
@@ -181,8 +204,8 @@ export function ContactPanel({ contact, conversationId, onBack }: Props) {
           };
           const topics = signals.topicFrequency
             ? Object.entries(signals.topicFrequency)
-                .sort(([, a], [, b]) => b - a)
-                .slice(0, 5)
+              .sort(([, a], [, b]) => b - a)
+              .slice(0, 5)
             : [];
           if (topics.length === 0) return null;
           return (
@@ -307,6 +330,53 @@ export function ContactPanel({ contact, conversationId, onBack }: Props) {
           )}
         </div>
       </div>
+
+      {/* Delete Action */}
+      <div className="border-t border-gray-800 p-4">
+        <button
+          onClick={() => setDeleteTarget(contact.id)}
+          className="flex w-full items-center justify-center gap-2 rounded-lg border border-red-900/50 bg-red-500/10 px-4 py-2 text-sm font-medium text-red-500 transition-colors hover:bg-red-500/20"
+        >
+          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+          </svg>
+          Eliminar Contacto
+        </button>
+      </div>
+
+      {/* Delete confirmation modal */}
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <div className="mx-4 w-full max-w-sm rounded-xl border border-gray-700 bg-gray-900 p-6 shadow-2xl">
+            <h3 className="text-base font-semibold text-white">
+              Eliminar contacto
+            </h3>
+            <p className="mt-2 text-sm text-gray-400">
+              ¿Estás seguro de que quieres eliminar a{" "}
+              <span className="font-medium text-white">@{contact.username}</span>?
+              Se eliminarán todas sus conversaciones, mensajes y notas.
+            </p>
+            <p className="mt-2 text-xs text-gray-500">
+              Si el contacto ha realizado algún pago, se archivará en lugar de eliminarse.
+            </p>
+            <div className="mt-5 flex justify-end gap-3">
+              <button
+                onClick={() => setDeleteTarget(null)}
+                className="rounded-lg border border-gray-700 px-4 py-2 text-sm text-gray-300 hover:bg-gray-800"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => deleteContact.mutate({ id: contact.id })}
+                disabled={deleteContact.isPending}
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                {deleteContact.isPending ? "Eliminando..." : "Eliminar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
