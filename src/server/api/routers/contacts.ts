@@ -1,10 +1,12 @@
 import { z } from "zod";
 import { eq, and, desc, ilike, or, sql, count } from "drizzle-orm";
+import { TRPCError } from "@trpc/server";
 import { createTRPCRouter, protectedProcedure, managerProcedure } from "../trpc";
-import { contacts, contactProfiles } from "@/server/db/schema";
+import { contacts, contactProfiles, fanTransactions } from "@/server/db/schema";
 import { checkContactLimit } from "@/server/services/usage-limits";
 import { workflowQueue } from "@/server/queues";
 import { platformTypeSchema, funnelStageSchema } from "@/lib/constants";
+import { scrapeInstagramProfile } from "@/server/services/instagram-scraper";
 
 export const contactsRouter = createTRPCRouter({
   list: protectedProcedure
@@ -82,6 +84,7 @@ export const contactsRouter = createTRPCRouter({
       z.object({
         username: z.string().min(1).max(255),
         displayName: z.string().max(255).optional(),
+        avatarUrl: z.string().optional(),
         platformType: platformTypeSchema,
       })
     )
@@ -94,6 +97,7 @@ export const contactsRouter = createTRPCRouter({
           creatorId: ctx.creatorId,
           username: input.username,
           displayName: input.displayName,
+          avatarUrl: input.avatarUrl,
           platformType: input.platformType,
         })
         .returning();
@@ -115,6 +119,24 @@ export const contactsRouter = createTRPCRouter({
         // Non-critical: workflow event dispatch failure shouldn't block contact creation
       }
 
+      // Background instagram scraping if missing info
+      if (input.platformType === "instagram" && (!input.avatarUrl || !input.displayName)) {
+        scrapeInstagramProfile(input.username, contact!.id)
+          .then(async (scraped) => {
+            const updates: Partial<{ avatarUrl: string; displayName: string }> = {};
+            if (scraped.avatarUrl && !input.avatarUrl) updates.avatarUrl = scraped.avatarUrl;
+            if (scraped.displayName && !input.displayName) updates.displayName = scraped.displayName;
+
+            if (Object.keys(updates).length > 0) {
+              await ctx.db
+                .update(contacts)
+                .set(updates)
+                .where(eq(contacts.id, contact!.id));
+            }
+          })
+          .catch((err) => console.error("Instagram Scraper background error", err));
+      }
+
       return contact;
     }),
 
@@ -123,6 +145,7 @@ export const contactsRouter = createTRPCRouter({
       z.object({
         id: z.string().uuid(),
         displayName: z.string().max(255).optional(),
+        avatarUrl: z.string().optional(),
         tags: z.array(z.string()).optional(),
         isArchived: z.boolean().optional(),
       })
@@ -135,5 +158,48 @@ export const contactsRouter = createTRPCRouter({
         .where(and(eq(contacts.id, id), eq(contacts.creatorId, ctx.creatorId)))
         .returning();
       return updated;
+    }),
+
+  delete: managerProcedure
+    .input(z.object({ id: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const contact = await ctx.db.query.contacts.findFirst({
+        where: and(
+          eq(contacts.id, input.id),
+          eq(contacts.creatorId, ctx.creatorId)
+        ),
+      });
+
+      if (!contact) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Contacto no encontrado." });
+      }
+
+      // Check if contact has any transactions
+      const [txResult] = await ctx.db
+        .select({ count: count() })
+        .from(fanTransactions)
+        .where(
+          and(
+            eq(fanTransactions.contactId, input.id),
+            eq(fanTransactions.creatorId, ctx.creatorId)
+          )
+        );
+
+      const hasPaid = (txResult?.count ?? 0) > 0;
+
+      if (hasPaid) {
+        // Archive instead of deleting
+        await ctx.db
+          .update(contacts)
+          .set({ isArchived: true })
+          .where(eq(contacts.id, input.id));
+        return { action: "archived" as const, reason: "has_transactions" };
+      }
+
+      // Hard delete (cascade will remove profile, conversations, messages, notes)
+      await ctx.db
+        .delete(contacts)
+        .where(eq(contacts.id, input.id));
+      return { action: "deleted" as const, reason: null };
     }),
 });

@@ -187,6 +187,7 @@ export const contacts = pgTable(
     username: varchar("username", { length: 255 }).notNull(),
     displayName: varchar("display_name", { length: 255 }),
     platformType: platformTypeEnum("platform_type").notNull(),
+    avatarUrl: text("avatar_url"),
     firstInteractionAt: timestamp("first_interaction_at").defaultNow().notNull(),
     lastInteractionAt: timestamp("last_interaction_at").defaultNow().notNull(),
     totalConversations: integer("total_conversations").default(1).notNull(),

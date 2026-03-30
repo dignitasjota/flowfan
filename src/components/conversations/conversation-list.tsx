@@ -14,6 +14,7 @@ type Conversation = {
   contact: {
     username: string;
     displayName: string | null;
+    avatarUrl?: string | null;
     platformType: string;
     profile: {
       paymentProbability: number;
@@ -448,12 +449,20 @@ export function ConversationList({
                       )}
                     >
                       {/* Avatar */}
-                      <div className="relative flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-gray-700 text-xs font-bold text-white">
-                        {(
-                          conv.contact.displayName?.[0] ||
-                          conv.contact.username[0] ||
-                          "?"
-                        ).toUpperCase()}
+                      <div className="relative flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-gray-700 text-xs font-bold text-white overflow-hidden">
+                        {conv.contact.avatarUrl ? (
+                          <img
+                            src={conv.contact.avatarUrl}
+                            alt={conv.contact.displayName || conv.contact.username}
+                            className="h-full w-full object-cover"
+                          />
+                        ) : (
+                          (
+                            conv.contact.displayName?.[0] ||
+                            conv.contact.username[0] ||
+                            "?"
+                          ).toUpperCase()
+                        )}
                         {conv.isPinned && (
                           <span className="absolute -right-0.5 -top-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-indigo-500 text-[8px] text-white">
                             <svg className="h-2 w-2" fill="currentColor" viewBox="0 0 16 16">
@@ -473,7 +482,7 @@ export function ConversationList({
                               className={cn(
                                 "h-2.5 w-2.5 rounded-full",
                                 funnelColors[
-                                  conv.contact.profile.funnelStage
+                                conv.contact.profile.funnelStage
                                 ] ?? "bg-gray-500"
                               )}
                               title={conv.contact.profile.funnelStage}

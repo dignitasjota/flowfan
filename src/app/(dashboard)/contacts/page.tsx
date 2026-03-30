@@ -13,6 +13,7 @@ export default function ContactsPage() {
   const [showNewForm, setShowNewForm] = useState(false);
   const [newUsername, setNewUsername] = useState("");
   const [newPlatform, setNewPlatform] = useState<PlatformType>("instagram");
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; username: string } | null>(null);
 
   // Filters
   const [search, setSearch] = useState("");
@@ -32,6 +33,17 @@ export default function ContactsPage() {
   });
 
   const utils = trpc.useUtils();
+  const deleteContact = trpc.contacts.delete.useMutation({
+    onSuccess: (result) => {
+      utils.contacts.list.invalidate();
+      setDeleteTarget(null);
+      if (result.action === "archived") {
+        toastSuccess("Este contacto ha pagado anteriormente. Se ha archivado en lugar de eliminarlo.");
+      } else {
+        toastSuccess("Contacto eliminado correctamente");
+      }
+    },
+  });
   const createContact = trpc.contacts.create.useMutation({
     onMutate: async () => {
       await utils.contacts.list.cancel();
@@ -275,11 +287,12 @@ export default function ContactsPage() {
                 <th className="px-6 py-3">Score</th>
                 <th className="px-6 py-3">Etapa</th>
                 <th className="px-6 py-3">Conversaciones</th>
+                <th className="px-6 py-3"></th>
               </tr>
             </thead>
             <tbody>
               {Array.from({ length: 8 }).map((_, i) => (
-                <TableRowSkeleton key={i} columns={5} />
+                <TableRowSkeleton key={i} columns={6} />
               ))}
             </tbody>
           </table>
@@ -298,13 +311,14 @@ export default function ContactsPage() {
                 <th className="px-6 py-3">Score</th>
                 <th className="px-6 py-3">Etapa</th>
                 <th className="px-6 py-3">Conversaciones</th>
+                <th className="px-6 py-3"></th>
               </tr>
             </thead>
             <tbody>
               {(items as any[]).map((contact: any) => (
                 <tr
                   key={contact.id}
-                  className="border-b border-gray-800/50 hover:bg-gray-800/30"
+                  className="group border-b border-gray-800/50 hover:bg-gray-800/30"
                 >
                   <td className="px-6 py-3 text-sm text-white">
                     @{contact.username}
@@ -333,6 +347,17 @@ export default function ContactsPage() {
                   </td>
                   <td className="px-6 py-3 text-sm text-gray-400">
                     {contact.totalConversations}
+                  </td>
+                  <td className="px-6 py-3">
+                    <button
+                      onClick={() => setDeleteTarget({ id: contact.id, username: contact.username })}
+                      className="rounded p-1 text-gray-600 opacity-0 transition-all hover:text-red-400 group-hover:opacity-100"
+                      title="Eliminar contacto"
+                    >
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
+                    </button>
                   </td>
                 </tr>
               ))}
@@ -363,6 +388,40 @@ export default function ContactsPage() {
           </button>
         </div>
       ) : null}
+
+      {/* Delete confirmation modal */}
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <div className="mx-4 w-full max-w-sm rounded-xl border border-gray-700 bg-gray-900 p-6 shadow-2xl">
+            <h3 className="text-base font-semibold text-white">
+              Eliminar contacto
+            </h3>
+            <p className="mt-2 text-sm text-gray-400">
+              ¿Estas seguro de que quieres eliminar a{" "}
+              <span className="font-medium text-white">@{deleteTarget.username}</span>?
+              Se eliminaran todas sus conversaciones, mensajes y notas.
+            </p>
+            <p className="mt-2 text-xs text-gray-500">
+              Si el contacto ha realizado algun pago, se archivara en lugar de eliminarse.
+            </p>
+            <div className="mt-5 flex justify-end gap-3">
+              <button
+                onClick={() => setDeleteTarget(null)}
+                className="rounded-lg border border-gray-700 px-4 py-2 text-sm text-gray-300 hover:bg-gray-800"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => deleteContact.mutate({ id: deleteTarget.id })}
+                disabled={deleteContact.isPending}
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                {deleteContact.isPending ? "Eliminando..." : "Eliminar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
