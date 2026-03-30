@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import { TableRowSkeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
 import { PLATFORM_OPTIONS, FUNNEL_STAGES, type PlatformType, type FunnelStage } from "@/lib/constants";
+import { ContactPanel } from "@/components/conversations/contact-panel";
 
 const funnelOptions = FUNNEL_STAGES.map((s) => ({ value: s, label: s === "hot_lead" ? "Hot Lead" : s.charAt(0).toUpperCase() + s.slice(1) }));
 
@@ -14,6 +15,7 @@ export default function ContactsPage() {
   const [newUsername, setNewUsername] = useState("");
   const [newPlatform, setNewPlatform] = useState<PlatformType>("instagram");
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; username: string } | null>(null);
+  const [selectedContact, setSelectedContact] = useState<any>(null);
 
   // Filters
   const [search, setSearch] = useState("");
@@ -318,7 +320,12 @@ export default function ContactsPage() {
               {(items as any[]).map((contact: any) => (
                 <tr
                   key={contact.id}
-                  className="group border-b border-gray-800/50 hover:bg-gray-800/30"
+                  className="group cursor-pointer border-b border-gray-800/50 hover:bg-gray-800/30"
+                  onClick={(e) => {
+                    // Evitar abrir si hizo clic en el botón de borrar
+                    if ((e.target as HTMLElement).closest('button')) return;
+                    setSelectedContact(contact);
+                  }}
                 >
                   <td className="px-6 py-3 text-sm text-white">
                     @{contact.username}
@@ -421,6 +428,22 @@ export default function ContactsPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Contact Profile Sidebar/Modal */}
+      {selectedContact && (
+        <>
+          <div
+            className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm transition-opacity"
+            onClick={() => setSelectedContact(null)}
+          />
+          <div className="fixed inset-y-0 right-0 z-50 w-full max-w-[400px] border-l border-gray-800 bg-gray-900 shadow-2xl animate-in slide-in-from-right duration-300">
+            <ContactPanel
+              contact={selectedContact}
+              onBack={() => setSelectedContact(null)}
+            />
+          </div>
+        </>
       )}
     </div>
   );
