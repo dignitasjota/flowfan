@@ -381,10 +381,95 @@ export function ContactPanel({ contact, conversationId, onBack }: Props) {
   );
 }
 
+function ReportContent({ data }: { data: { overview: string; patterns: string[]; funnelPrediction: { nextStage: string; probability: number; timeframe: string }; riskLevel: string; recommendations: string[] } }) {
+  const riskColors: Record<string, string> = {
+    low: "text-green-400",
+    medium: "text-yellow-400",
+    high: "text-red-400",
+  };
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs leading-relaxed text-gray-300">{data.overview}</p>
+
+      {data.patterns.length > 0 && (
+        <div>
+          <span className="text-[10px] font-medium uppercase text-gray-500">Patrones</span>
+          <ul className="mt-1 space-y-0.5">
+            {data.patterns.map((p, i) => (
+              <li key={i} className="text-xs text-gray-400">• {p}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <div className="flex items-center justify-between rounded bg-gray-800/50 p-2">
+        <div>
+          <span className="text-[10px] font-medium uppercase text-gray-500">Prediccion</span>
+          <p className="text-xs text-gray-300">
+            {data.funnelPrediction.nextStage} ({data.funnelPrediction.probability}%)
+          </p>
+          <p className="text-[10px] text-gray-500">{data.funnelPrediction.timeframe}</p>
+        </div>
+        <div className="text-right">
+          <span className="text-[10px] font-medium uppercase text-gray-500">Riesgo</span>
+          <p className={cn("text-sm font-medium", riskColors[data.riskLevel])}>
+            {data.riskLevel === "low" ? "Bajo" : data.riskLevel === "medium" ? "Medio" : "Alto"}
+          </p>
+        </div>
+      </div>
+
+      {data.recommendations.length > 0 && (
+        <div>
+          <span className="text-[10px] font-medium uppercase text-gray-500">Recomendaciones</span>
+          <ul className="mt-1 space-y-0.5">
+            {data.recommendations.map((r, i) => (
+              <li key={i} className="text-xs text-green-400/80">• {r}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ReportModal({ reportId, onClose }: { reportId: string; onClose: () => void }) {
+  const { data, isLoading } = trpc.ai.getReport.useQuery({ reportId });
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
+      <div
+        className="mx-4 max-h-[80vh] w-full max-w-lg overflow-y-auto rounded-lg border border-gray-700 bg-gray-900 p-6"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="text-sm font-medium text-white">
+            Informe — {data ? new Date(data.createdAt).toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "..."}
+          </h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-white">
+            ✕
+          </button>
+        </div>
+        {isLoading && <p className="text-xs text-gray-500">Cargando...</p>}
+        {data && (
+          <>
+            {data.modelUsed && (
+              <p className="mb-3 text-[10px] text-gray-600">Modelo: {data.modelUsed}</p>
+            )}
+            <ReportContent data={data.reportData as { overview: string; patterns: string[]; funnelPrediction: { nextStage: string; probability: number; timeframe: string }; riskLevel: string; recommendations: string[] }} />
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function PriceAndReport({ contactId }: { contactId: string }) {
   const [showReport, setShowReport] = useState(false);
+  const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
   const priceAdvice = trpc.ai.getPriceAdvice.useMutation();
   const report = trpc.ai.generateReport.useMutation();
+  const reportsList = trpc.ai.listReports.useQuery({ contactId });
 
   const timingColors: Record<string, string> = {
     now: "text-green-400",
@@ -395,12 +480,6 @@ function PriceAndReport({ contactId }: { contactId: string }) {
     now: "Ahora",
     soon: "Pronto",
     wait: "Esperar",
-  };
-
-  const riskColors: Record<string, string> = {
-    low: "text-green-400",
-    medium: "text-yellow-400",
-    high: "text-red-400",
   };
 
   return (
@@ -460,7 +539,11 @@ function PriceAndReport({ contactId }: { contactId: string }) {
           </h4>
           <button
             onClick={() => {
-              report.mutate({ contactId });
+              report.mutate({ contactId }, {
+                onSuccess: () => {
+                  reportsList.refetch();
+                },
+              });
               setShowReport(true);
             }}
             disabled={report.isPending}
@@ -471,53 +554,44 @@ function PriceAndReport({ contactId }: { contactId: string }) {
         </div>
 
         {showReport && report.data && (
-          <div className="space-y-3">
-            <p className="text-xs leading-relaxed text-gray-300">{report.data.overview}</p>
-
-            {report.data.patterns.length > 0 && (
-              <div>
-                <span className="text-[10px] font-medium uppercase text-gray-500">Patrones</span>
-                <ul className="mt-1 space-y-0.5">
-                  {report.data.patterns.map((p, i) => (
-                    <li key={i} className="text-xs text-gray-400">• {p}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            <div className="flex items-center justify-between rounded bg-gray-800/50 p-2">
-              <div>
-                <span className="text-[10px] font-medium uppercase text-gray-500">Prediccion</span>
-                <p className="text-xs text-gray-300">
-                  {report.data.funnelPrediction.nextStage} ({report.data.funnelPrediction.probability}%)
-                </p>
-                <p className="text-[10px] text-gray-500">{report.data.funnelPrediction.timeframe}</p>
-              </div>
-              <div className="text-right">
-                <span className="text-[10px] font-medium uppercase text-gray-500">Riesgo</span>
-                <p className={cn("text-sm font-medium", riskColors[report.data.riskLevel])}>
-                  {report.data.riskLevel === "low" ? "Bajo" : report.data.riskLevel === "medium" ? "Medio" : "Alto"}
-                </p>
-              </div>
-            </div>
-
-            {report.data.recommendations.length > 0 && (
-              <div>
-                <span className="text-[10px] font-medium uppercase text-gray-500">Recomendaciones</span>
-                <ul className="mt-1 space-y-0.5">
-                  {report.data.recommendations.map((r, i) => (
-                    <li key={i} className="text-xs text-green-400/80">• {r}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </div>
+          <ReportContent data={report.data} />
         )}
 
         {!report.data && !report.isPending && (
           <p className="text-xs text-gray-600">Pulsa "Generar" para un informe completo del contacto</p>
         )}
+
+        {/* Report History */}
+        {reportsList.data && reportsList.data.length > 0 && (
+          <div className="mt-4 border-t border-gray-800 pt-3">
+            <span className="text-[10px] font-medium uppercase text-gray-500">
+              Informes anteriores ({reportsList.data.length})
+            </span>
+            <ul className="mt-2 space-y-1">
+              {[...reportsList.data].reverse().map((r) => (
+                <li key={r.id}>
+                  <button
+                    onClick={() => setSelectedReportId(r.id)}
+                    className="w-full rounded px-2 py-1.5 text-left text-xs text-gray-400 hover:bg-gray-800 hover:text-white transition-colors"
+                  >
+                    {new Date(r.createdAt).toLocaleDateString("es-ES", {
+                      day: "2-digit",
+                      month: "short",
+                      year: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </div>
+
+      {selectedReportId && (
+        <ReportModal reportId={selectedReportId} onClose={() => setSelectedReportId(null)} />
+      )}
     </>
   );
 }

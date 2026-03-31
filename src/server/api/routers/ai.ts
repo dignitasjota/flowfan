@@ -15,6 +15,7 @@ import {
   aiUsageLog,
   aiConfigs,
   creators,
+  contactReports,
 } from "@/server/db/schema";
 import { generateSuggestion } from "@/server/services/ai";
 import type { ConversationModeContext } from "@/server/services/ai";
@@ -512,14 +513,59 @@ export const aiRouter = createTRPCRouter({
         recentMessages: recentMessages.slice(-10),
       });
 
+      const modelUsed = `${config.provider}/${config.model}`;
+
       await ctx.db.insert(aiUsageLog).values({
         creatorId: ctx.creatorId,
         requestType: "analysis",
         tokensUsed: result.tokensUsed,
-        modelUsed: `${config.provider}/${config.model}`,
+        modelUsed,
       });
 
-      return result;
+      // Persist report
+      const { tokensUsed, ...reportData } = result;
+      const [saved] = await ctx.db.insert(contactReports).values({
+        creatorId: ctx.creatorId,
+        contactId: input.contactId,
+        reportData,
+        modelUsed,
+        tokensUsed: result.tokensUsed,
+      }).returning();
+
+      return { ...result, id: saved!.id, createdAt: saved!.createdAt };
+    }),
+
+  listReports: protectedProcedure
+    .input(z.object({ contactId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const rows = await ctx.db
+        .select({
+          id: contactReports.id,
+          createdAt: contactReports.createdAt,
+          modelUsed: contactReports.modelUsed,
+        })
+        .from(contactReports)
+        .where(
+          and(
+            eq(contactReports.creatorId, ctx.creatorId),
+            eq(contactReports.contactId, input.contactId)
+          )
+        )
+        .orderBy(contactReports.createdAt);
+      return rows;
+    }),
+
+  getReport: protectedProcedure
+    .input(z.object({ reportId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const row = await ctx.db.query.contactReports.findFirst({
+        where: and(
+          eq(contactReports.id, input.reportId),
+          eq(contactReports.creatorId, ctx.creatorId)
+        ),
+      });
+      if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+      return row;
     }),
 
   getPriceAdvice: protectedProcedure

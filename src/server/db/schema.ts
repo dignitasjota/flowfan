@@ -934,6 +934,28 @@ export const conversationAssignments = pgTable(
   ]
 );
 
+// --- Contact Reports (informes IA persistidos) ---
+export const contactReports = pgTable(
+  "contact_reports",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    creatorId: uuid("creator_id")
+      .notNull()
+      .references(() => creators.id, { onDelete: "cascade" }),
+    contactId: uuid("contact_id")
+      .notNull()
+      .references(() => contacts.id, { onDelete: "cascade" }),
+    reportData: jsonb("report_data").notNull(), // ContactReport object
+    modelUsed: varchar("model_used", { length: 100 }),
+    tokensUsed: integer("tokens_used"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("contact_reports_creator_contact_idx").on(table.creatorId, table.contactId),
+    index("contact_reports_contact_idx").on(table.contactId),
+  ]
+);
+
 // ============================================================
 // RELATIONS
 // ============================================================
@@ -989,6 +1011,18 @@ export const contactsRelations = relations(contacts, ({ one, many }) => ({
   conversations: many(conversations),
   notes: many(notes),
   fanTransactions: many(fanTransactions),
+  reports: many(contactReports),
+}));
+
+export const contactReportsRelations = relations(contactReports, ({ one }) => ({
+  creator: one(creators, {
+    fields: [contactReports.creatorId],
+    references: [creators.id],
+  }),
+  contact: one(contacts, {
+    fields: [contactReports.contactId],
+    references: [contacts.id],
+  }),
 }));
 
 export const contactProfilesRelations = relations(
