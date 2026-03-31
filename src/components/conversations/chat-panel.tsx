@@ -33,6 +33,12 @@ type SuggestionVariant = {
   content: string;
 };
 
+type ManualQueueItem = {
+  id: string;
+  role: "fan" | "creator";
+  content: string;
+};
+
 type Props = {
   conversation: Conversation;
   onMessageSent: () => void;
@@ -41,8 +47,9 @@ type Props = {
 };
 
 export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact }: Props) {
-  const [fanMessage, setFanMessage] = useState("");
-  const [creatorMessage, setCreatorMessage] = useState("");
+  const [fanMessageInput, setFanMessageInput] = useState("");
+  const [creatorMessageInput, setCreatorMessageInput] = useState("");
+  const [manualQueue, setManualQueue] = useState<ManualQueueItem[]>([]);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [variants, setVariants] = useState<SuggestionVariant[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -101,7 +108,7 @@ export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact
   }, [conversation.messages, isGenerating]);
 
   async function handleSendFanMessage() {
-    if (!fanMessage.trim()) return;
+    if (!fanMessageInput.trim()) return;
 
     setIsGenerating(true);
     setSuggestions([]);
@@ -110,12 +117,12 @@ export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact
     try {
       const result = await suggestMutation.mutateAsync({
         conversationId: conversation.id,
-        fanMessage: fanMessage.trim(),
+        fanMessage: fanMessageInput.trim(),
       });
 
       setSuggestions(result.suggestions);
       setVariants(result.variants ?? []);
-      setFanMessage("");
+      setFanMessageInput("");
       utils.conversationModes.resolveForContact.invalidate({ contactId: conversation.contactId });
       onMessageSent();
     } catch (error) {
@@ -127,29 +134,42 @@ export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact
     }
   }
 
+  function addToQueue(role: "fan" | "creator", input: string) {
+    if (!input.trim()) return;
+    const id = Math.random().toString(36).slice(2);
+    setManualQueue([...manualQueue, { id, role, content: input.trim() }]);
+    if (role === "fan") {
+      setFanMessageInput("");
+    } else {
+      setCreatorMessageInput("");
+    }
+  }
+
+  function removeFromQueue(id: string) {
+    setManualQueue(manualQueue.filter((m) => m.id !== id));
+  }
+
   async function handleSendManual() {
-    if (!fanMessage.trim() && !creatorMessage.trim()) return;
+    if (manualQueue.length === 0) return;
     setIsSendingManual(true);
 
     try {
-      // Save fan message if provided
-      if (fanMessage.trim()) {
-        await addFanMessage.mutateAsync({
-          conversationId: conversation.id,
-          content: fanMessage.trim(),
-        });
+      // Save all messages in order
+      for (const item of manualQueue) {
+        if (item.role === "fan") {
+          await addFanMessage.mutateAsync({
+            conversationId: conversation.id,
+            content: item.content,
+          });
+        } else {
+          await addCreatorMessage.mutateAsync({
+            conversationId: conversation.id,
+            content: item.content,
+          });
+        }
       }
 
-      // Save creator message if provided
-      if (creatorMessage.trim()) {
-        await addCreatorMessage.mutateAsync({
-          conversationId: conversation.id,
-          content: creatorMessage.trim(),
-        });
-      }
-
-      setFanMessage("");
-      setCreatorMessage("");
+      setManualQueue([]);
       utils.conversationModes.resolveForContact.invalidate({ contactId: conversation.contactId });
       onMessageSent();
     } catch {
@@ -229,7 +249,9 @@ export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact
           onClick={() => {
             setManualMode(!manualMode);
             setSuggestions([]);
-            setCreatorMessage("");
+            setCreatorMessageInput("");
+            setFanMessageInput("");
+            setManualQueue([]);
           }}
           className={cn(
             "flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors",
@@ -445,38 +467,109 @@ export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact
       {/* Input */}
       <div className="border-t border-gray-800 px-6 py-4">
         {manualMode ? (
-          /* Manual mode: two inputs */
+          /* Manual mode: queue-based input */
           <div className="space-y-3">
-            <div>
-              <label className="mb-1 block text-[11px] font-medium uppercase tracking-wider text-gray-500">
-                Mensaje del fan
-              </label>
-              <input
-                value={fanMessage}
-                onChange={(e) => setFanMessage(e.target.value)}
-                placeholder="Pega el mensaje que te envio el fan..."
-                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:border-indigo-500 focus:outline-none"
-                disabled={isSendingManual}
-              />
+            {/* Message Queue Display */}
+            <div className="max-h-64 overflow-y-auto rounded-lg border border-gray-700 bg-gray-800/30 p-3">
+              {manualQueue.length === 0 ? (
+                <p className="text-xs text-gray-600 italic">Añade mensajes con los botones de abajo...</p>
+              ) : (
+                <div className="space-y-2">
+                  {manualQueue.map((msg) => (
+                    <div key={msg.id} className={cn(
+                      "flex gap-2 rounded p-2",
+                      msg.role === "fan"
+                        ? "bg-indigo-900/30 border border-indigo-700/30"
+                        : "bg-green-900/30 border border-green-700/30"
+                    )}>
+                      <div className="flex-1 min-w-0">
+                        <span className={cn(
+                          "inline-block text-[10px] font-semibold mb-1 px-1.5 py-0.5 rounded",
+                          msg.role === "fan" ? "bg-indigo-600 text-white" : "bg-green-600 text-white"
+                        )}>
+                          {msg.role === "fan" ? "FAN" : "TÚ"}
+                        </span>
+                        <p className="text-xs text-gray-300 whitespace-pre-wrap break-words">
+                          {msg.content}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => removeFromQueue(msg.id)}
+                        className="flex-shrink-0 text-gray-500 hover:text-red-400 transition-colors"
+                        title="Eliminar"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
-            <div>
-              <label className="mb-1 block text-[11px] font-medium uppercase tracking-wider text-gray-500">
-                Tu respuesta
-              </label>
-              <input
-                value={creatorMessage}
-                onChange={(e) => setCreatorMessage(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    handleSendManual();
-                  }
-                }}
-                placeholder="Pega tu respuesta..."
-                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:border-indigo-500 focus:outline-none"
-                disabled={isSendingManual}
-              />
+
+            {/* Input Textareas */}
+            <div className="space-y-2">
+              <div>
+                <label className="mb-1 block text-[11px] font-medium uppercase tracking-wider text-gray-500">
+                  Mensaje del fan
+                </label>
+                <div className="flex gap-2">
+                  <textarea
+                    value={fanMessageInput}
+                    onChange={(e) => setFanMessageInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        addToQueue("fan", fanMessageInput);
+                      }
+                    }}
+                    placeholder="Pega el mensaje que te envio el fan... (Shift+Enter para nueva línea)"
+                    rows={3}
+                    className="flex-1 rounded-lg border border-gray-700 bg-gray-800 px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:border-indigo-500 focus:outline-none resize-none"
+                    disabled={isSendingManual}
+                  />
+                  <button
+                    onClick={() => addToQueue("fan", fanMessageInput)}
+                    disabled={isSendingManual || !fanMessageInput.trim()}
+                    className="flex-shrink-0 rounded-lg bg-indigo-600 px-3 py-2.5 text-white font-bold hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+                    title="Añadir mensaje del fan"
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-[11px] font-medium uppercase tracking-wider text-gray-500">
+                  Tu respuesta
+                </label>
+                <div className="flex gap-2">
+                  <textarea
+                    value={creatorMessageInput}
+                    onChange={(e) => setCreatorMessageInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        addToQueue("creator", creatorMessageInput);
+                      }
+                    }}
+                    placeholder="Pega tu respuesta... (Shift+Enter para nueva línea)"
+                    rows={3}
+                    className="flex-1 rounded-lg border border-gray-700 bg-gray-800 px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:border-indigo-500 focus:outline-none resize-none"
+                    disabled={isSendingManual}
+                  />
+                  <button
+                    onClick={() => addToQueue("creator", creatorMessageInput)}
+                    disabled={isSendingManual || !creatorMessageInput.trim()}
+                    className="flex-shrink-0 rounded-lg bg-green-600 px-3 py-2.5 text-white font-bold hover:bg-green-700 disabled:opacity-50 transition-colors"
+                    title="Añadir tu respuesta"
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
             </div>
+
+            {/* Action Buttons */}
             <div className="flex gap-3">
               <button
                 onClick={() => setShowMediaPicker(true)}
@@ -489,14 +582,14 @@ export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact
               </button>
               <button
                 onClick={handleSendManual}
-                disabled={isSendingManual || (!fanMessage.trim() && !creatorMessage.trim())}
+                disabled={isSendingManual || manualQueue.length === 0}
                 className="flex-1 rounded-lg bg-amber-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50"
               >
-                {isSendingManual ? "Guardando..." : "Guardar mensajes"}
+                {isSendingManual ? "Guardando..." : `Guardar todo (${manualQueue.length})`}
               </button>
               <button
                 onClick={() => setShowScheduleManual(!showScheduleManual)}
-                disabled={!creatorMessage.trim()}
+                disabled={manualQueue.filter((m) => m.role === "creator").length === 0}
                 className="flex-shrink-0 rounded-lg border border-gray-700 p-2.5 text-gray-400 hover:border-blue-500 hover:text-blue-400 transition-colors disabled:opacity-50"
                 title="Programar envio"
               >
@@ -505,7 +598,7 @@ export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact
                 </svg>
               </button>
             </div>
-            {showScheduleManual && creatorMessage.trim() && (
+            {showScheduleManual && manualQueue.filter((m) => m.role === "creator").length > 0 && (
               <div className="mt-2 flex items-center gap-2 rounded-lg border border-blue-500/30 bg-blue-500/5 p-2.5">
                 <svg className="h-4 w-4 flex-shrink-0 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
@@ -519,13 +612,16 @@ export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact
                 />
                 <button
                   onClick={() => {
-                    if (!scheduleManualDate || !creatorMessage.trim()) return;
+                    if (!scheduleManualDate || manualQueue.filter((m) => m.role === "creator").length === 0) return;
+                    const lastCreatorMsg = [...manualQueue].reverse().find((m) => m.role === "creator");
+                    if (!lastCreatorMsg) return;
                     scheduleMutation.mutate({
                       conversationId: conversation.id,
-                      content: creatorMessage.trim(),
+                      content: lastCreatorMsg.content,
                       scheduledAt: new Date(scheduleManualDate).toISOString(),
                     });
-                    setCreatorMessage("");
+                    setScheduleManualDate("");
+                    setShowScheduleManual(false);
                   }}
                   disabled={!scheduleManualDate || scheduleMutation.isPending}
                   className="rounded bg-blue-600 px-3 py-1 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
@@ -549,8 +645,8 @@ export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact
                 </svg>
               </button>
               <input
-                value={fanMessage}
-                onChange={(e) => setFanMessage(e.target.value)}
+                value={fanMessageInput}
+                onChange={(e) => setFanMessageInput(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
@@ -563,7 +659,7 @@ export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact
               />
               <button
                 onClick={handleSendFanMessage}
-                disabled={isGenerating || !fanMessage.trim()}
+                disabled={isGenerating || !fanMessageInput.trim()}
                 className="rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
               >
                 {isGenerating ? "Generando..." : "Enviar"}
