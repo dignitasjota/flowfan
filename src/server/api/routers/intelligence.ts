@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { eq, and, desc, sql, count } from "drizzle-orm";
+import { eq, and, desc, gte, lte, sql, count } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { createTRPCRouter, protectedProcedure } from "../trpc";
 import {
@@ -10,6 +10,7 @@ import {
   aiConfigs,
   aiUsageLog,
   notifications,
+  fanTransactions,
 } from "@/server/db/schema";
 import { analyzeMessage } from "@/server/services/ai-analysis";
 import { updateSignals, calculateScores, type BehavioralSignals } from "@/server/services/scoring";
@@ -380,6 +381,180 @@ export const intelligenceRouter = createTRPCRouter({
       }))
     );
   }),
+
+  getEnhancedDashboardStats: protectedProcedure
+    .input(
+      z.object({
+        period: z.enum(["30d", "60d", "90d"]).default("30d"),
+      })
+    )
+    .query(async ({ ctx, input }) => {
+      const days = input.period === "30d" ? 30 : input.period === "60d" ? 60 : 90;
+      const now = new Date();
+      const periodStart = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+      const prevPeriodStart = new Date(periodStart.getTime() - days * 24 * 60 * 60 * 1000);
+
+      // --- Revenue trend (daily) ---
+      const revenueTrend = await ctx.db
+        .select({
+          date: sql<string>`date_trunc('day', ${fanTransactions.transactionDate})::date::text`,
+          totalEur: sql<number>`COALESCE(SUM(${fanTransactions.amount}), 0)::float / 100`,
+          count: count(),
+        })
+        .from(fanTransactions)
+        .where(
+          and(
+            eq(fanTransactions.creatorId, ctx.creatorId),
+            gte(fanTransactions.transactionDate, periodStart)
+          )
+        )
+        .groupBy(sql`date_trunc('day', ${fanTransactions.transactionDate})::date`)
+        .orderBy(sql`date_trunc('day', ${fanTransactions.transactionDate})::date`);
+
+      // --- Revenue period comparison ---
+      const [currentRevenue] = await ctx.db
+        .select({ total: sql<number>`COALESCE(SUM(${fanTransactions.amount}), 0)::float / 100` })
+        .from(fanTransactions)
+        .where(
+          and(
+            eq(fanTransactions.creatorId, ctx.creatorId),
+            gte(fanTransactions.transactionDate, periodStart)
+          )
+        );
+      const [prevRevenue] = await ctx.db
+        .select({ total: sql<number>`COALESCE(SUM(${fanTransactions.amount}), 0)::float / 100` })
+        .from(fanTransactions)
+        .where(
+          and(
+            eq(fanTransactions.creatorId, ctx.creatorId),
+            gte(fanTransactions.transactionDate, prevPeriodStart),
+            lte(fanTransactions.transactionDate, periodStart)
+          )
+        );
+      const currentTotal = currentRevenue?.total ?? 0;
+      const prevTotal = prevRevenue?.total ?? 0;
+      const revenueChangePercent =
+        prevTotal > 0 ? Math.round(((currentTotal - prevTotal) / prevTotal) * 100) : currentTotal > 0 ? 100 : 0;
+
+      // --- Funnel conversion (snapshot) ---
+      const allContacts = await ctx.db.query.contacts.findMany({
+        where: and(eq(contacts.creatorId, ctx.creatorId), eq(contacts.isArchived, false)),
+        with: { profile: true },
+      });
+      const stages = ["cold", "curious", "interested", "hot_lead", "buyer", "vip"] as const;
+      const funnelCounts: Record<string, number> = {};
+      for (const s of stages) funnelCounts[s] = 0;
+      for (const c of allContacts) {
+        const stage = c.profile?.funnelStage ?? "cold";
+        funnelCounts[stage] = (funnelCounts[stage] ?? 0) + 1;
+      }
+      const totalActive = allContacts.length || 1;
+      // Conversion = contacts that have progressed past each stage
+      const funnelConversion = stages.slice(0, -1).map((stage, i) => {
+        const nextStage = stages[i + 1]!;
+        const atOrBeyond = stages.slice(i + 1).reduce((sum, s) => sum + (funnelCounts[s] ?? 0), 0);
+        const atOrBeyondCurrent = stages.slice(i).reduce((sum, s) => sum + (funnelCounts[s] ?? 0), 0);
+        return {
+          from: stage,
+          to: nextStage,
+          rate: atOrBeyondCurrent > 0 ? Math.round((atOrBeyond / atOrBeyondCurrent) * 100) : 0,
+        };
+      });
+
+      // --- Churn rate ---
+      const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      const inactiveCount = allContacts.filter(
+        (c) => c.lastInteractionAt < thirtyDaysAgo
+      ).length;
+      const churnRate = Math.round((inactiveCount / totalActive) * 100);
+
+      // --- ROI per platform ---
+      const platformROI = await ctx.db
+        .select({
+          platform: contacts.platformType,
+          totalEur: sql<number>`COALESCE(SUM(${fanTransactions.amount}), 0)::float / 100`,
+          contactCount: sql<number>`COUNT(DISTINCT ${contacts.id})::int`,
+        })
+        .from(fanTransactions)
+        .innerJoin(contacts, eq(fanTransactions.contactId, contacts.id))
+        .where(eq(fanTransactions.creatorId, ctx.creatorId))
+        .groupBy(contacts.platformType);
+
+      // --- Contacts at risk ---
+      const fourteenDaysAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+      const atRisk = allContacts
+        .filter((c) => {
+          if (!c.profile) return false;
+          const engagement = c.profile.engagementLevel;
+          const lastInteraction = c.lastInteractionAt;
+          // Had engagement but inactive 14-30 days
+          return engagement > 20 && lastInteraction < fourteenDaysAgo && lastInteraction >= thirtyDaysAgo;
+        })
+        .sort((a, b) => (b.profile?.engagementLevel ?? 0) - (a.profile?.engagementLevel ?? 0))
+        .slice(0, 10)
+        .map((c) => {
+          const daysSince = Math.floor(
+            (now.getTime() - c.lastInteractionAt.getTime()) / (24 * 60 * 60 * 1000)
+          );
+          return {
+            id: c.id,
+            username: c.username,
+            displayName: c.displayName,
+            platformType: c.platformType,
+            engagementLevel: c.profile!.engagementLevel,
+            funnelStage: c.profile!.funnelStage,
+            daysSinceInteraction: daysSince,
+          };
+        });
+
+      // --- Average creator response time (last 30 days) ---
+      const recentConversations = await ctx.db.query.conversations.findMany({
+        where: and(
+          eq(conversations.creatorId, ctx.creatorId),
+          gte(conversations.lastMessageAt, thirtyDaysAgo)
+        ),
+        columns: { id: true },
+        limit: 500,
+      });
+
+      let totalResponseMs = 0;
+      let responseCount = 0;
+
+      for (const conv of recentConversations) {
+        const msgs = await ctx.db.query.messages.findMany({
+          where: eq(messages.conversationId, conv.id),
+          orderBy: (m, { asc }) => [asc(m.createdAt)],
+          columns: { role: true, createdAt: true },
+        });
+
+        for (let i = 1; i < msgs.length; i++) {
+          if (msgs[i - 1]!.role === "fan" && msgs[i]!.role === "creator") {
+            const diff = msgs[i]!.createdAt.getTime() - msgs[i - 1]!.createdAt.getTime();
+            if (diff > 0 && diff < 24 * 60 * 60 * 1000) {
+              // Ignore >24h gaps
+              totalResponseMs += diff;
+              responseCount++;
+            }
+          }
+        }
+      }
+
+      const avgResponseMinutes =
+        responseCount > 0 ? Math.round(totalResponseMs / responseCount / 60000) : null;
+
+      return {
+        revenueTrend,
+        currentRevenueEur: currentTotal,
+        revenueChangePercent,
+        funnelConversion,
+        churnRate,
+        inactiveCount,
+        platformROI,
+        atRiskContacts: atRisk,
+        avgResponseMinutes,
+        period: input.period,
+      };
+    }),
 
   exportContactsData: protectedProcedure
     .input(z.object({ format: z.enum(["json", "csv"]).default("json") }))

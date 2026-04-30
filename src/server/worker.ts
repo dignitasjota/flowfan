@@ -13,8 +13,11 @@ import type {
   BroadcastProcessingJobData,
   BroadcastSendJobData,
   ScheduledMessageJobData,
+  ImportJobData,
 } from "./queues";
+import { importJobs, contactProfiles } from "./db/schema";
 import { createChildLogger } from "@/lib/logger";
+import { publishEvent } from "@/lib/redis-pubsub";
 
 const log = createChildLogger("worker");
 
@@ -87,6 +90,97 @@ const worker = new Worker<AnalysisJobData>(
       }
     } catch (err) {
       log.warn({ err }, "Failed to check keyword workflows");
+    }
+
+    // Auto-response features: classification + quick replies
+    try {
+      const { autoResponseConfigs: arConfigsTable, messages: msgsTable, conversations: convsTable } = await import("@/server/db/schema");
+      const { eq: eqOp, and: andOp } = await import("drizzle-orm");
+
+      // Find auto-response config for this platform
+      const arConfig = await db.query.autoResponseConfigs.findFirst({
+        where: andOp(
+          eqOp(arConfigsTable.creatorId, creatorId),
+          eqOp(arConfigsTable.platformType, platformType as "instagram" | "tinder" | "reddit" | "onlyfans" | "twitter" | "telegram" | "snapchat" | "other"),
+          eqOp(arConfigsTable.isEnabled, true)
+        ),
+      });
+
+      if (arConfig) {
+        // Classification
+        if (arConfig.classifyMessages && config) {
+          try {
+            const { classifyMessage } = await import("@/server/services/message-classifier");
+            const classification = await classifyMessage(config, messageContent, platformType);
+
+            // Store classification in sentiment JSONB
+            const msg = await db.query.messages.findFirst({
+              where: eqOp(msgsTable.id, messageId),
+              columns: { sentiment: true },
+            });
+            const existingSentiment = (msg?.sentiment as Record<string, unknown>) ?? {};
+            await db
+              .update(msgsTable)
+              .set({
+                sentiment: { ...existingSentiment, classification },
+              })
+              .where(eqOp(msgsTable.id, messageId));
+
+            log.info({ messageId, category: classification.category }, "Message classified");
+
+            // Dispatch workflow event for non-general classifications
+            if (classification.category !== "general" && classification.confidence >= 0.7) {
+              const { workflowQueue: wfQueue } = await import("@/server/queues");
+              await wfQueue.add("message_classified", {
+                type: "keyword_detected", // Reuse workflow type since enum not extended yet
+                creatorId,
+                contactId,
+                conversationId: job.data.conversationId,
+                messageContent,
+                matchedKeywords: [classification.category],
+              });
+            }
+          } catch (classErr) {
+            log.warn({ classErr }, "Message classification failed");
+          }
+        }
+
+        // Pre-generate quick replies
+        if (arConfig.preGenerateReplies && config) {
+          try {
+            const { generateQuickReplies } = await import("@/server/services/quick-replies");
+
+            const contact = await db.query.contacts.findFirst({
+              where: eqOp((await import("@/server/db/schema")).contacts.id, contactId),
+              with: { profile: true },
+            });
+
+            const replies = await generateQuickReplies(config, {
+              message: messageContent,
+              platformType,
+              contactProfile: contact?.profile
+                ? {
+                    funnelStage: contact.profile.funnelStage,
+                    engagementLevel: contact.profile.engagementLevel,
+                  }
+                : undefined,
+            });
+
+            if (replies.length > 0) {
+              await db
+                .update(msgsTable)
+                .set({ aiSuggestion: replies.join("\n---\n") })
+                .where(eqOp(msgsTable.id, messageId));
+
+              log.info({ messageId, replyCount: replies.length }, "Quick replies pre-generated");
+            }
+          } catch (qrErr) {
+            log.warn({ qrErr }, "Quick reply generation failed");
+          }
+        }
+      }
+    } catch (arErr) {
+      log.warn({ arErr }, "Auto-response processing failed");
     }
 
     log.info({ jobId: job.id, contactId }, "Message analysis completed");
@@ -254,7 +348,7 @@ const telegramAutoReplyWorker = new Worker<TelegramAutoReplyJobData>(
     const tgResult = await sendMessage(token, chatId, result.text);
 
     // Save as creator message
-    await db.insert(messagesTable).values({
+    const [autoMsg] = await db.insert(messagesTable).values({
       conversationId,
       role: "creator",
       content: result.text,
@@ -262,7 +356,14 @@ const telegramAutoReplyWorker = new Worker<TelegramAutoReplyJobData>(
       aiSuggestionUsed: true,
       externalMessageId: String(tgResult.message_id),
       source: "telegram",
-    });
+    }).returning();
+
+    if (autoMsg) {
+      publishEvent(creatorId, {
+        type: "new_message",
+        data: { conversationId, messageId: autoMsg.id, role: "creator", source: "auto-reply" },
+      }).catch(() => {});
+    }
 
     log.info({ jobId: job.id, chatId }, "Auto-reply sent");
   },
@@ -393,6 +494,14 @@ const scheduledMessageWorker = new Worker<ScheduledMessageJobData>(
           sentById: scheduled.sentById,
         })
         .returning();
+
+      // Publish real-time event
+      if (message) {
+        publishEvent(creatorId, {
+          type: "new_message",
+          data: { conversationId: scheduled.conversationId, messageId: message.id, role: "creator", source: "scheduled" },
+        }).catch(() => {});
+      }
 
       // Update conversation lastMessageAt
       await db
@@ -555,19 +664,196 @@ async function startScheduler() {
   }, 5 * 60 * 1000);
 }
 
+// --- Contact Import Worker ---
+
+const PLATFORM_TYPES_SET = new Set([
+  "instagram", "tinder", "reddit", "onlyfans", "twitter", "telegram", "snapchat", "other",
+]);
+
+const importWorker = new Worker<ImportJobData>(
+  "contact-import",
+  async (job) => {
+    const { importJobId, creatorId } = job.data;
+    log.info({ jobId: job.id, importJobId }, "Processing contact import");
+
+    const { contacts } = await import("@/server/db/schema");
+    const { eq } = await import("drizzle-orm");
+
+    try {
+      const importJob = await db.query.importJobs.findFirst({
+        where: eq(importJobs.id, importJobId),
+      });
+
+      if (!importJob || importJob.status === "cancelled") {
+        log.info({ importJobId }, "Import job not found or cancelled");
+        return;
+      }
+
+      const rawData = importJob.rawData as { headers: string[]; rows: string[][] };
+      const mapping = importJob.columnMapping as Record<string, string | null>;
+      const skipDuplicates = importJob.skipDuplicates;
+
+      // Build existing contacts set for duplicate detection
+      const existingContacts = await db.query.contacts.findMany({
+        where: eq(contacts.creatorId, creatorId),
+        columns: { username: true, platformType: true },
+      });
+      const existingSet = new Set(
+        existingContacts.map((c) => `${c.username.toLowerCase()}:${c.platformType}`)
+      );
+
+      // Find header indices for mapped fields
+      const fieldIndices: Record<string, number> = {};
+      for (const [header, field] of Object.entries(mapping)) {
+        if (field) {
+          const idx = rawData.headers.indexOf(header);
+          if (idx >= 0) fieldIndices[field] = idx;
+        }
+      }
+
+      let createdCount = 0;
+      let skippedCount = 0;
+      let errorCount = 0;
+      let duplicateCount = 0;
+      const errors: { row: number; message: string }[] = [];
+      const BATCH_SIZE = 50;
+
+      for (let i = 0; i < rawData.rows.length; i += BATCH_SIZE) {
+        // Check if cancelled
+        const currentJob = await db.query.importJobs.findFirst({
+          where: eq(importJobs.id, importJobId),
+          columns: { status: true },
+        });
+        if (currentJob?.status === "cancelled") break;
+
+        const batch = rawData.rows.slice(i, i + BATCH_SIZE);
+
+        for (let j = 0; j < batch.length; j++) {
+          const row = batch[j]!;
+          const rowNum = i + j + 1;
+
+          try {
+            const username = fieldIndices.username != null ? row[fieldIndices.username]?.trim() : undefined;
+            const platformType = fieldIndices.platformType != null ? row[fieldIndices.platformType]?.trim().toLowerCase() : undefined;
+            const displayName = fieldIndices.displayName != null ? row[fieldIndices.displayName]?.trim() : undefined;
+            const tags = fieldIndices.tags != null ? row[fieldIndices.tags]?.split(";").map((t) => t.trim()).filter(Boolean) : undefined;
+            const platformUserId = fieldIndices.platformUserId != null ? row[fieldIndices.platformUserId]?.trim() : undefined;
+
+            // Validate required fields
+            if (!username || username.length === 0 || username.length > 255) {
+              errors.push({ row: rowNum, message: "Username invalido o vacio" });
+              errorCount++;
+              continue;
+            }
+
+            if (!platformType || !PLATFORM_TYPES_SET.has(platformType)) {
+              errors.push({ row: rowNum, message: `Plataforma invalida: ${platformType ?? "vacio"}` });
+              errorCount++;
+              continue;
+            }
+
+            // Duplicate check
+            const key = `${username.toLowerCase()}:${platformType}`;
+            if (existingSet.has(key)) {
+              duplicateCount++;
+              if (skipDuplicates) {
+                skippedCount++;
+                continue;
+              }
+            }
+
+            // Insert contact + profile
+            const [newContact] = await db
+              .insert(contacts)
+              .values({
+                creatorId,
+                username,
+                displayName: displayName || null,
+                platformType: platformType as "instagram" | "tinder" | "reddit" | "onlyfans" | "twitter" | "telegram" | "snapchat" | "other",
+                tags: tags ?? [],
+                platformUserId: platformUserId || null,
+              })
+              .returning({ id: contacts.id });
+
+            if (newContact) {
+              await db.insert(contactProfiles).values({
+                contactId: newContact.id,
+              });
+              existingSet.add(key); // Prevent duplicates within same import
+              createdCount++;
+            }
+          } catch (err) {
+            errors.push({ row: rowNum, message: String(err) });
+            errorCount++;
+          }
+        }
+
+        // Update progress
+        await db
+          .update(importJobs)
+          .set({
+            processedRows: Math.min(i + BATCH_SIZE, rawData.rows.length),
+            createdCount,
+            skippedCount,
+            errorCount,
+            duplicateCount,
+            errors: errors.slice(-100), // Keep last 100 errors
+          })
+          .where(eq(importJobs.id, importJobId));
+      }
+
+      // Finalize
+      await db
+        .update(importJobs)
+        .set({
+          status: "completed",
+          processedRows: rawData.rows.length,
+          createdCount,
+          skippedCount,
+          errorCount,
+          duplicateCount,
+          errors: errors.slice(-100),
+          completedAt: new Date(),
+        })
+        .where(eq(importJobs.id, importJobId));
+
+      // Publish real-time event
+      publishEvent(creatorId, {
+        type: "conversation_update",
+        data: { importJobId, status: "completed", createdCount },
+        timestamp: Date.now(),
+      });
+
+      log.info({ importJobId, createdCount, skippedCount, errorCount, duplicateCount }, "Import completed");
+    } catch (err) {
+      log.error({ err, importJobId }, "Import job failed");
+      const { eq } = await import("drizzle-orm");
+      await db
+        .update(importJobs)
+        .set({ status: "failed" })
+        .where(eq(importJobs.id, importJobId));
+    }
+  },
+  { connection: { host: redisUrl.hostname, port: Number(redisUrl.port) || 6379 }, concurrency: 2 }
+);
+
+importWorker.on("failed", (job, err) => {
+  log.error({ jobId: job?.id, err: err.message }, "Import worker job failed");
+});
+
 startScheduler();
 
 // Graceful shutdown
 process.on("SIGTERM", async () => {
   log.info("SIGTERM received, closing workers...");
   if (schedulerInterval) clearInterval(schedulerInterval);
-  await Promise.all([worker.close(), workflowWorker.close(), telegramOutgoingWorker.close(), telegramAutoReplyWorker.close(), broadcastProcessingWorker.close(), broadcastSendWorker.close(), scheduledMessageWorker.close()]);
+  await Promise.all([worker.close(), workflowWorker.close(), telegramOutgoingWorker.close(), telegramAutoReplyWorker.close(), broadcastProcessingWorker.close(), broadcastSendWorker.close(), scheduledMessageWorker.close(), importWorker.close()]);
   process.exit(0);
 });
 
 process.on("SIGINT", async () => {
   log.info("SIGINT received, closing workers...");
   if (schedulerInterval) clearInterval(schedulerInterval);
-  await Promise.all([worker.close(), workflowWorker.close(), telegramOutgoingWorker.close(), telegramAutoReplyWorker.close(), broadcastProcessingWorker.close(), broadcastSendWorker.close(), scheduledMessageWorker.close()]);
+  await Promise.all([worker.close(), workflowWorker.close(), telegramOutgoingWorker.close(), telegramAutoReplyWorker.close(), broadcastProcessingWorker.close(), broadcastSendWorker.close(), scheduledMessageWorker.close(), importWorker.close()]);
   process.exit(0);
 });

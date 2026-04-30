@@ -147,3 +147,22 @@ export type ScheduledMessageJobData = {
   scheduledMessageId: string;
   creatorId: string;
 };
+
+// --- Contact import queue ---
+
+export const importQueue = new Queue("contact-import", {
+  connection: {
+    host: new URL(process.env.REDIS_URL ?? "redis://localhost:6379").hostname,
+    port: Number(new URL(process.env.REDIS_URL ?? "redis://localhost:6379").port) || 6379,
+  },
+  defaultJobOptions: {
+    attempts: 1,
+    removeOnComplete: { count: 100 },
+    removeOnFail: { count: 500 },
+  },
+});
+
+export type ImportJobData = {
+  importJobId: string;
+  creatorId: string;
+};

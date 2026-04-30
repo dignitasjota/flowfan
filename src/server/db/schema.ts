@@ -1302,3 +1302,80 @@ export const conversationAssignmentsRelations = relations(conversationAssignment
     relationName: "assignedBy",
   }),
 }));
+
+// --- Import Jobs ---
+
+export const importJobStatusEnum = pgEnum("import_job_status", [
+  "pending",
+  "processing",
+  "completed",
+  "failed",
+  "cancelled",
+]);
+
+export const importJobs = pgTable(
+  "import_jobs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    creatorId: uuid("creator_id")
+      .notNull()
+      .references(() => creators.id, { onDelete: "cascade" }),
+    fileName: varchar("file_name", { length: 255 }).notNull(),
+    totalRows: integer("total_rows").default(0).notNull(),
+    processedRows: integer("processed_rows").default(0).notNull(),
+    createdCount: integer("created_count").default(0).notNull(),
+    skippedCount: integer("skipped_count").default(0).notNull(),
+    errorCount: integer("error_count").default(0).notNull(),
+    duplicateCount: integer("duplicate_count").default(0).notNull(),
+    status: importJobStatusEnum("status").default("pending").notNull(),
+    columnMapping: jsonb("column_mapping").default({}).notNull(),
+    rawData: jsonb("raw_data").default([]).notNull(),
+    errors: jsonb("errors").default([]).notNull(),
+    skipDuplicates: boolean("skip_duplicates").default(true).notNull(),
+    completedAt: timestamp("completed_at"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [index("import_jobs_creator_idx").on(table.creatorId)]
+);
+
+export const importJobsRelations = relations(importJobs, ({ one }) => ({
+  creator: one(creators, {
+    fields: [importJobs.creatorId],
+    references: [creators.id],
+  }),
+}));
+
+// --- Auto-Response Configs ---
+
+export const autoResponseConfigs = pgTable(
+  "auto_response_configs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    creatorId: uuid("creator_id")
+      .notNull()
+      .references(() => creators.id, { onDelete: "cascade" }),
+    platformType: platformTypeEnum("platform_type").notNull(),
+    isEnabled: boolean("is_enabled").default(false).notNull(),
+    inactivityMinutes: integer("inactivity_minutes").default(30).notNull(),
+    useAIReply: boolean("use_ai_reply").default(false).notNull(),
+    maxTokens: integer("max_tokens").default(256).notNull(),
+    fallbackMessage: text("fallback_message"),
+    classifyMessages: boolean("classify_messages").default(true).notNull(),
+    preGenerateReplies: boolean("pre_generate_replies").default(true).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("auto_response_configs_creator_platform_idx").on(
+      table.creatorId,
+      table.platformType
+    ),
+  ]
+);
+
+export const autoResponseConfigsRelations = relations(autoResponseConfigs, ({ one }) => ({
+  creator: one(creators, {
+    fields: [autoResponseConfigs.creatorId],
+    references: [creators.id],
+  }),
+}));

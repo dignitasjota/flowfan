@@ -12,6 +12,7 @@ type Message = {
   role: "fan" | "creator";
   content: string;
   aiSuggestion: string | null;
+  sentiment: Record<string, unknown> | null;
   createdAt: Date;
 };
 
@@ -44,9 +45,10 @@ type Props = {
   onMessageSent: () => void;
   onBack?: () => void;
   onToggleContact?: () => void;
+  highlightMessageId?: string | null;
 };
 
-export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact }: Props) {
+export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact, highlightMessageId }: Props) {
   const [fanMessageInput, setFanMessageInput] = useState("");
   const [creatorMessageInput, setCreatorMessageInput] = useState("");
   const [manualQueue, setManualQueue] = useState<ManualQueueItem[]>([]);
@@ -62,6 +64,7 @@ export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact
   const [showScheduleManual, setShowScheduleManual] = useState(false);
   const [scheduleManualDate, setScheduleManualDate] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
 
   const utils = trpc.useUtils();
   const suggestMutation = trpc.ai.suggest.useMutation();
@@ -104,8 +107,25 @@ export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact
   const { success: toastSuccess } = useToast();
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [conversation.messages, isGenerating]);
+    if (highlightMessageId) {
+      const el = document.getElementById(`msg-${highlightMessageId}`);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        return;
+      }
+    }
+    // Auto-scroll only if user is near the bottom (within 150px)
+    const container = messagesContainerRef.current;
+    if (container) {
+      const isNearBottom =
+        container.scrollHeight - container.scrollTop - container.clientHeight < 150;
+      if (isNearBottom) {
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      }
+    } else {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [conversation.messages, isGenerating, highlightMessageId]);
 
   async function handleSendFanMessage() {
     if (!fanMessageInput.trim()) return;
@@ -126,9 +146,7 @@ export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact
       utils.conversationModes.resolveForContact.invalidate({ contactId: conversation.contactId });
       onMessageSent();
     } catch (error) {
-      if (!handleError(error)) {
-        console.error("Error generating suggestions:", error);
-      }
+      handleError(error);
     } finally {
       setIsGenerating(false);
     }
@@ -211,9 +229,7 @@ export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact
       setSuggestions(result.suggestions);
       setVariants(result.variants ?? []);
     } catch (error) {
-      if (!handleError(error)) {
-        console.error("Error regenerating suggestions:", error);
-      }
+      handleError(error);
     } finally {
       setIsGenerating(false);
     }
@@ -299,19 +315,41 @@ export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact
       )}
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-6 py-4">
+      <div ref={messagesContainerRef} className="flex-1 overflow-y-auto px-6 py-4">
         <div className="space-y-4">
           {conversation.messages.map((msg) => (
             <div
               key={msg.id}
+              id={`msg-${msg.id}`}
               className={cn(
-                "max-w-[75%] rounded-2xl px-4 py-2.5",
+                "max-w-[75%] rounded-2xl px-4 py-2.5 transition-all duration-1000",
                 msg.role === "fan"
                   ? "mr-auto bg-gray-800 text-white"
-                  : "ml-auto bg-indigo-600 text-white"
+                  : "ml-auto bg-indigo-600 text-white",
+                highlightMessageId === msg.id && "ring-2 ring-yellow-400 animate-pulse"
               )}
             >
               <p className="text-sm">{msg.content}</p>
+              {msg.role === "fan" &&
+                msg.sentiment &&
+                (msg.sentiment as Record<string, unknown>).classification && (() => {
+                  const cls = (msg.sentiment as Record<string, { category?: string }>).classification;
+                  const cat = cls?.category;
+                  if (!cat || cat === "general") return null;
+                  const badge = cat === "urgent"
+                    ? { label: "Urgente", color: "bg-red-500/20 text-red-400" }
+                    : cat === "price_inquiry"
+                      ? { label: "Precio", color: "bg-green-500/20 text-green-400" }
+                      : cat === "spam"
+                        ? { label: "Spam", color: "bg-gray-500/20 text-gray-400" }
+                        : null;
+                  if (!badge) return null;
+                  return (
+                    <span className={cn("mt-1 inline-block rounded-full px-2 py-0.5 text-[10px] font-medium", badge.color)}>
+                      {badge.label}
+                    </span>
+                  );
+                })()}
               <span className="mt-1 block text-[10px] opacity-50">
                 {new Date(msg.createdAt).toLocaleTimeString("es-ES", {
                   hour: "2-digit",

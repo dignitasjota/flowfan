@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
+import { TrendChart } from "@/components/ui/trend-chart";
 
 const typeLabels: Record<string, string> = {
   tip: "Propinas",
@@ -126,7 +127,10 @@ export default function RevenuePage() {
             </div>
           </div>
           <div className="mt-4">
-            <TrendChart data={trend.data} />
+            <TrendChart
+              data={trend.data.map((d) => ({ date: d.date, value: d.totalEur }))}
+              valueSuffix="€"
+            />
           </div>
         </div>
       )}
@@ -209,70 +213,3 @@ function KpiCard({
   );
 }
 
-function TrendChart({ data }: { data: { date: string; totalEur: number; count: number }[] }) {
-  if (data.length === 0) return null;
-
-  const width = 600;
-  const height = 120;
-  const padding = 24;
-
-  const maxVal = Math.max(...data.map((d) => d.totalEur), 1);
-
-  const points = data
-    .map((d, i) => {
-      const x = padding + (i / Math.max(data.length - 1, 1)) * (width - padding * 2);
-      const y = height - padding - (d.totalEur / maxVal) * (height - padding * 2);
-      return `${x},${y}`;
-    })
-    .join(" ");
-
-  // Area fill
-  const firstX = padding;
-  const lastX = padding + ((data.length - 1) / Math.max(data.length - 1, 1)) * (width - padding * 2);
-  const areaPoints = `${firstX},${height - padding} ${points} ${lastX},${height - padding}`;
-
-  return (
-    <svg viewBox={`0 0 ${width} ${height}`} className="w-full" preserveAspectRatio="xMidYMid meet">
-      {/* Grid */}
-      {[0, 0.25, 0.5, 0.75, 1].map((pct) => {
-        const y = height - padding - pct * (height - padding * 2);
-        return (
-          <g key={pct}>
-            <line x1={padding} y1={y} x2={width - padding} y2={y} stroke="#1f2937" strokeWidth={1} />
-            <text x={padding - 4} y={y + 3} textAnchor="end" className="fill-gray-600 text-[8px]">
-              {(maxVal * pct).toFixed(0)}€
-            </text>
-          </g>
-        );
-      })}
-      {/* Area */}
-      <polygon points={areaPoints} fill="url(#areaGradient)" opacity={0.3} />
-      {/* Line */}
-      <polyline fill="none" stroke="#818cf8" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" points={points} />
-      {/* Dots */}
-      {data.map((d, i) => {
-        const x = padding + (i / Math.max(data.length - 1, 1)) * (width - padding * 2);
-        const y = height - padding - (d.totalEur / maxVal) * (height - padding * 2);
-        return <circle key={i} cx={x} cy={y} r={2.5} fill="#818cf8" />;
-      })}
-      {/* Date labels (first, mid, last) */}
-      {[0, Math.floor(data.length / 2), data.length - 1]
-        .filter((idx, i, arr) => arr.indexOf(idx) === i)
-        .map((idx) => {
-          const x = padding + (idx / Math.max(data.length - 1, 1)) * (width - padding * 2);
-          const label = data[idx]?.date?.slice(5) ?? "";
-          return (
-            <text key={idx} x={x} y={height - 4} textAnchor="middle" className="fill-gray-600 text-[8px]">
-              {label}
-            </text>
-          );
-        })}
-      <defs>
-        <linearGradient id="areaGradient" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#818cf8" />
-          <stop offset="100%" stopColor="#818cf8" stopOpacity={0} />
-        </linearGradient>
-      </defs>
-    </svg>
-  );
-}

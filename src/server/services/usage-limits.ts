@@ -169,6 +169,27 @@ export async function checkContactLimit(db: Db, creatorId: string) {
   }
 }
 
+export async function checkBulkContactLimit(db: Db, creatorId: string, newCount: number) {
+  const plan = await getCreatorPlan(db, creatorId);
+  const limits = PLAN_LIMITS[plan];
+  if (limits.contacts === -1) return;
+
+  const [result] = await db
+    .select({ count: count() })
+    .from(contacts)
+    .where(eq(contacts.creatorId, creatorId));
+
+  const current = result?.count ?? 0;
+  const remaining = limits.contacts - current;
+
+  if (remaining < newCount) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: `Solo puedes importar ${Math.max(remaining, 0)} contactos mas en el plan ${plan} (limite: ${limits.contacts}, actuales: ${current}).`,
+    });
+  }
+}
+
 export async function checkAIMessageLimit(db: Db, creatorId: string) {
   const plan = await getCreatorPlan(db, creatorId);
   const limits = PLAN_LIMITS[plan];

@@ -19,6 +19,9 @@ import { broadcastsRouter } from "./routers/broadcasts";
 import { teamRouter } from "./routers/team";
 import { scheduledMessagesRouter } from "./routers/scheduled-messages";
 import { conversationModesRouter } from "./routers/conversation-modes";
+import { searchRouter } from "./routers/search";
+import { importRouter } from "./routers/import";
+import { autoResponseRouter } from "./routers/auto-response";
 
 export const appRouter = createTRPCRouter({
   contacts: contactsRouter,
@@ -41,6 +44,9 @@ export const appRouter = createTRPCRouter({
   team: teamRouter,
   scheduledMessages: scheduledMessagesRouter,
   conversationModes: conversationModesRouter,
+  search: searchRouter,
+  import: importRouter,
+  autoResponse: autoResponseRouter,
 });
 
 export type AppRouter = typeof appRouter;
