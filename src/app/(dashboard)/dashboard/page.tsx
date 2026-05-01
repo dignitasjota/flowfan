@@ -4,6 +4,7 @@ import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
 import { TrendChart } from "@/components/ui/trend-chart";
+import { ChurnPanel } from "@/components/dashboard/churn-panel";
 
 const funnelLabels: Record<string, string> = {
   cold: "Frio",
@@ -372,6 +373,9 @@ export default function DashboardPage() {
             </div>
           </div>
         )}
+
+        {/* Churn Panel */}
+        <ChurnPanel />
 
         {/* Proactive Actions */}
         {actions && actions.length > 0 && (

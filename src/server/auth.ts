@@ -44,7 +44,13 @@ export const authOptions: NextAuthOptions = {
       async authorize(credentials, req) {
         if (!credentials?.email || !credentials?.password) return null;
 
-        // Rate limit login attempts by email
+        // Rate limit login attempts by IP (prevent credential stuffing across emails)
+        const forwarded = req?.headers?.["x-forwarded-for"];
+        const ip = (typeof forwarded === "string" ? forwarded.split(",")[0]?.trim() : undefined) ?? "unknown";
+        const ipLimit = await rateLimit(`login-ip:${ip}`, { limit: 15, windowSeconds: 300 });
+        if (!ipLimit.success) return null;
+
+        // Rate limit login attempts by email (prevent brute force on single account)
         const rateLimitResult = await rateLimit(
           `login:${credentials.email}`,
           RATE_LIMITS.auth

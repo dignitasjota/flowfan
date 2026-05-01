@@ -52,12 +52,20 @@ export async function POST(req: Request) {
     expiresAt,
   });
 
-  // In production, send email here. For now, log the reset URL
+  // Send password reset email
   const resetUrl = `${process.env.NEXTAUTH_URL}/reset-password?token=${token}`;
   log.info({ email, resetUrl }, "Password reset URL generated");
 
-  // TODO: Integrate email service (Resend, SendGrid, etc.)
-  // await sendResetEmail(email, resetUrl);
+  try {
+    const { emailQueue } = await import("@/server/queues");
+    await emailQueue.add("password_reset", {
+      type: "password_reset" as const,
+      to: email,
+      data: { resetUrl },
+    });
+  } catch (err) {
+    log.warn({ err, email }, "Failed to enqueue password reset email");
+  }
 
   return NextResponse.json({ success: true });
 }

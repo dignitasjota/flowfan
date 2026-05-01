@@ -4,10 +4,13 @@ import { authOptions } from "@/server/auth";
 import { db } from "@/server/db";
 import { mediaItems } from "@/server/db/schema";
 import { checkMediaFileLimit, checkMediaStorageLimit } from "@/server/services/usage-limits";
+import { createChildLogger } from "@/lib/logger";
 import { randomUUID } from "crypto";
 import { writeFile, mkdir } from "fs/promises";
 import { join } from "path";
 import sharp from "sharp";
+
+const log = createChildLogger("media-upload");
 
 const ALLOWED_MIMES: Record<string, { ext: string; mediaType: "image" | "video" | "gif" }> = {
   "image/jpeg": { ext: "jpg", mediaType: "image" },
@@ -156,7 +159,7 @@ export async function POST(request: Request) {
       const msg = "message" in error ? String(error.message) : "Límite alcanzado";
       return NextResponse.json({ error: msg }, { status: 403 });
     }
-    console.error("Upload error:", error);
+    log.error({ err: error }, "Upload error");
     return NextResponse.json(
       { error: "Error al subir el archivo" },
       { status: 500 }

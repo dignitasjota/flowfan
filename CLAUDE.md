@@ -179,7 +179,7 @@ Tabs:
 4. **Modelo IA** — AI provider and model selection per task
 5. **Templates** — Message templates
 6. **Telegram** — Telegram bot integration settings
-7. **Cuenta** — Account settings
+7. **Cuenta** — Account settings + email notification preferences (3 toggles)
 
 ## Contact Scoring
 
@@ -191,8 +191,147 @@ Contacts have behavioral profiles (`contactProfiles` table) with:
 - `responseSpeed`, `conversationDepth`
 - `behavioralSignals` (JSONB: message count, sentiment trend, topic frequency, etc.)
 - `scoringHistory` (JSONB: historical engagement + payment probability snapshots)
+- `churnScore` (0-100) — predicted churn risk
+- `churnFactors` (JSONB: breakdown of 5 weighted factors)
+- `churnUpdatedAt` (timestamp)
 
-Scoring is updated asynchronously via BullMQ worker when messages are sent.
+Scoring is updated asynchronously via BullMQ worker when messages are sent. Churn score is calculated in real-time during scoring pipeline and recalculated in batch every 6 hours.
+
+## Churn Prediction
+
+### Algorithm (`src/server/services/churn-prediction.ts`)
+
+`calculateChurnScore(signals, profile, contact)` returns a score 0-100 based on 5 weighted factors:
+
+| Factor | Weight | Logic |
+|--------|--------|-------|
+| Recency decay | 0.30 | Days inactive: 0d=0, 3d=15, 7d=35, 14d=60, 30d=90, 60d+=100 |
+| Engagement drop | 0.25 | % drop from peak in scoringHistory |
+| Sentiment trend | 0.15 | sentimentTrend [-1,1] mapped to [100,0] |
+| Frequency decline | 0.15 | avgTimeBetweenMessages thresholds |
+| Funnel stage | 0.15 | cold=80, curious=50, interested=30, hot_lead=15, buyer=10, vip=5 |
+
+Risk levels: `low` (0-24), `medium` (25-49), `high` (50-74), `critical` (75-100)
+
+### Integration
+- **Real-time:** Calculated after `updateContactProfile()` in `profile-updater.ts`, stored in `contactProfiles`
+- **Batch:** `computeAllChurnScores(db)` runs every 6 hours via worker scheduler, catches contacts with no recent messages
+- **Alerts:** When VIP/buyer/hot_lead crosses into high risk → creates notification + sends churn alert email
+- **Dashboard:** `ChurnPanel` component (`src/components/dashboard/churn-panel.tsx`) shows risk distribution bar + top at-risk contacts
+- **API:** `intelligence.getChurnDashboard` (counts + top 20 at-risk), `intelligence.getContactChurnDetails` (per-contact factors + actions)
+- `getSuggestedActions(funnelStage)` returns 3 retention actions per funnel stage
+
+## Sequences and Follow-Up
+
+### Overview
+
+Automated message sequences for nurturing new contacts and re-engaging inactive ones. Sequences are multi-step workflows with configurable delays and actions.
+
+### Schema
+
+- **`sequences`** — Per-creator sequence definitions with steps (JSONB), type (nurturing/followup/custom), enrollment criteria, counters (totalEnrolled/Completed/Converted)
+- **`sequenceEnrollments`** — Tracks each contact's progress through a sequence (currentStep, status, nextStepAt)
+
+### Engine (`src/server/services/sequence-engine.ts`)
+
+- `enrollContact(db, sequenceId, contactId, creatorId)` — Creates enrollment, calculates first nextStepAt, prevents duplicate enrollment
+- `processSequenceStep(db, enrollmentId)` — Executes current step action (send_message or create_notification), advances to next step or marks completed
+- `cancelEnrollment(db, enrollmentId)` — Cancels active enrollment
+- `checkSequenceSteps(db)` — Scheduler function: finds enrollments with `nextStepAt <= now`, enqueues for processing
+- `getSequenceStats(db, sequenceId)` — Enrollment counts by status, conversion rate
+
+### Step actions
+- `send_message` — Sends message to contact's active conversation with variable interpolation (`{{displayName}}`, `{{username}}`)
+- `create_notification` — Creates notification for the creator
+
+### Templates (`src/server/services/sequence-templates.ts`)
+
+- **FOLLOWUP_3_7_14** — 3 steps at 3, 7, 14 days for re-engagement
+- **NURTURING_WELCOME** — 3 steps at 0, 3, 7 days for onboarding new contacts
+- `createDefaultSequences(db, creatorId)` — Creates both templates (inactive by default)
+
+### Auto-enrollment
+
+`checkInactivityFollowups(db)` in `workflow-scheduler.ts` runs every 30 minutes:
+- Finds active followup sequences with enrollment criteria
+- Matches contacts inactive > X days in specified funnel stages
+- Auto-enrolls matching contacts not already enrolled
+
+### Workflow integration
+
+Workflow engine supports `advance_sequence` action type:
+- Action config: `{ sequenceId: string }`
+- Enrolls the contact in the specified sequence
+- Enables workflows like: trigger `new_contact` → action `advance_sequence` (auto-enroll in nurturing)
+
+### Queue
+
+`sequenceQueue` ("sequence-processing") with BullMQ:
+- Job types: `process_step` (enrollment step execution), `enroll` (enrollment via queue)
+- Worker concurrency: 3, attempts: 3, exponential backoff 5s
+
+### Scheduler (in `worker.ts`)
+- `checkSequenceSteps(db)` — every 5 minutes (each scheduler tick)
+- `checkInactivityFollowups(db)` — every 30 minutes (every 6th tick)
+
+### API (`src/server/api/routers/sequences.ts`)
+
+- `list` — all sequences for the creator
+- `getById` — sequence with stats + enrollments (top 50)
+- `create` — create sequence with steps
+- `update` — update name/description/steps/criteria
+- `toggleActive` — activate/deactivate
+- `getStats` — enrollment counts + conversion rate
+- `getEnrollments` — paginated enrollments with contact info
+- `cancelEnrollment` — cancel specific enrollment
+- `enrollContact` — manual enrollment
+
+### UI (`src/app/(dashboard)/sequences/page.tsx`)
+
+- Sequence list with type badge, active status, step count, enrollment stats
+- Create form with step builder (delay + action type + content per step)
+- Expandable detail view per sequence: stats grid, steps timeline, enrollments list
+- Activate/deactivate toggle
+
+## Email Transactional (Resend)
+
+### Service (`src/server/services/email.ts`)
+
+Singleton Resend client with graceful degradation (no-op if `RESEND_API_KEY` not set).
+
+Methods:
+- `sendVerificationEmail(to, verifyUrl)` — account verification
+- `sendPasswordResetEmail(to, resetUrl)` — password reset
+- `sendDailySummary(to, data)` — daily summary: new contacts, messages, at-risk count
+- `sendWeeklySummary(to, data)` — weekly summary: contacts, revenue, churn rate, top contacts
+- `sendChurnAlert(to, data)` — churn risk alert with at-risk contact list
+- `wrapTemplate(title, content)` — branded HTML wrapper with gradient header
+
+### Queue and Worker
+
+`emailQueue` ("email-send") with BullMQ, 3 attempts, exponential 2s backoff. Worker switches on job type and calls appropriate email service method.
+
+### Email Summaries (`src/server/services/email-summary.ts`)
+
+- `generateDailySummary(db, creatorId)` — queries new contacts, messages, at-risk count for today
+- `generateWeeklySummary(db, creatorId)` — queries contacts, revenue, churn rate, top 5 contacts for the week
+- `checkAndSendDailySummaries(db)` — finds creators with dailySummaryEnabled, enqueues emails
+- `checkAndSendWeeklySummaries(db)` — finds creators with weeklySummaryEnabled, enqueues on Mondays
+- Scheduler runs hourly, triggers at 9 UTC with Redis NX dedup keys
+
+### Creator Preferences
+
+3 columns on `creators` table:
+- `emailNotificationsEnabled` (default true) — churn alerts and important notifications
+- `dailySummaryEnabled` (default false) — daily activity summary
+- `weeklySummaryEnabled` (default true) — weekly performance summary
+
+UI: Settings → Cuenta tab, "Notificaciones por email" section with 3 toggles.
+
+### Auth Integration
+
+- Register (`/api/auth/register`) → enqueues verification email
+- Forgot password (`/api/auth/forgot-password`) → enqueues password reset email
 
 ## Revenue Tracking
 
@@ -206,9 +345,9 @@ Scoring is updated asynchronously via BullMQ worker when messages are sent.
 
 | Table | Purpose |
 |-------|---------|
-| `creators` | User accounts with settings (JSONB), subscription plan |
+| `creators` | User accounts with settings (JSONB), subscription plan, email prefs |
 | `contacts` | Fans/contacts per creator, with `isArchived` flag |
-| `contactProfiles` | Scoring data, behavioral signals, funnel stage |
+| `contactProfiles` | Scoring data, behavioral signals, funnel stage, churn score/factors |
 | `conversations` | Per-contact conversations with `isPinned`, status (active/paused/archived) |
 | `messages` | Chat messages (role: fan/creator) |
 | `platforms` | Platform configs per creator with personality JSONB |
@@ -219,3 +358,6 @@ Scoring is updated asynchronously via BullMQ worker when messages are sent.
 | `aiUsageLog` | Token usage tracking |
 | `templates` | Message templates |
 | `conversationAssignments` | Team member → conversation assignments |
+| `sequences` | Automated message sequences (nurturing/followup/custom) |
+| `sequenceEnrollments` | Contact enrollment tracking for sequences |
+| `autoResponseConfigs` | Per-platform auto-response settings |

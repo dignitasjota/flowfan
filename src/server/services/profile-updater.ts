@@ -1,9 +1,12 @@
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import type { SentimentResult } from "./ai-analysis";
-import { updateSignals, calculateScores, type BehavioralSignals } from "./scoring";
-import { contactProfiles, messages, contacts, notifications } from "@/server/db/schema";
+import { updateSignals, calculateScores, type BehavioralSignals, type ScoringConfig } from "./scoring";
+import { calculateChurnScore } from "./churn-prediction";
+import { contactProfiles, messages, contacts, notifications, platformScoringConfigs } from "@/server/db/schema";
 import { workflowQueue } from "@/server/queues";
 import { createChildLogger } from "@/lib/logger";
+import { publishEvent } from "@/lib/redis-pubsub";
+import { dispatchWebhookEvent } from "./webhook-dispatcher";
 
 const log = createChildLogger("profile-updater");
 
@@ -58,10 +61,37 @@ export async function updateContactProfile(
       contact?.totalConversations ?? 1
     );
 
-    // 4. Calculate scores
-    const scores = calculateScores(newSignals, profile.funnelStage);
+    // 4. Load platform scoring config (if any)
+    let scoringConfig: ScoringConfig | undefined;
+    const resolvedCreatorId2 = creatorId ?? contact?.creatorId;
+    if (resolvedCreatorId2 && contact?.platformType) {
+      const platformConfig = await (db as any).query.platformScoringConfigs.findFirst({
+        where: and(
+          eq(platformScoringConfigs.creatorId, resolvedCreatorId2),
+          eq(platformScoringConfigs.platformType, contact.platformType)
+        ),
+      });
+      if (platformConfig) {
+        scoringConfig = {
+          engagementWeights: platformConfig.engagementWeights as ScoringConfig["engagementWeights"],
+          paymentWeights: platformConfig.paymentWeights as ScoringConfig["paymentWeights"],
+          benchmarks: platformConfig.benchmarks as ScoringConfig["benchmarks"],
+          funnelThresholds: platformConfig.funnelThresholds as ScoringConfig["funnelThresholds"],
+          contactAgeFactor: platformConfig.contactAgeFactor as ScoringConfig["contactAgeFactor"],
+        };
+      }
+    }
 
-    // 5. Build scoring history snapshot (max 50)
+    // 5. Calculate scores
+    const scores = calculateScores(
+      newSignals,
+      profile.funnelStage,
+      scoringConfig,
+      contact?.platformType,
+      contact?.firstInteractionAt ? new Date(contact.firstInteractionAt) : undefined
+    );
+
+    // 6. Build scoring history snapshot (max 50)
     const history = Array.isArray(profile.scoringHistory) ? [...profile.scoringHistory] : [];
     history.push({
       timestamp: new Date().toISOString(),
@@ -74,7 +104,14 @@ export async function updateContactProfile(
       history.splice(0, history.length - 50);
     }
 
-    // 6. Update contact profile
+    // 7. Calculate churn score
+    const churnResult = calculateChurnScore(
+      newSignals,
+      { engagementLevel: scores.engagementLevel, funnelStage: scores.funnelStage, scoringHistory: history },
+      { lastInteractionAt: new Date() } // Just received a message, so active now
+    );
+
+    // 8. Update contact profile
     await (db as any)
       .update(contactProfiles)
       .set({
@@ -86,11 +123,14 @@ export async function updateContactProfile(
         estimatedBudget: scores.estimatedBudget,
         behavioralSignals: newSignals,
         scoringHistory: history,
+        churnScore: churnResult.score,
+        churnFactors: churnResult.factors,
+        churnUpdatedAt: new Date(),
         updatedAt: new Date(),
       })
       .where(eq(contactProfiles.contactId, contactId));
 
-    // 7. Update message sentiment
+    // 9. Update message sentiment
     await (db as any)
       .update(messages)
       .set({
@@ -106,7 +146,7 @@ export async function updateContactProfile(
       })
       .where(eq(messages.id, messageId));
 
-    // 8. Create notifications for significant changes
+    // 10. Create notifications for significant changes
     const resolvedCreatorId = creatorId ?? contact?.creatorId;
     if (resolvedCreatorId) {
       const username = contact?.displayName || contact?.username || "Contacto";
@@ -121,6 +161,10 @@ export async function updateContactProfile(
           message: `La probabilidad de pago de ${username} subio de ${prevPayment}% a ${scores.paymentProbability}%.`,
           data: { from: prevPayment, to: scores.paymentProbability },
         });
+        publishEvent(resolvedCreatorId, {
+          type: "notification",
+          data: { contactId, notificationType: "payment_probability_spike" },
+        }).catch(() => {});
       }
 
       // Funnel stage advance
@@ -133,6 +177,10 @@ export async function updateContactProfile(
           message: `${username} paso de ${FUNNEL_LABELS[prevFunnel] ?? prevFunnel} a ${FUNNEL_LABELS[scores.funnelStage] ?? scores.funnelStage}.`,
           data: { from: prevFunnel, to: scores.funnelStage },
         });
+        publishEvent(resolvedCreatorId, {
+          type: "notification",
+          data: { contactId, notificationType: "funnel_advance" },
+        }).catch(() => {});
 
         // Dispatch workflow event for funnel change
         try {
@@ -146,6 +194,23 @@ export async function updateContactProfile(
         } catch (e) {
           log.warn({ err: e }, "Failed to enqueue funnel_stage_change workflow event");
         }
+      }
+
+      // Dispatch webhook: contact.updated
+      dispatchWebhookEvent(db, resolvedCreatorId, "contact.updated", {
+        contactId,
+        engagementLevel: scores.engagementLevel,
+        paymentProbability: scores.paymentProbability,
+        funnelStage: scores.funnelStage,
+      }).catch(() => {});
+
+      // Dispatch webhook: funnel_stage.changed
+      if (scores.funnelStage !== prevFunnel) {
+        dispatchWebhookEvent(db, resolvedCreatorId, "funnel_stage.changed", {
+          contactId,
+          previousStage: prevFunnel,
+          newStage: scores.funnelStage,
+        }).catch(() => {});
       }
 
       // Dispatch workflow event for significant sentiment change

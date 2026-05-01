@@ -1,5 +1,8 @@
 import { join } from "path";
 import { writeFile, mkdir } from "fs/promises";
+import { createChildLogger } from "@/lib/logger";
+
+const log = createChildLogger("instagram-scraper");
 
 export async function scrapeInstagramProfile(username: string, contactId: string): Promise<{ displayName?: string, avatarUrl?: string }> {
     try {
@@ -46,7 +49,7 @@ export async function scrapeInstagramProfile(username: string, contactId: string
 
         return { displayName, avatarUrl };
     } catch (error) {
-        console.error("Failed to scrape instagram profile", error);
+        log.error({ err: error }, "Failed to scrape instagram profile");
         return {};
     }
 }

@@ -3,6 +3,7 @@ import { eq, and, gte, lte, sql, desc, count, sum } from "drizzle-orm";
 import { createTRPCRouter, protectedProcedure } from "../trpc";
 import { fanTransactions, contacts, contactProfiles, messages, conversations } from "@/server/db/schema";
 import { checkRevenueAccess } from "@/server/services/usage-limits";
+import { dispatchWebhookEvent } from "@/server/services/webhook-dispatcher";
 
 export const revenueRouter = createTRPCRouter({
   // Registrar transacción
@@ -45,6 +46,14 @@ export const revenueRouter = createTRPCRouter({
           transactionDate: input.transactionDate ?? new Date(),
         })
         .returning();
+
+      // Dispatch webhook: transaction.created
+      dispatchWebhookEvent(ctx.db, ctx.creatorId, "transaction.created", {
+        transactionId: tx!.id,
+        contactId: input.contactId,
+        type: input.type,
+        amount: amountCents,
+      }).catch(() => {});
 
       return tx;
     }),

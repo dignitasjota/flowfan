@@ -10,6 +10,7 @@ import {
 import { decrypt } from "@/lib/crypto";
 import { analysisQueue, telegramAutoReplyQueue } from "@/server/queues";
 import { workflowQueue } from "@/server/queues";
+import { publishEvent } from "@/lib/redis-pubsub";
 import type { TelegramUpdate } from "@/server/services/telegram";
 import { createChildLogger } from "@/lib/logger";
 
@@ -142,6 +143,24 @@ export async function POST(
         totalConversations: contact.totalConversations + 1,
       })
       .where(eq(contacts.id, contact.id));
+
+    // Publish real-time events
+    if (savedMessage) {
+      publishEvent(config.creatorId, {
+        type: "new_message",
+        data: {
+          conversationId: conversation.id,
+          messageId: savedMessage.id,
+          role: "fan",
+          contactName: contact.displayName ?? contact.username,
+          source: "telegram",
+        },
+      }).catch(() => {});
+      publishEvent(config.creatorId, {
+        type: "conversation_update",
+        data: { conversationId: conversation.id },
+      }).catch(() => {});
+    }
 
     // Enqueue analysis
     if (savedMessage) {

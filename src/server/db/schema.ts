@@ -150,6 +150,9 @@ export const creators = pgTable("creators", {
   currentPeriodEnd: timestamp("current_period_end"),
   onboardingCompleted: boolean("onboarding_completed").default(false).notNull(),
   settings: jsonb("settings").default({}),
+  emailNotificationsEnabled: boolean("email_notifications_enabled").default(true).notNull(),
+  dailySummaryEnabled: boolean("daily_summary_enabled").default(false).notNull(),
+  weeklySummaryEnabled: boolean("weekly_summary_enabled").default(true).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -232,6 +235,9 @@ export const contactProfiles = pgTable("contact_profiles", {
   behavioralSignals: jsonb("behavioral_signals").default({}),
   currentConversationMode: conversationModeTypeEnum("current_conversation_mode"),
   modeChangedAt: timestamp("mode_changed_at"),
+  churnScore: integer("churn_score").default(0).notNull(),
+  churnFactors: jsonb("churn_factors").default({}),
+  churnUpdatedAt: timestamp("churn_updated_at"),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
@@ -632,6 +638,20 @@ export const workflowActionTypeEnum = pgEnum("workflow_action_type", [
   "send_template",
   "create_notification",
   "change_tags",
+  "advance_sequence",
+]);
+
+export const sequenceTypeEnum = pgEnum("sequence_type", [
+  "nurturing",
+  "followup",
+  "custom",
+]);
+
+export const sequenceEnrollmentStatusEnum = pgEnum("sequence_enrollment_status", [
+  "active",
+  "completed",
+  "cancelled",
+  "paused",
 ]);
 
 export const workflows = pgTable(
@@ -689,6 +709,39 @@ export const workflowExecutions = pgTable(
     index("workflow_executions_contact_idx").on(table.contactId),
   ]
 );
+
+// --- Platform Scoring Configs ---
+
+export const platformScoringConfigs = pgTable(
+  "platform_scoring_configs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    creatorId: uuid("creator_id")
+      .notNull()
+      .references(() => creators.id, { onDelete: "cascade" }),
+    platformType: platformTypeEnum("platform_type").notNull(),
+    engagementWeights: jsonb("engagement_weights"),
+    paymentWeights: jsonb("payment_weights"),
+    benchmarks: jsonb("benchmarks"),
+    funnelThresholds: jsonb("funnel_thresholds"),
+    contactAgeFactor: jsonb("contact_age_factor"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("platform_scoring_configs_creator_platform_idx").on(
+      table.creatorId,
+      table.platformType
+    ),
+  ]
+);
+
+export const platformScoringConfigsRelations = relations(platformScoringConfigs, ({ one }) => ({
+  creator: one(creators, {
+    fields: [platformScoringConfigs.creatorId],
+    references: [creators.id],
+  }),
+}));
 
 // --- Segments ---
 
@@ -1377,5 +1430,187 @@ export const autoResponseConfigsRelations = relations(autoResponseConfigs, ({ on
   creator: one(creators, {
     fields: [autoResponseConfigs.creatorId],
     references: [creators.id],
+  }),
+}));
+
+// --- Sequences ---
+
+export const sequences = pgTable(
+  "sequences",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    creatorId: uuid("creator_id")
+      .notNull()
+      .references(() => creators.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 255 }).notNull(),
+    description: text("description"),
+    type: sequenceTypeEnum("type").notNull().default("custom"),
+    steps: jsonb("steps").default([]).notNull(),
+    isActive: boolean("is_active").default(true).notNull(),
+    enrollmentCriteria: jsonb("enrollment_criteria").default({}).notNull(),
+    totalEnrolled: integer("total_enrolled").default(0).notNull(),
+    totalCompleted: integer("total_completed").default(0).notNull(),
+    totalConverted: integer("total_converted").default(0).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("sequences_creator_idx").on(table.creatorId),
+    index("sequences_creator_active_idx").on(table.creatorId, table.isActive),
+  ]
+);
+
+export const sequencesRelations = relations(sequences, ({ one, many }) => ({
+  creator: one(creators, {
+    fields: [sequences.creatorId],
+    references: [creators.id],
+  }),
+  enrollments: many(sequenceEnrollments),
+}));
+
+export const sequenceEnrollments = pgTable(
+  "sequence_enrollments",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    sequenceId: uuid("sequence_id")
+      .notNull()
+      .references(() => sequences.id, { onDelete: "cascade" }),
+    contactId: uuid("contact_id")
+      .notNull()
+      .references(() => contacts.id, { onDelete: "cascade" }),
+    creatorId: uuid("creator_id")
+      .notNull()
+      .references(() => creators.id, { onDelete: "cascade" }),
+    currentStep: integer("current_step").default(0).notNull(),
+    status: sequenceEnrollmentStatusEnum("status").default("active").notNull(),
+    enrolledAt: timestamp("enrolled_at").defaultNow().notNull(),
+    lastStepAt: timestamp("last_step_at"),
+    nextStepAt: timestamp("next_step_at"),
+    metadata: jsonb("metadata").default({}).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("sequence_enrollments_sequence_status_idx").on(table.sequenceId, table.status),
+    index("sequence_enrollments_contact_idx").on(table.contactId),
+    index("sequence_enrollments_status_next_idx").on(table.status, table.nextStepAt),
+  ]
+);
+
+export const sequenceEnrollmentsRelations = relations(sequenceEnrollments, ({ one }) => ({
+  sequence: one(sequences, {
+    fields: [sequenceEnrollments.sequenceId],
+    references: [sequences.id],
+  }),
+  contact: one(contacts, {
+    fields: [sequenceEnrollments.contactId],
+    references: [contacts.id],
+  }),
+  creator: one(creators, {
+    fields: [sequenceEnrollments.creatorId],
+    references: [creators.id],
+  }),
+}));
+
+// --- API Keys ---
+
+export const apiKeys = pgTable(
+  "api_keys",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    creatorId: uuid("creator_id")
+      .notNull()
+      .references(() => creators.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 255 }).notNull(),
+    keyPrefix: varchar("key_prefix", { length: 20 }).notNull(),
+    keyHash: varchar("key_hash", { length: 64 }).notNull(),
+    encryptedKey: text("encrypted_key").notNull(),
+    lastUsedAt: timestamp("last_used_at"),
+    expiresAt: timestamp("expires_at"),
+    isActive: boolean("is_active").default(true).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    revokedAt: timestamp("revoked_at"),
+  },
+  (table) => [
+    index("api_keys_hash_idx").on(table.keyHash),
+    index("api_keys_creator_idx").on(table.creatorId),
+  ]
+);
+
+export const apiKeysRelations = relations(apiKeys, ({ one }) => ({
+  creator: one(creators, {
+    fields: [apiKeys.creatorId],
+    references: [creators.id],
+  }),
+}));
+
+// --- Webhook Configs ---
+
+export const webhookEventEnum = pgEnum("webhook_event", [
+  "contact.created",
+  "contact.updated",
+  "message.received",
+  "funnel_stage.changed",
+  "transaction.created",
+]);
+
+export const webhookConfigs = pgTable(
+  "webhook_configs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    creatorId: uuid("creator_id")
+      .notNull()
+      .references(() => creators.id, { onDelete: "cascade" }),
+    url: text("url").notNull(),
+    events: text("events").array().notNull(),
+    secret: text("secret").notNull(),
+    isActive: boolean("is_active").default(true).notNull(),
+    description: varchar("description", { length: 255 }),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("webhook_configs_creator_idx").on(table.creatorId),
+  ]
+);
+
+export const webhookConfigsRelations = relations(webhookConfigs, ({ one, many }) => ({
+  creator: one(creators, {
+    fields: [webhookConfigs.creatorId],
+    references: [creators.id],
+  }),
+  deliveryLogs: many(webhookDeliveryLogs),
+}));
+
+// --- Webhook Delivery Logs ---
+
+export const webhookDeliveryLogs = pgTable(
+  "webhook_delivery_logs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    webhookConfigId: uuid("webhook_config_id")
+      .notNull()
+      .references(() => webhookConfigs.id, { onDelete: "cascade" }),
+    event: varchar("event", { length: 100 }).notNull(),
+    payload: jsonb("payload").notNull(),
+    statusCode: integer("status_code"),
+    responseBody: text("response_body"),
+    attempt: integer("attempt").default(1).notNull(),
+    deliveredAt: timestamp("delivered_at"),
+    error: text("error"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("webhook_delivery_logs_config_created_idx").on(
+      table.webhookConfigId,
+      table.createdAt
+    ),
+  ]
+);
+
+export const webhookDeliveryLogsRelations = relations(webhookDeliveryLogs, ({ one }) => ({
+  webhookConfig: one(webhookConfigs, {
+    fields: [webhookDeliveryLogs.webhookConfigId],
+    references: [webhookConfigs.id],
   }),
 }));

@@ -102,3 +102,62 @@ export async function checkNoResponseTimeouts(db: Db): Promise<void> {
     "No-response timeout check completed"
   );
 }
+
+/**
+ * Checks active followup sequences and auto-enrolls contacts
+ * that meet inactivity criteria and are not already enrolled.
+ */
+export async function checkInactivityFollowups(db: Db): Promise<void> {
+  const { sequences, sequenceEnrollments, contacts: contactsTable, contactProfiles } = await import("@/server/db/schema");
+  const { enrollContact } = await import("@/server/services/sequence-engine");
+
+  // Find active followup sequences
+  const followupSequences = await (db as any)
+    .select()
+    .from(sequences)
+    .where(
+      and(
+        eq(sequences.isActive, true),
+        eq(sequences.type, "followup")
+      )
+    );
+
+  if (followupSequences.length === 0) return;
+
+  for (const sequence of followupSequences) {
+    const criteria = sequence.enrollmentCriteria as {
+      minDaysInactive?: number;
+      funnelStages?: string[];
+    };
+
+    const minDays = criteria.minDaysInactive ?? 3;
+    const funnelStages = criteria.funnelStages ?? [];
+    const cutoff = new Date(Date.now() - minDays * 24 * 60 * 60 * 1000);
+
+    // Find inactive contacts for this creator
+    const inactiveContacts = await (db as any)
+      .select({ id: contactsTable.id })
+      .from(contactsTable)
+      .innerJoin(contactProfiles, eq(contactProfiles.contactId, contactsTable.id))
+      .where(
+        and(
+          eq(contactsTable.creatorId, sequence.creatorId),
+          eq(contactsTable.isArchived, false),
+          sql`${contactsTable.lastInteractionAt} < ${cutoff}`,
+          funnelStages.length > 0
+            ? sql`${contactProfiles.funnelStage} IN (${sql.join(funnelStages.map((s: string) => sql`${s}`), sql`, `)})`
+            : sql`1=1`
+        )
+      );
+
+    for (const contact of inactiveContacts) {
+      try {
+        await enrollContact(db as any, sequence.id, contact.id, sequence.creatorId);
+      } catch {
+        // Skip errors (duplicate enrollment, etc.)
+      }
+    }
+  }
+
+  log.debug({ sequenceCount: followupSequences.length }, "Inactivity followup check completed");
+}

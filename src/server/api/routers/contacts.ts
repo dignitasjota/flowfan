@@ -7,6 +7,10 @@ import { checkContactLimit } from "@/server/services/usage-limits";
 import { workflowQueue } from "@/server/queues";
 import { platformTypeSchema, funnelStageSchema } from "@/lib/constants";
 import { scrapeInstagramProfile } from "@/server/services/instagram-scraper";
+import { createChildLogger } from "@/lib/logger";
+import { dispatchWebhookEvent } from "@/server/services/webhook-dispatcher";
+
+const log = createChildLogger("contacts-router");
 
 export const contactsRouter = createTRPCRouter({
   list: protectedProcedure
@@ -119,6 +123,13 @@ export const contactsRouter = createTRPCRouter({
         // Non-critical: workflow event dispatch failure shouldn't block contact creation
       }
 
+      // Dispatch webhook: contact.created
+      dispatchWebhookEvent(ctx.db, ctx.creatorId, "contact.created", {
+        contactId: contact!.id,
+        username: input.username,
+        platformType: input.platformType,
+      }).catch(() => {});
+
       // Background instagram scraping if missing info
       if (input.platformType === "instagram" && (!input.avatarUrl || !input.displayName)) {
         scrapeInstagramProfile(input.username, contact!.id)
@@ -134,7 +145,7 @@ export const contactsRouter = createTRPCRouter({
                 .where(eq(contacts.id, contact!.id));
             }
           })
-          .catch((err) => console.error("Instagram Scraper background error", err));
+          .catch((err) => log.error({ err }, "Instagram Scraper background error"));
       }
 
       return contact;

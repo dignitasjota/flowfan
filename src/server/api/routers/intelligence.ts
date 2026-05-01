@@ -613,4 +613,118 @@ export const intelligenceRouter = createTRPCRouter({
 
       return { data: JSON.stringify(rows, null, 2), format: "json" as const };
     }),
+
+  // ============================================================
+  // Churn Dashboard
+  // ============================================================
+
+  getChurnDashboard: protectedProcedure.query(async ({ ctx }) => {
+    const { getSuggestedActions } = await import("@/server/services/churn-prediction");
+
+    const atRiskContacts = await ctx.db
+      .select({
+        id: contacts.id,
+        username: contacts.username,
+        displayName: contacts.displayName,
+        platformType: contacts.platformType,
+        lastInteractionAt: contacts.lastInteractionAt,
+        churnScore: contactProfiles.churnScore,
+        churnFactors: contactProfiles.churnFactors,
+        funnelStage: contactProfiles.funnelStage,
+        engagementLevel: contactProfiles.engagementLevel,
+      })
+      .from(contacts)
+      .innerJoin(contactProfiles, eq(contactProfiles.contactId, contacts.id))
+      .where(
+        and(
+          eq(contacts.creatorId, ctx.creatorId),
+          eq(contacts.isArchived, false),
+          gte(contactProfiles.churnScore, 50)
+        )
+      )
+      .orderBy(desc(contactProfiles.churnScore))
+      .limit(20);
+
+    let criticalCount = 0;
+    let highCount = 0;
+    let mediumCount = 0;
+
+    // Count all risk levels (not just top 20)
+    const allRiskCounts = await ctx.db
+      .select({
+        churnScore: contactProfiles.churnScore,
+      })
+      .from(contacts)
+      .innerJoin(contactProfiles, eq(contactProfiles.contactId, contacts.id))
+      .where(
+        and(
+          eq(contacts.creatorId, ctx.creatorId),
+          eq(contacts.isArchived, false),
+          gte(contactProfiles.churnScore, 25)
+        )
+      );
+
+    for (const r of allRiskCounts) {
+      if (r.churnScore >= 75) criticalCount++;
+      else if (r.churnScore >= 50) highCount++;
+      else mediumCount++;
+    }
+
+    const now = Date.now();
+    const enrichedContacts = atRiskContacts.map((c) => ({
+      id: c.id,
+      username: c.username,
+      displayName: c.displayName,
+      platformType: c.platformType,
+      churnScore: c.churnScore,
+      funnelStage: c.funnelStage,
+      engagementLevel: c.engagementLevel,
+      daysSinceInteraction: Math.floor((now - c.lastInteractionAt.getTime()) / (1000 * 60 * 60 * 24)),
+      suggestedAction: getSuggestedActions(c.funnelStage)[0] ?? "Enviar mensaje",
+      riskLevel: c.churnScore >= 75 ? "critical" : "high",
+    }));
+
+    return {
+      criticalCount,
+      highCount,
+      mediumCount,
+      atRiskContacts: enrichedContacts,
+    };
+  }),
+
+  getContactChurnDetails: protectedProcedure
+    .input(z.object({ contactId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const { getSuggestedActions } = await import("@/server/services/churn-prediction");
+
+      const profile = await ctx.db.query.contactProfiles.findFirst({
+        where: eq(contactProfiles.contactId, input.contactId),
+        columns: {
+          churnScore: true,
+          churnFactors: true,
+          funnelStage: true,
+          churnUpdatedAt: true,
+        },
+      });
+
+      if (!profile) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Perfil no encontrado" });
+      }
+
+      const riskLevel = profile.churnScore >= 75
+        ? "critical"
+        : profile.churnScore >= 50
+          ? "high"
+          : profile.churnScore >= 25
+            ? "medium"
+            : "low";
+
+      return {
+        churnScore: profile.churnScore,
+        factors: profile.churnFactors as { name: string; score: number; weight: number; description: string }[],
+        riskLevel,
+        suggestedActions: getSuggestedActions(profile.funnelStage),
+        updatedAt: profile.churnUpdatedAt,
+      };
+    }),
 });

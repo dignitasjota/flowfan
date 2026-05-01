@@ -9,14 +9,18 @@ import { TelegramSettings } from "@/components/settings/telegram-settings";
 import { GlobalInstructionsSettings } from "@/components/settings/global-instructions-settings";
 import { ConversationModesSettings } from "@/components/settings/conversation-modes-settings";
 import { AutoResponseSettings } from "@/components/settings/auto-response-settings";
+import { ScoringSettings } from "@/components/settings/scoring-settings";
+import { ApiSettings } from "@/components/settings/api-settings";
 
 const tabs = [
   { id: "personality", label: "Personalidad" },
   { id: "global", label: "Instrucciones globales" },
   { id: "conversation-modes", label: "Modos conversacion" },
   { id: "ai-model", label: "Modelo IA" },
+  { id: "scoring", label: "Scoring" },
   { id: "templates", label: "Templates" },
   { id: "auto-responses", label: "Auto-respuestas" },
+  { id: "api", label: "API & Webhooks" },
   { id: "telegram", label: "Telegram" },
   { id: "account", label: "Cuenta" },
 ] as const;
@@ -56,8 +60,10 @@ export default function SettingsPage() {
         {activeTab === "global" && <GlobalInstructionsSettings />}
         {activeTab === "conversation-modes" && <ConversationModesSettings />}
         {activeTab === "ai-model" && <AIModelSettings />}
+        {activeTab === "scoring" && <ScoringSettings />}
         {activeTab === "templates" && <TemplateSettings />}
         {activeTab === "auto-responses" && <AutoResponseSettings />}
+        {activeTab === "api" && <ApiSettings />}
         {activeTab === "telegram" && <TelegramSettings />}
         {activeTab === "account" && <AccountSettings />}
       </div>

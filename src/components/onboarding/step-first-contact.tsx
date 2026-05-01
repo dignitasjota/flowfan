@@ -33,7 +33,6 @@ export function StepFirstContact({ onComplete }: Props) {
     } catch (err) {
       if (!handleError(err)) {
         setError("Error al crear el contacto. Intenta de nuevo.");
-        console.error("Error creating contact:", err);
       }
     }
   }

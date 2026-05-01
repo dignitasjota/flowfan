@@ -317,6 +317,9 @@ export async function executeAction(
     case "change_tags":
       return executeChangeTags(db, actionConfig, contact);
 
+    case "advance_sequence":
+      return executeAdvanceSequence(db, actionConfig, contact, workflow.creatorId);
+
     default:
       return { success: false, result: null, error: `Unknown action type: ${workflow.actionType}` };
   }
@@ -456,6 +459,27 @@ async function executeChangeTags(
   return {
     success: true,
     result: { previousTags: currentTags, updatedTags, added: tagsToAdd, removed: tagsToRemove },
+  };
+}
+
+async function executeAdvanceSequence(
+  db: Db,
+  config: Record<string, unknown>,
+  contact: typeof contacts.$inferSelect,
+  creatorId: string,
+): Promise<ActionResult> {
+  const sequenceId = config.sequenceId as string;
+  if (!sequenceId) {
+    return { success: false, result: null, error: "No sequenceId in action config" };
+  }
+
+  const { enrollContact } = await import("@/server/services/sequence-engine");
+  const result = await enrollContact(db as any, sequenceId, contact.id, creatorId);
+
+  return {
+    success: result.enrolled,
+    result,
+    error: result.enrolled ? undefined : result.reason,
   };
 }
 

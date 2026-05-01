@@ -7,6 +7,17 @@ import { trpc } from "@/lib/trpc";
 import superjson from "superjson";
 import { SessionProvider } from "next-auth/react";
 import { ToastProvider } from "@/components/ui/toast";
+import { useRealtime, RealtimeContext } from "@/hooks/use-realtime";
+
+function RealtimeConnection({ children }: { children: React.ReactNode }) {
+  const realtime = useRealtime();
+
+  return (
+    <RealtimeContext.Provider value={realtime}>
+      {children}
+    </RealtimeContext.Provider>
+  );
+}
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(() => new QueryClient());
@@ -26,7 +37,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
       <trpc.Provider client={trpcClient} queryClient={queryClient}>
         <QueryClientProvider client={queryClient}>
           <ToastProvider>
-            {children}
+            <RealtimeConnection>
+              {children}
+            </RealtimeConnection>
           </ToastProvider>
         </QueryClientProvider>
       </trpc.Provider>

@@ -6,6 +6,10 @@ import { signOut } from "next-auth/react";
 
 export function AccountSettings() {
   const profileQuery = trpc.account.getProfile.useQuery();
+  const emailPrefs = trpc.account.getEmailPreferences.useQuery();
+  const updateEmailPrefs = trpc.account.updateEmailPreferences.useMutation({
+    onSuccess: () => emailPrefs.refetch(),
+  });
   const deleteAccount = trpc.account.deleteAccount.useMutation();
 
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -67,6 +71,49 @@ export function AccountSettings() {
                 {new Date(profile.createdAt).toLocaleDateString("es-ES")}
               </span>
             </div>
+          </div>
+        )}
+      </div>
+
+      {/* Email Notifications */}
+      <div>
+        <h3 className="text-lg font-semibold text-white">Notificaciones por email</h3>
+        <p className="mt-1 text-sm text-gray-400">
+          Configura que emails quieres recibir.
+        </p>
+
+        {emailPrefs.data && (
+          <div className="mt-4 space-y-3">
+            {([
+              { key: "emailNotificationsEnabled" as const, label: "Alertas importantes", desc: "Recibe alertas de churn y cambios criticos" },
+              { key: "dailySummaryEnabled" as const, label: "Resumen diario", desc: "Resumen de actividad cada dia a las 9:00 UTC" },
+              { key: "weeklySummaryEnabled" as const, label: "Resumen semanal", desc: "Resumen de metricas cada lunes" },
+            ]).map((pref) => (
+              <div key={pref.key} className="flex items-center justify-between rounded-lg border border-gray-700 bg-gray-800 px-4 py-3">
+                <div>
+                  <span className="text-sm text-white">{pref.label}</span>
+                  <p className="text-xs text-gray-500">{pref.desc}</p>
+                </div>
+                <button
+                  onClick={() =>
+                    updateEmailPrefs.mutate({
+                      ...emailPrefs.data,
+                      [pref.key]: !emailPrefs.data[pref.key],
+                    })
+                  }
+                  disabled={updateEmailPrefs.isPending}
+                  className={`relative h-6 w-11 rounded-full transition-colors ${
+                    emailPrefs.data[pref.key] ? "bg-indigo-600" : "bg-gray-700"
+                  }`}
+                >
+                  <span
+                    className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
+                      emailPrefs.data[pref.key] ? "left-5" : "left-0.5"
+                    }`}
+                  />
+                </button>
+              </div>
+            ))}
           </div>
         )}
       </div>

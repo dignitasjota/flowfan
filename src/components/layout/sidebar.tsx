@@ -9,6 +9,7 @@ import { trpc } from "@/lib/trpc";
 import { useTheme } from "@/hooks/useTheme";
 import { useSession } from "next-auth/react";
 import { TeamSwitcher } from "./team-switcher";
+import { GlobalSearch } from "./global-search";
 import Image from "next/image";
 
 // access: "all" = any team member, "manager" = owner+manager, "owner" = owner only
@@ -20,6 +21,7 @@ const navigation = [
   { name: "Revenue", href: "/revenue", icon: "💰", access: "manager" as const },
   { name: "Media Vault", href: "/media", icon: "🖼️", access: "manager" as const },
   { name: "Automatizaciones", href: "/workflows", icon: "⚡", access: "manager" as const },
+  { name: "Secuencias", href: "/sequences", icon: "🔄", access: "manager" as const },
   { name: "Programados", href: "/scheduled", icon: "⏰", access: "all" as const },
   { name: "Broadcasts", href: "/broadcasts", icon: "📢", access: "manager" as const },
   { name: "Equipo", href: "/team", icon: "👤", access: "owner" as const },
@@ -94,6 +96,9 @@ export function Sidebar({ user }: SidebarProps) {
 
       {/* Team Switcher */}
       <TeamSwitcher />
+
+      {/* Global Search */}
+      <GlobalSearch />
 
       {/* Navigation */}
       <nav className="flex-1 space-y-1 px-3 py-4">
@@ -201,10 +206,7 @@ export function Sidebar({ user }: SidebarProps) {
 }
 
 function NotificationBell() {
-  const { data: unreadCount } = trpc.intelligence.getUnreadCount.useQuery(
-    undefined,
-    { refetchInterval: 30000 }
-  );
+  const { data: unreadCount } = trpc.intelligence.getUnreadCount.useQuery();
 
   return (
     <Link

@@ -95,12 +95,20 @@ export async function POST(req: Request) {
     emailVerificationToken: verificationToken,
   });
 
-  // Log verification URL (in production, send email)
+  // Send verification email
   const verifyUrl = `${process.env.NEXTAUTH_URL}/api/auth/verify-email?token=${verificationToken}`;
   log.info({ email, verifyUrl }, "Email verification URL generated");
 
-  // TODO: Integrate email service (Resend, SendGrid, etc.)
-  // await sendVerificationEmail(email, verifyUrl);
+  try {
+    const { emailQueue } = await import("@/server/queues");
+    await emailQueue.add("verification", {
+      type: "verification" as const,
+      to: email,
+      data: { verifyUrl },
+    });
+  } catch (err) {
+    log.warn({ err, email }, "Failed to enqueue verification email");
+  }
 
   return NextResponse.json({ success: true }, { status: 201 });
 }

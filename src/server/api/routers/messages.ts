@@ -3,6 +3,7 @@ import { eq, and } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { createTRPCRouter, protectedProcedure } from "../trpc";
 import { createChildLogger } from "@/lib/logger";
+import { publishEvent } from "@/lib/redis-pubsub";
 
 const log = createChildLogger("messages-router");
 import { messages, conversations, contacts } from "@/server/db/schema";
@@ -78,6 +79,25 @@ export const messagesRouter = createTRPCRouter({
         .set({ lastInteractionAt: new Date() })
         .where(eq(contacts.id, conversation.contactId));
 
+      // Publish real-time event
+      if (message) {
+        // Get contact name for notification
+        const contact = await ctx.db.query.contacts.findFirst({
+          where: eq(contacts.id, conversation.contactId),
+          columns: { username: true, displayName: true },
+        });
+
+        publishEvent(ctx.creatorId, {
+          type: "new_message",
+          data: {
+            conversationId: input.conversationId,
+            messageId: message.id,
+            role: "fan",
+            contactName: contact?.displayName ?? contact?.username ?? "Fan",
+          },
+        }).catch(() => {});
+      }
+
       // Enqueue analysis job (processed by worker)
       if (message) {
         const recentMessages = await ctx.db.query.messages.findMany({
@@ -144,6 +164,18 @@ export const messagesRouter = createTRPCRouter({
         .update(conversations)
         .set({ lastMessageAt: new Date() })
         .where(eq(conversations.id, input.conversationId));
+
+      // Publish real-time event
+      if (message) {
+        publishEvent(ctx.creatorId, {
+          type: "new_message",
+          data: {
+            conversationId: input.conversationId,
+            messageId: message.id,
+            role: "creator",
+          },
+        }).catch(() => {});
+      }
 
       // If conversation is on Telegram, enqueue outgoing message
       if (conversation.platformType === "telegram" && message) {

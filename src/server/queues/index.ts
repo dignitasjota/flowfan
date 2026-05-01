@@ -166,3 +166,66 @@ export type ImportJobData = {
   importJobId: string;
   creatorId: string;
 };
+
+// --- Email queue ---
+
+export const emailQueue = new Queue("email-send", {
+  connection: {
+    host: new URL(process.env.REDIS_URL ?? "redis://localhost:6379").hostname,
+    port: Number(new URL(process.env.REDIS_URL ?? "redis://localhost:6379").port) || 6379,
+  },
+  defaultJobOptions: {
+    attempts: 3,
+    backoff: { type: "exponential", delay: 2000 },
+    removeOnComplete: { count: 5000 },
+    removeOnFail: { count: 10000 },
+  },
+});
+
+export type EmailJobData = {
+  type: "verification" | "password_reset" | "daily_summary" | "weekly_summary" | "churn_alert";
+  to: string;
+  data: Record<string, unknown>;
+};
+
+// --- Sequence queue ---
+
+export const sequenceQueue = new Queue("sequence-processing", {
+  connection: {
+    host: new URL(process.env.REDIS_URL ?? "redis://localhost:6379").hostname,
+    port: Number(new URL(process.env.REDIS_URL ?? "redis://localhost:6379").port) || 6379,
+  },
+  defaultJobOptions: {
+    attempts: 3,
+    backoff: { type: "exponential", delay: 5000 },
+    removeOnComplete: { count: 2000 },
+    removeOnFail: { count: 5000 },
+  },
+});
+
+export type SequenceJobData =
+  | { type: "process_step"; enrollmentId: string }
+  | { type: "enroll"; sequenceId: string; contactId: string; creatorId: string };
+
+// --- Webhook delivery queue ---
+
+export const webhookDeliveryQueue = new Queue("webhook-delivery", {
+  connection: {
+    host: new URL(process.env.REDIS_URL ?? "redis://localhost:6379").hostname,
+    port: Number(new URL(process.env.REDIS_URL ?? "redis://localhost:6379").port) || 6379,
+  },
+  defaultJobOptions: {
+    attempts: 3,
+    backoff: { type: "exponential", delay: 5000 },
+    removeOnComplete: { count: 5000 },
+    removeOnFail: { count: 10000 },
+  },
+});
+
+export type WebhookDeliveryJobData = {
+  webhookConfigId: string;
+  event: string;
+  payload: Record<string, unknown>;
+  url: string;
+  secret: string;
+};

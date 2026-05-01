@@ -22,6 +22,10 @@ import { conversationModesRouter } from "./routers/conversation-modes";
 import { searchRouter } from "./routers/search";
 import { importRouter } from "./routers/import";
 import { autoResponseRouter } from "./routers/auto-response";
+import { sequencesRouter } from "./routers/sequences";
+import { scoringConfigRouter } from "./routers/scoring-config";
+import { apiKeysRouter } from "./routers/api-keys";
+import { webhooksOutgoingRouter } from "./routers/webhooks-outgoing";
 
 export const appRouter = createTRPCRouter({
   contacts: contactsRouter,
@@ -47,6 +51,10 @@ export const appRouter = createTRPCRouter({
   search: searchRouter,
   import: importRouter,
   autoResponse: autoResponseRouter,
+  sequences: sequencesRouter,
+  scoringConfig: scoringConfigRouter,
+  apiKeys: apiKeysRouter,
+  webhooksOutgoing: webhooksOutgoingRouter,
 });
 
 export type AppRouter = typeof appRouter;

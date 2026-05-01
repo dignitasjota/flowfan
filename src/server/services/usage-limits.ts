@@ -41,6 +41,8 @@ type PlanLimits = {
   assignments: boolean;
   scheduledMessagesPerMonth: number;
   optimalTimeSuggestion: boolean;
+  apiAccess: "none" | "readonly" | "full";
+  webhooks: boolean;
 };
 
 export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
@@ -66,6 +68,8 @@ export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
     assignments: false,
     scheduledMessagesPerMonth: 0,
     optimalTimeSuggestion: false,
+    apiAccess: "none",
+    webhooks: false,
   },
   starter: {
     contacts: 50,
@@ -89,6 +93,8 @@ export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
     assignments: false,
     scheduledMessagesPerMonth: 5,
     optimalTimeSuggestion: false,
+    apiAccess: "none",
+    webhooks: false,
   },
   pro: {
     contacts: -1,
@@ -112,6 +118,8 @@ export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
     assignments: true,
     scheduledMessagesPerMonth: 50,
     optimalTimeSuggestion: true,
+    apiAccess: "readonly",
+    webhooks: false,
   },
   business: {
     contacts: -1,
@@ -135,6 +143,8 @@ export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
     assignments: true,
     scheduledMessagesPerMonth: -1,
     optimalTimeSuggestion: true,
+    apiAccess: "full",
+    webhooks: true,
   },
 };
 
@@ -546,6 +556,43 @@ export async function checkOptimalTimeSuggestion(db: Db, creatorId: string) {
     throw new TRPCError({
       code: "FORBIDDEN",
       message: `La sugerencia de horario óptimo no está disponible en el plan ${plan}. Actualiza a Pro o superior para acceder.`,
+    });
+  }
+}
+
+export async function checkApiAccess(
+  db: Db,
+  creatorId: string,
+  requiredLevel: "readonly" | "full" = "readonly"
+): Promise<"full" | "readonly"> {
+  const plan = await getCreatorPlan(db, creatorId);
+  const limits = PLAN_LIMITS[plan];
+
+  if (limits.apiAccess === "none") {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: `El acceso a la API no está disponible en el plan ${plan}. Actualiza a Pro o superior para acceder.`,
+    });
+  }
+
+  if (requiredLevel === "full" && limits.apiAccess !== "full") {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: `La escritura via API requiere el plan Business. Tu plan ${plan} solo permite lectura.`,
+    });
+  }
+
+  return limits.apiAccess;
+}
+
+export async function checkWebhookAccess(db: Db, creatorId: string) {
+  const plan = await getCreatorPlan(db, creatorId);
+  const limits = PLAN_LIMITS[plan];
+
+  if (!limits.webhooks) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: `Los webhooks no están disponibles en el plan ${plan}. Actualiza a Business para acceder.`,
     });
   }
 }

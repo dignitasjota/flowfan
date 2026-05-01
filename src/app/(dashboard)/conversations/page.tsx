@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
 import { useQueryClient } from "@tanstack/react-query";
@@ -9,10 +10,22 @@ import { ChatPanel } from "@/components/conversations/chat-panel";
 import { ContactPanel } from "@/components/conversations/contact-panel";
 
 export default function ConversationsPage() {
+  const searchParams = useSearchParams();
   const [selectedConversationId, setSelectedConversationId] = useState<
     string | null
   >(null);
+  const [highlightMessageId, setHighlightMessageId] = useState<string | null>(null);
   const [showContactPanel, setShowContactPanel] = useState(false);
+
+  // Handle search result navigation via URL params
+  useEffect(() => {
+    const id = searchParams.get("id");
+    const msgId = searchParams.get("messageId");
+    if (id) {
+      setSelectedConversationId(id);
+      setHighlightMessageId(msgId);
+    }
+  }, [searchParams]);
 
   const queryClient = useQueryClient();
   const utils = trpc.useUtils();
@@ -24,6 +37,7 @@ export default function ConversationsPage() {
 
   function handleSelectConversation(id: string) {
     setSelectedConversationId(id);
+    setHighlightMessageId(null);
     setShowContactPanel(false);
   }
 
@@ -71,6 +85,7 @@ export default function ConversationsPage() {
             }}
             onBack={handleBack}
             onToggleContact={() => setShowContactPanel(!showContactPanel)}
+            highlightMessageId={highlightMessageId}
           />
         ) : (
           <div className="flex h-full items-center justify-center text-gray-500">

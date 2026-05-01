@@ -4,7 +4,7 @@ import { analyzeMessage } from "./services/ai-analysis";
 import { updateContactProfile } from "./services/profile-updater";
 import { resolveAIConfig } from "./services/ai-config-resolver";
 import { evaluateWorkflows } from "./services/workflow-engine";
-import { checkNoResponseTimeouts } from "./services/workflow-scheduler";
+import { checkNoResponseTimeouts, checkInactivityFollowups } from "./services/workflow-scheduler";
 import type {
   AnalysisJobData,
   WorkflowJobData,
@@ -14,7 +14,11 @@ import type {
   BroadcastSendJobData,
   ScheduledMessageJobData,
   ImportJobData,
+  EmailJobData,
+  SequenceJobData,
+  WebhookDeliveryJobData,
 } from "./queues";
+import { deliverWebhook, dispatchWebhookEvent } from "./services/webhook-dispatcher";
 import { importJobs, contactProfiles } from "./db/schema";
 import { createChildLogger } from "@/lib/logger";
 import { publishEvent } from "@/lib/redis-pubsub";
@@ -46,6 +50,15 @@ const worker = new Worker<AnalysisJobData>(
 
     // Update contact profile
     await updateContactProfile(db, contactId, messageId, analysis, creatorId);
+
+    // Dispatch webhook: message.received
+    dispatchWebhookEvent(db, creatorId, "message.received", {
+      contactId,
+      conversationId,
+      messageId,
+      sentiment: analysis.score,
+      topics: analysis.topics,
+    }).catch(() => {});
 
     // Dispatch keyword_detected workflow event
     try {
@@ -632,6 +645,8 @@ async function checkScheduledBroadcasts() {
 }
 
 let schedulerInterval: ReturnType<typeof setInterval> | null = null;
+let churnCheckCounter = 0;
+let inactivityFollowupCounter = 0;
 
 async function startScheduler() {
   // Run immediately on startup, then every 5 minutes
@@ -660,6 +675,37 @@ async function startScheduler() {
       await checkScheduledMessagesToSend();
     } catch (err) {
       log.error({ err }, "Error checking scheduled messages");
+    }
+
+    // Check sequence steps due for execution
+    try {
+      const { checkSequenceSteps } = await import("@/server/services/sequence-engine");
+      await checkSequenceSteps(db);
+    } catch (err) {
+      log.error({ err }, "Error checking sequence steps");
+    }
+
+    // Inactivity followup enrollment every 30 min (every 6th interval of 5 min)
+    inactivityFollowupCounter++;
+    if (inactivityFollowupCounter >= 6) {
+      inactivityFollowupCounter = 0;
+      try {
+        await checkInactivityFollowups(db);
+      } catch (err) {
+        log.error({ err }, "Error checking inactivity followups");
+      }
+    }
+
+    // Batch churn recalculation every 6 hours (every 72nd interval of 5 min)
+    churnCheckCounter++;
+    if (churnCheckCounter >= 72) {
+      churnCheckCounter = 0;
+      try {
+        const { computeAllChurnScores } = await import("@/server/services/churn-prediction");
+        await computeAllChurnScores(db);
+      } catch (err) {
+        log.error({ err }, "Error in batch churn recalculation");
+      }
     }
   }, 5 * 60 * 1000);
 }
@@ -841,19 +887,156 @@ importWorker.on("failed", (job, err) => {
   log.error({ jobId: job?.id, err: err.message }, "Import worker job failed");
 });
 
+// --- Sequence Worker ---
+
+const sequenceWorker = new Worker<SequenceJobData>(
+  "sequence-processing",
+  async (job) => {
+    const { type } = job.data;
+    log.info({ jobId: job.id, type }, "Processing sequence job");
+
+    const { enrollContact, processSequenceStep } = await import("@/server/services/sequence-engine");
+
+    switch (type) {
+      case "process_step":
+        await processSequenceStep(db, job.data.enrollmentId);
+        break;
+      case "enroll":
+        await enrollContact(db, job.data.sequenceId, job.data.contactId, job.data.creatorId);
+        break;
+      default:
+        log.warn({ type }, "Unknown sequence job type");
+    }
+  },
+  { connection: { host: redisUrl.hostname, port: Number(redisUrl.port) || 6379 }, concurrency: 3 }
+);
+
+sequenceWorker.on("failed", (job, err) => {
+  log.error({ jobId: job?.id, err: err.message }, "Sequence worker job failed");
+});
+
+sequenceWorker.on("ready", () => {
+  log.info("Sequence worker ready");
+});
+
+// --- Webhook Delivery Worker ---
+
+const webhookDeliveryWorker = new Worker<WebhookDeliveryJobData>(
+  "webhook-delivery",
+  async (job) => {
+    const { webhookConfigId, event, payload, url, secret } = job.data;
+    await deliverWebhook(db, webhookConfigId, event, payload, url, secret, job.attemptsMade + 1);
+  },
+  {
+    connection: { host: redisUrl.hostname, port: Number(redisUrl.port) || 6379 },
+    concurrency: 5,
+  }
+);
+
+webhookDeliveryWorker.on("failed", (job, err) => {
+  log.error({ jobId: job?.id, err: err.message }, "Webhook delivery job failed");
+});
+
+webhookDeliveryWorker.on("ready", () => {
+  log.info("Webhook delivery worker ready");
+});
+
+// --- Email Worker ---
+
+const emailWorker = new Worker<EmailJobData>(
+  "email-send",
+  async (job) => {
+    const { type, to, data } = job.data;
+    log.info({ jobId: job.id, type, to }, "Processing email job");
+
+    const email = await import("@/server/services/email");
+
+    switch (type) {
+      case "verification":
+        await email.sendVerificationEmail(to, data.verifyUrl as string);
+        break;
+      case "password_reset":
+        await email.sendPasswordResetEmail(to, data.resetUrl as string);
+        break;
+      case "daily_summary":
+        await email.sendDailySummary(to, data as unknown as import("@/server/services/email").DailySummaryData);
+        break;
+      case "weekly_summary":
+        await email.sendWeeklySummary(to, data as unknown as import("@/server/services/email").WeeklySummaryData);
+        break;
+      case "churn_alert":
+        await email.sendChurnAlert(to, data as unknown as import("@/server/services/email").ChurnAlertData);
+        break;
+      default:
+        log.warn({ type }, "Unknown email job type");
+    }
+  },
+  { connection: { host: redisUrl.hostname, port: Number(redisUrl.port) || 6379 }, concurrency: 5 }
+);
+
+emailWorker.on("failed", (job, err) => {
+  log.error({ jobId: job?.id, err: err.message }, "Email worker job failed");
+});
+
+// --- Email Summary Scheduler ---
+
+let summarySchedulerInterval: ReturnType<typeof setInterval> | null = null;
+
+async function startSummaryScheduler() {
+  const redis = (await import("ioredis")).default;
+  const redisClient = new redis(process.env.REDIS_URL ?? "redis://localhost:6379");
+
+  summarySchedulerInterval = setInterval(async () => {
+    const now = new Date();
+    const hour = now.getUTCHours();
+
+    if (hour !== 9) return; // Only run at 9 UTC
+
+    const { checkAndSendDailySummaries, checkAndSendWeeklySummaries } = await import("@/server/services/email-summary");
+
+    // Daily summary (dedup by date)
+    const dailyKey = `summary:daily:${now.toISOString().slice(0, 10)}`;
+    const dailySent = await redisClient.set(dailyKey, "1", "EX", 86400, "NX");
+    if (dailySent) {
+      try {
+        await checkAndSendDailySummaries(db);
+      } catch (err) {
+        log.error({ err }, "Error sending daily summaries");
+      }
+    }
+
+    // Weekly summary (Mondays only, dedup by week)
+    if (now.getUTCDay() === 1) {
+      const weekNum = Math.ceil(((now.getTime() - new Date(now.getFullYear(), 0, 1).getTime()) / 86400000 + 1) / 7);
+      const weeklyKey = `summary:weekly:${now.getFullYear()}-W${weekNum}`;
+      const weeklySent = await redisClient.set(weeklyKey, "1", "EX", 604800, "NX");
+      if (weeklySent) {
+        try {
+          await checkAndSendWeeklySummaries(db);
+        } catch (err) {
+          log.error({ err }, "Error sending weekly summaries");
+        }
+      }
+    }
+  }, 60 * 60 * 1000); // Every hour
+}
+
 startScheduler();
+startSummaryScheduler();
 
 // Graceful shutdown
 process.on("SIGTERM", async () => {
   log.info("SIGTERM received, closing workers...");
   if (schedulerInterval) clearInterval(schedulerInterval);
-  await Promise.all([worker.close(), workflowWorker.close(), telegramOutgoingWorker.close(), telegramAutoReplyWorker.close(), broadcastProcessingWorker.close(), broadcastSendWorker.close(), scheduledMessageWorker.close(), importWorker.close()]);
+  if (summarySchedulerInterval) clearInterval(summarySchedulerInterval);
+  await Promise.all([worker.close(), workflowWorker.close(), telegramOutgoingWorker.close(), telegramAutoReplyWorker.close(), broadcastProcessingWorker.close(), broadcastSendWorker.close(), scheduledMessageWorker.close(), importWorker.close(), emailWorker.close(), sequenceWorker.close(), webhookDeliveryWorker.close()]);
   process.exit(0);
 });
 
 process.on("SIGINT", async () => {
   log.info("SIGINT received, closing workers...");
   if (schedulerInterval) clearInterval(schedulerInterval);
-  await Promise.all([worker.close(), workflowWorker.close(), telegramOutgoingWorker.close(), telegramAutoReplyWorker.close(), broadcastProcessingWorker.close(), broadcastSendWorker.close(), scheduledMessageWorker.close(), importWorker.close()]);
+  if (summarySchedulerInterval) clearInterval(summarySchedulerInterval);
+  await Promise.all([worker.close(), workflowWorker.close(), telegramOutgoingWorker.close(), telegramAutoReplyWorker.close(), broadcastProcessingWorker.close(), broadcastSendWorker.close(), scheduledMessageWorker.close(), importWorker.close(), emailWorker.close(), sequenceWorker.close(), webhookDeliveryWorker.close()]);
   process.exit(0);
 });

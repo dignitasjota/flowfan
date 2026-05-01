@@ -110,9 +110,171 @@ function clamp(v: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, v));
 }
 
+// --- Configurable types ---
+
+export type EngagementWeights = {
+  frequency: number;
+  msgLength: number;
+  sentiment: number;
+  depth: number;
+  recency: number;
+  convCount: number;
+};
+
+export type PaymentWeights = {
+  intent: number;
+  budget: number;
+  engagement: number;
+  momentum: number;
+  sentiment: number;
+};
+
+export type ScoringBenchmarks = {
+  maxMessages: number;
+  maxMsgLength: number;
+  recencyHours: number;
+  maxConversations: number;
+  maxMsgsPerConv: number;
+  maxBudgetMentions: number;
+};
+
+export type FunnelThresholds = {
+  vip: number;
+  buyer: number;
+  hotLead: number;
+  interested: number;
+  curious: number;
+};
+
+export type ContactAgeFactor = {
+  enabled: boolean;
+  newContactDays: number;
+  boostFactor: number;
+};
+
+export type ScoringConfig = {
+  engagementWeights?: Partial<EngagementWeights>;
+  paymentWeights?: Partial<PaymentWeights>;
+  benchmarks?: Partial<ScoringBenchmarks>;
+  funnelThresholds?: Partial<FunnelThresholds>;
+  contactAgeFactor?: Partial<ContactAgeFactor>;
+};
+
+// --- Defaults ---
+
+export const DEFAULT_ENGAGEMENT_WEIGHTS: EngagementWeights = {
+  frequency: 0.25,
+  msgLength: 0.15,
+  sentiment: 0.20,
+  depth: 0.15,
+  recency: 0.15,
+  convCount: 0.10,
+};
+
+export const DEFAULT_PAYMENT_WEIGHTS: PaymentWeights = {
+  intent: 0.30,
+  budget: 0.20,
+  engagement: 0.20,
+  momentum: 0.15,
+  sentiment: 0.15,
+};
+
+export const DEFAULT_BENCHMARKS: ScoringBenchmarks = {
+  maxMessages: 30,
+  maxMsgLength: 200,
+  recencyHours: 168,
+  maxConversations: 5,
+  maxMsgsPerConv: 15,
+  maxBudgetMentions: 3,
+};
+
+export const DEFAULT_FUNNEL_THRESHOLDS: FunnelThresholds = {
+  vip: 85,
+  buyer: 70,
+  hotLead: 50,
+  interested: 30,
+  curious: 20,
+};
+
+export const DEFAULT_CONTACT_AGE_FACTOR: ContactAgeFactor = {
+  enabled: false,
+  newContactDays: 14,
+  boostFactor: 1.2,
+};
+
+// --- Per-platform presets ---
+
+export const PLATFORM_SCORING_DEFAULTS: Record<string, Partial<ScoringConfig>> = {
+  onlyfans: {
+    benchmarks: { maxMsgLength: 100, maxMessages: 15 },
+    paymentWeights: { intent: 0.35, engagement: 0.15 },
+  },
+  telegram: {
+    benchmarks: { maxMessages: 50, recencyHours: 336 },
+    engagementWeights: { convCount: 0.15, frequency: 0.20 },
+  },
+  twitter: {
+    engagementWeights: { depth: 0.10, sentiment: 0.25 },
+  },
+  reddit: {
+    engagementWeights: { depth: 0.10, sentiment: 0.25 },
+  },
+};
+
+// --- Merge helper ---
+
+export function mergeScoringConfig(
+  platformType?: string,
+  creatorOverride?: ScoringConfig | null,
+): {
+  ew: EngagementWeights;
+  pw: PaymentWeights;
+  bm: ScoringBenchmarks;
+  ft: FunnelThresholds;
+  af: ContactAgeFactor;
+} {
+  const platformDefaults = platformType ? PLATFORM_SCORING_DEFAULTS[platformType] : undefined;
+
+  const ew: EngagementWeights = {
+    ...DEFAULT_ENGAGEMENT_WEIGHTS,
+    ...platformDefaults?.engagementWeights,
+    ...creatorOverride?.engagementWeights,
+  };
+
+  const pw: PaymentWeights = {
+    ...DEFAULT_PAYMENT_WEIGHTS,
+    ...platformDefaults?.paymentWeights,
+    ...creatorOverride?.paymentWeights,
+  };
+
+  const bm: ScoringBenchmarks = {
+    ...DEFAULT_BENCHMARKS,
+    ...platformDefaults?.benchmarks,
+    ...creatorOverride?.benchmarks,
+  };
+
+  const ft: FunnelThresholds = {
+    ...DEFAULT_FUNNEL_THRESHOLDS,
+    ...platformDefaults?.funnelThresholds,
+    ...creatorOverride?.funnelThresholds,
+  };
+
+  const af: ContactAgeFactor = {
+    ...DEFAULT_CONTACT_AGE_FACTOR,
+    ...creatorOverride?.contactAgeFactor,
+  };
+
+  return { ew, pw, bm, ft, af };
+}
+
+// --- Main calculator ---
+
 export function calculateScores(
   rawSignals: BehavioralSignals | Record<string, unknown>,
-  currentFunnelStage?: string
+  currentFunnelStage?: string,
+  config?: ScoringConfig,
+  platformType?: string,
+  contactCreatedAt?: Date,
 ): ScoringResult {
   // Normalize signals to handle empty {} from DB default
   const signals: BehavioralSignals = {
@@ -129,74 +291,78 @@ export function calculateScores(
     conversationCount: Number(rawSignals.conversationCount) || 0,
   };
 
+  const { ew, pw, bm, ft, af } = mergeScoringConfig(platformType, config);
   const factors: { label: string; value: number; weight: number }[] = [];
 
   // --- Engagement Level ---
-  // Frequency (0-100): based on message count
-  const frequencyScore = clamp(Math.min(signals.messageCount / 30, 1) * 100, 0, 100);
-  factors.push({ label: "Frecuencia de mensajes", value: frequencyScore, weight: 0.25 });
+  const frequencyScore = clamp(Math.min(signals.messageCount / bm.maxMessages, 1) * 100, 0, 100);
+  factors.push({ label: "Frecuencia de mensajes", value: frequencyScore, weight: ew.frequency });
 
-  // Message length (0-100)
-  const lengthScore = clamp(Math.min(signals.avgMessageLength / 200, 1) * 100, 0, 100);
-  factors.push({ label: "Longitud de mensajes", value: lengthScore, weight: 0.15 });
+  const lengthScore = clamp(Math.min(signals.avgMessageLength / bm.maxMsgLength, 1) * 100, 0, 100);
+  factors.push({ label: "Longitud de mensajes", value: lengthScore, weight: ew.msgLength });
 
-  // Sentiment (0-100): map -1..1 to 0..100
   const sentimentScore = clamp((signals.avgSentiment + 1) / 2 * 100, 0, 100);
-  factors.push({ label: "Sentimiento", value: sentimentScore, weight: 0.20 });
+  factors.push({ label: "Sentimiento", value: sentimentScore, weight: ew.sentiment });
 
-  // Conversation depth (0-100): messages per conversation
   const msgsPerConv = signals.conversationCount > 0
     ? signals.messageCount / signals.conversationCount
     : 0;
-  const depthScore = clamp(Math.min(msgsPerConv / 15, 1) * 100, 0, 100);
-  factors.push({ label: "Profundidad de conversación", value: depthScore, weight: 0.15 });
+  const depthScore = clamp(Math.min(msgsPerConv / bm.maxMsgsPerConv, 1) * 100, 0, 100);
+  factors.push({ label: "Profundidad de conversación", value: depthScore, weight: ew.depth });
 
-  // Recency (0-100)
   let recencyScore = 0;
   if (signals.lastMessageAt) {
     const hoursSince = (Date.now() - new Date(signals.lastMessageAt).getTime()) / (1000 * 60 * 60);
-    recencyScore = clamp((1 - hoursSince / 168) * 100, 0, 100); // 168h = 1 week
+    recencyScore = clamp((1 - hoursSince / bm.recencyHours) * 100, 0, 100);
   }
-  factors.push({ label: "Recencia", value: recencyScore, weight: 0.15 });
+  factors.push({ label: "Recencia", value: recencyScore, weight: ew.recency });
 
-  // Conversations count (0-100)
-  const convScore = clamp(Math.min(signals.conversationCount / 5, 1) * 100, 0, 100);
-  factors.push({ label: "Conversaciones totales", value: convScore, weight: 0.10 });
+  const convScore = clamp(Math.min(signals.conversationCount / bm.maxConversations, 1) * 100, 0, 100);
+  factors.push({ label: "Conversaciones totales", value: convScore, weight: ew.convCount });
 
-  const engagementLevel = Math.round(
-    frequencyScore * 0.25 +
-    lengthScore * 0.15 +
-    sentimentScore * 0.20 +
-    depthScore * 0.15 +
-    recencyScore * 0.15 +
-    convScore * 0.10
+  let engagementLevel = Math.round(
+    frequencyScore * ew.frequency +
+    lengthScore * ew.msgLength +
+    sentimentScore * ew.sentiment +
+    depthScore * ew.depth +
+    recencyScore * ew.recency +
+    convScore * ew.convCount
   );
+
+  // Contact age factor: boost engagement for new contacts
+  if (af.enabled && contactCreatedAt) {
+    const daysSinceCreation = (Date.now() - contactCreatedAt.getTime()) / (1000 * 60 * 60 * 24);
+    if (daysSinceCreation < af.newContactDays) {
+      const scale = 1 - daysSinceCreation / af.newContactDays;
+      const boost = 1 + (af.boostFactor - 1) * scale;
+      engagementLevel = Math.round(engagementLevel * boost);
+    }
+  }
 
   // --- Payment Probability ---
   const intentScore = clamp(signals.avgPurchaseIntent * 100, 0, 100);
-  const budgetScore = clamp(Math.min(signals.budgetMentions.length / 3, 1) * 100, 0, 100);
+  const budgetScore = clamp(Math.min(signals.budgetMentions.length / bm.maxBudgetMentions, 1) * 100, 0, 100);
   const momentumScore = clamp(
     (signals.maxPurchaseIntent * 0.6 + (signals.sentimentTrend > 0 ? signals.sentimentTrend : 0) * 0.4) * 100,
     0, 100
   );
 
   const paymentProbability = Math.round(
-    intentScore * 0.30 +
-    budgetScore * 0.20 +
-    clamp(engagementLevel, 0, 100) * 0.20 +
-    momentumScore * 0.15 +
-    sentimentScore * 0.15
+    intentScore * pw.intent +
+    budgetScore * pw.budget +
+    clamp(engagementLevel, 0, 100) * pw.engagement +
+    momentumScore * pw.momentum +
+    sentimentScore * pw.sentiment
   );
 
   // --- Funnel Stage (only advance, never retreat) ---
   let funnelStage: typeof FUNNEL_ORDER[number] = "cold";
-  if (paymentProbability >= 85) funnelStage = "vip";
-  else if (paymentProbability >= 70) funnelStage = "buyer";
-  else if (paymentProbability >= 50) funnelStage = "hot_lead";
-  else if (paymentProbability >= 30) funnelStage = "interested";
-  else if (engagementLevel >= 20 || signals.messageCount >= 3) funnelStage = "curious";
+  if (paymentProbability >= ft.vip) funnelStage = "vip";
+  else if (paymentProbability >= ft.buyer) funnelStage = "buyer";
+  else if (paymentProbability >= ft.hotLead) funnelStage = "hot_lead";
+  else if (paymentProbability >= ft.interested) funnelStage = "interested";
+  else if (engagementLevel >= ft.curious || signals.messageCount >= 3) funnelStage = "curious";
 
-  // Only advance: compare with current stage
   if (currentFunnelStage) {
     const currentIdx = FUNNEL_ORDER.indexOf(currentFunnelStage as typeof FUNNEL_ORDER[number]);
     const newIdx = FUNNEL_ORDER.indexOf(funnelStage);

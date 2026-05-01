@@ -4,6 +4,7 @@ import { useState, useMemo } from "react";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/lib/trpc";
 import { ConversationListSkeleton } from "@/components/ui/skeleton";
+import { useRealtimeContext } from "@/hooks/use-realtime";
 
 type Conversation = {
   id: string;
@@ -80,6 +81,7 @@ export function ConversationList({
   onSelect,
   isLoading,
 }: Props) {
+  const { newMessageConversations, markConversationSeen } = useRealtimeContext();
   const [searchTerm, setSearchTerm] = useState("");
   const [collapsedPlatforms, setCollapsedPlatforms] = useState<Set<string>>(
     new Set()
@@ -440,7 +442,10 @@ export function ConversationList({
                   convs.map((conv) => (
                     <button
                       key={conv.id}
-                      onClick={() => onSelect(conv.id)}
+                      onClick={() => {
+                        onSelect(conv.id);
+                        markConversationSeen(conv.id);
+                      }}
                       className={cn(
                         "group flex w-full items-center gap-3 border-b border-gray-800/50 px-4 py-3 text-left transition-colors",
                         selectedId === conv.id
@@ -450,6 +455,9 @@ export function ConversationList({
                     >
                       {/* Avatar */}
                       <div className="relative flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-gray-700 text-xs font-bold text-white overflow-hidden">
+                        {newMessageConversations.has(conv.id) && selectedId !== conv.id && (
+                          <span className="absolute -right-0.5 -top-0.5 z-10 h-3 w-3 rounded-full border-2 border-gray-900 bg-blue-500 animate-pulse" />
+                        )}
                         {conv.contact.avatarUrl ? (
                           <img
                             src={conv.contact.avatarUrl}
