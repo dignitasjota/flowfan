@@ -75,7 +75,13 @@ export default function ConversationsPage() {
       >
         {hasConversation ? (
           <ChatPanel
-            conversation={conversationQuery.data!}
+            conversation={{
+              ...conversationQuery.data!,
+              messages: conversationQuery.data!.messages.map((m) => ({
+                ...m,
+                sentiment: m.sentiment as Record<string, unknown> | null,
+              })),
+            }}
             onMessageSent={() => {
               utils.conversations.getById.invalidate({ id: selectedConversationId! });
               utils.conversations.list.invalidate();

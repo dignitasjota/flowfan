@@ -77,7 +77,7 @@ No incluyas nada mas. Plataforma: ${platformType}`;
       100
     );
 
-    const parsed = JSON.parse(result.content);
+    const parsed = JSON.parse(result.text);
     const category = parsed.category as string;
     const confidence = Number(parsed.confidence) || 0.5;
 

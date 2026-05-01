@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
       status: conversations.status,
       isPinned: conversations.isPinned,
       lastMessageAt: conversations.lastMessageAt,
-      createdAt: conversations.createdAt,
+      startedAt: conversations.startedAt,
     })
     .from(conversations)
     .innerJoin(contacts, eq(conversations.contactId, contacts.id))

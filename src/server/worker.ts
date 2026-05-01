@@ -30,7 +30,7 @@ const redisUrl = new URL(process.env.REDIS_URL ?? "redis://localhost:6379");
 const worker = new Worker<AnalysisJobData>(
   "message-analysis",
   async (job) => {
-    const { creatorId, contactId, messageId, messageContent, platformType, conversationHistory } = job.data;
+    const { creatorId, contactId, messageId, conversationId, messageContent, platformType, conversationHistory } = job.data;
 
     log.info({ jobId: job.id, contactId }, "Processing message analysis");
 
@@ -867,7 +867,6 @@ const importWorker = new Worker<ImportJobData>(
       publishEvent(creatorId, {
         type: "conversation_update",
         data: { importJobId, status: "completed", createdCount },
-        timestamp: Date.now(),
       });
 
       log.info({ importJobId, createdCount, skippedCount, errorCount, duplicateCount }, "Import completed");

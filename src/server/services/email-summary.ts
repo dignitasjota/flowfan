@@ -86,7 +86,7 @@ export async function generateWeeklySummary(db: DB, creatorId: string): Promise<
 
   // Revenue this week
   const [revenueResult] = await db
-    .select({ total: sum(fanTransactions.amountCents) })
+    .select({ total: sum(fanTransactions.amount) })
     .from(fanTransactions)
     .innerJoin(contacts, eq(contacts.id, fanTransactions.contactId))
     .where(and(eq(contacts.creatorId, creatorId), gte(fanTransactions.createdAt, weekStart)));

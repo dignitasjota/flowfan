@@ -58,7 +58,7 @@ Responde SOLO con las 3 respuestas separadas por ---`;
       300
     );
 
-    const replies = result.content
+    const replies = result.text
       .split("---")
       .map((r) => r.trim())
       .filter((r) => r.length > 0)

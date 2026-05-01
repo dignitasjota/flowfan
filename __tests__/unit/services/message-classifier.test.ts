@@ -86,7 +86,7 @@ describe("message-classifier — AI fallback", () => {
 
   it("calls AI when no keywords match and returns AI result", async () => {
     mockCallAI.mockResolvedValueOnce({
-      content: JSON.stringify({ category: "urgent", confidence: 0.9 }),
+      text: JSON.stringify({ category: "urgent", confidence: 0.9 }),
       tokensUsed: 50,
     });
 
@@ -106,7 +106,7 @@ describe("message-classifier — AI fallback", () => {
 
   it("returns general when AI returns invalid category", async () => {
     mockCallAI.mockResolvedValueOnce({
-      content: JSON.stringify({ category: "unknown_cat", confidence: 0.8 }),
+      text: JSON.stringify({ category: "unknown_cat", confidence: 0.8 }),
       tokensUsed: 50,
     });
 
@@ -117,7 +117,7 @@ describe("message-classifier — AI fallback", () => {
 
   it("returns general when AI returns invalid JSON", async () => {
     mockCallAI.mockResolvedValueOnce({
-      content: "not json at all",
+      text: "not json at all",
       tokensUsed: 50,
     });
 
@@ -133,7 +133,7 @@ describe("message-classifier — AI fallback", () => {
 
   it("handles missing confidence in AI response", async () => {
     mockCallAI.mockResolvedValueOnce({
-      content: JSON.stringify({ category: "spam" }),
+      text: JSON.stringify({ category: "spam" }),
       tokensUsed: 30,
     });
 

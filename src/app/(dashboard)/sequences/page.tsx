@@ -19,7 +19,7 @@ const typeColors: Record<string, string> = {
 type Step = {
   stepNumber: number;
   delayDays: number;
-  actionType: string;
+  actionType: "send_message" | "create_notification";
   actionConfig: Record<string, unknown>;
 };
 
@@ -154,7 +154,7 @@ export default function SequencesPage() {
                       <label className="mb-0.5 block text-[10px] text-gray-500">Accion</label>
                       <select
                         value={step.actionType}
-                        onChange={(e) => updateStep(i, "actionType", e.target.value)}
+                        onChange={(e) => updateStep(i, "actionType", e.target.value as Step["actionType"])}
                         className="w-full rounded border border-gray-700 bg-gray-800 px-2 py-1.5 text-sm text-white"
                       >
                         <option value="send_message">Enviar mensaje</option>

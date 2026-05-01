@@ -28,6 +28,17 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
+type ApiKeyItem = {
+  id: string;
+  name: string;
+  keyPrefix: string;
+  lastUsedAt: Date | null;
+  isActive: boolean;
+  createdAt: Date;
+  revokedAt: Date | null;
+  expiresAt: Date | null;
+};
+
 function ApiKeysSection() {
   const [newKeyName, setNewKeyName] = useState("");
   const [createdKey, setCreatedKey] = useState<string | null>(null);
@@ -109,25 +120,25 @@ function ApiKeysSection() {
               </tr>
             </thead>
             <tbody>
-              {keysQuery.data.map((key) => (
-                <tr key={key.id} className="border-t border-gray-800">
-                  <td className="px-4 py-2 text-white">{key.name}</td>
-                  <td className="px-4 py-2 font-mono text-gray-400">{key.keyPrefix}...</td>
+              {(keysQuery.data as ApiKeyItem[]).map((apiKey) => (
+                <tr key={apiKey.id} className="border-t border-gray-800">
+                  <td className="px-4 py-2 text-white">{apiKey.name}</td>
+                  <td className="px-4 py-2 font-mono text-gray-400">{apiKey.keyPrefix}...</td>
                   <td className="px-4 py-2 text-gray-400">
-                    {new Date(key.createdAt).toLocaleDateString()}
+                    {new Date(apiKey.createdAt).toLocaleDateString()}
                   </td>
                   <td className="px-4 py-2 text-gray-400">
-                    {key.lastUsedAt ? new Date(key.lastUsedAt).toLocaleDateString() : "Nunca"}
+                    {apiKey.lastUsedAt ? new Date(apiKey.lastUsedAt).toLocaleDateString() : "Nunca"}
                   </td>
                   <td className="px-4 py-2">
-                    <span className={`rounded px-2 py-0.5 text-xs ${key.isActive ? "bg-green-900/50 text-green-400" : "bg-red-900/50 text-red-400"}`}>
-                      {key.isActive ? "Activa" : "Revocada"}
+                    <span className={`rounded px-2 py-0.5 text-xs ${apiKey.isActive ? "bg-green-900/50 text-green-400" : "bg-red-900/50 text-red-400"}`}>
+                      {apiKey.isActive ? "Activa" : "Revocada"}
                     </span>
                   </td>
                   <td className="px-4 py-2">
-                    {key.isActive && (
+                    {apiKey.isActive && (
                       <button
-                        onClick={() => revokeMutation.mutate({ id: key.id })}
+                        onClick={() => revokeMutation.mutate({ id: apiKey.id })}
                         className="text-xs text-red-400 hover:text-red-300"
                       >
                         Revocar

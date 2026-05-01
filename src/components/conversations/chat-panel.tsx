@@ -331,8 +331,8 @@ export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact
             >
               <p className="text-sm">{msg.content}</p>
               {msg.role === "fan" &&
-                msg.sentiment &&
-                (msg.sentiment as Record<string, unknown>).classification && (() => {
+                !!msg.sentiment &&
+                !!(msg.sentiment as Record<string, unknown>).classification && (() => {
                   const cls = (msg.sentiment as Record<string, { category?: string }>).classification;
                   const cat = cls?.category;
                   if (!cat || cat === "general") return null;
