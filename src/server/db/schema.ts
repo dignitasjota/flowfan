@@ -1717,7 +1717,7 @@ export const teamAuditLogRelations = relations(teamAuditLog, ({ one }) => ({
 // ============================================================
 
 export const conversationModeExperiments = pgTable(
-  "conversation_mode_experiments",
+  "ab_experiments",
   {
     id: uuid("id").defaultRandom().primaryKey(),
     creatorId: uuid("creator_id")
