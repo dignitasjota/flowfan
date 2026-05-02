@@ -14,6 +14,7 @@ import {
   conversationAssignments,
   creators,
   conversations,
+  customRoles,
 } from "@/server/db/schema";
 import { checkTeamMemberLimit, checkAssignmentAccess } from "@/server/services/usage-limits";
 import {
@@ -22,6 +23,9 @@ import {
   removeMember,
   getTeamsForUser,
 } from "@/server/services/team";
+import { resolveUserPermissions, seedSystemRoles } from "@/server/services/permissions";
+import { ALL_PERMISSIONS } from "@/lib/permissions";
+import { logTeamAction } from "@/server/services/team-audit";
 
 const log = createChildLogger("team-router");
 
@@ -33,12 +37,16 @@ export const teamRouter = createTRPCRouter({
         id: teamMembers.id,
         userId: teamMembers.userId,
         role: teamMembers.role,
+        customRoleId: teamMembers.customRoleId,
         joinedAt: teamMembers.joinedAt,
         userName: creators.name,
         userEmail: creators.email,
+        customRoleName: customRoles.name,
+        customRoleColor: customRoles.color,
       })
       .from(teamMembers)
       .innerJoin(creators, eq(teamMembers.userId, creators.id))
+      .leftJoin(customRoles, eq(teamMembers.customRoleId, customRoles.id))
       .where(
         and(
           eq(teamMembers.creatorId, ctx.creatorId),
@@ -100,6 +108,15 @@ export const teamRouter = createTRPCRouter({
 
       log.info({ creatorId: ctx.creatorId, email: input.email, role: input.role }, "Team invite sent");
 
+      logTeamAction(ctx.db, {
+        creatorId: ctx.creatorId,
+        userId: ctx.actingUserId,
+        userName: ctx.session!.user.name ?? "Unknown",
+        action: "member.invited",
+        entityType: "invite",
+        details: { email: input.email, role: input.role },
+      });
+
       return {
         ...invite,
         inviteLink: `/team/accept?token=${invite.token}`,
@@ -143,6 +160,16 @@ export const teamRouter = createTRPCRouter({
     .input(z.object({ userId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       await removeMember(ctx.db, ctx.creatorId, input.userId);
+
+      logTeamAction(ctx.db, {
+        creatorId: ctx.creatorId,
+        userId: ctx.actingUserId,
+        userName: ctx.session!.user.name ?? "Unknown",
+        action: "member.removed",
+        entityType: "team_member",
+        details: { removedUserId: input.userId },
+      });
+
       return { success: true };
     }),
 
@@ -165,6 +192,16 @@ export const teamRouter = createTRPCRouter({
             eq(teamMembers.isActive, true)
           )
         );
+
+      logTeamAction(ctx.db, {
+        creatorId: ctx.creatorId,
+        userId: ctx.actingUserId,
+        userName: ctx.session!.user.name ?? "Unknown",
+        action: "member.role_changed",
+        entityType: "team_member",
+        entityId: input.userId,
+        details: { newRole: input.role },
+      });
 
       return { success: true };
     }),
@@ -281,6 +318,16 @@ export const teamRouter = createTRPCRouter({
         "Conversation assigned"
       );
 
+      logTeamAction(ctx.db, {
+        creatorId: ctx.creatorId,
+        userId: ctx.actingUserId,
+        userName: ctx.session!.user.name ?? "Unknown",
+        action: "conversation.assigned",
+        entityType: "conversation",
+        entityId: input.conversationId,
+        details: { assignedTo: input.userId },
+      });
+
       return assignment;
     }),
 
@@ -301,6 +348,16 @@ export const teamRouter = createTRPCRouter({
             eq(conversationAssignments.assignedToUserId, input.userId)
           )
         );
+
+      logTeamAction(ctx.db, {
+        creatorId: ctx.creatorId,
+        userId: ctx.actingUserId,
+        userName: ctx.session!.user.name ?? "Unknown",
+        action: "conversation.unassigned",
+        entityType: "conversation",
+        entityId: input.conversationId,
+        details: { unassignedUserId: input.userId },
+      });
 
       return { success: true };
     }),
@@ -350,4 +407,212 @@ export const teamRouter = createTRPCRouter({
 
       return assignments;
     }),
+
+  // ============================================================
+  // Custom Roles
+  // ============================================================
+
+  // 13. List custom roles
+  getCustomRoles: protectedProcedure.query(async ({ ctx }) => {
+    await seedSystemRoles(ctx.db, ctx.creatorId);
+
+    const roles = await ctx.db
+      .select()
+      .from(customRoles)
+      .where(eq(customRoles.creatorId, ctx.creatorId))
+      .orderBy(customRoles.isSystem, customRoles.name);
+
+    return roles;
+  }),
+
+  // 14. Create custom role
+  createCustomRole: ownerProcedure
+    .input(
+      z.object({
+        name: z.string().min(1).max(100),
+        description: z.string().max(500).optional(),
+        permissions: z.array(z.string()).min(1),
+        color: z.string().max(20).optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      // Validate permissions
+      const validPermissions = input.permissions.filter((p) =>
+        (ALL_PERMISSIONS as readonly string[]).includes(p)
+      );
+
+      if (validPermissions.length === 0) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Debes seleccionar al menos un permiso válido.",
+        });
+      }
+
+      const [role] = await ctx.db
+        .insert(customRoles)
+        .values({
+          creatorId: ctx.creatorId,
+          name: input.name,
+          description: input.description,
+          permissions: validPermissions,
+          color: input.color ?? "#6b7280",
+          isSystem: false,
+        })
+        .returning();
+
+      log.info({ creatorId: ctx.creatorId, roleName: input.name }, "Custom role created");
+
+      logTeamAction(ctx.db, {
+        creatorId: ctx.creatorId,
+        userId: ctx.actingUserId,
+        userName: ctx.session!.user.name ?? "Unknown",
+        action: "role.created",
+        entityType: "role",
+        entityId: role!.id,
+        details: { name: input.name, permissionCount: validPermissions.length },
+      });
+
+      return role;
+    }),
+
+  // 15. Update custom role
+  updateCustomRole: ownerProcedure
+    .input(
+      z.object({
+        roleId: z.string().uuid(),
+        name: z.string().min(1).max(100).optional(),
+        description: z.string().max(500).optional(),
+        permissions: z.array(z.string()).min(1).optional(),
+        color: z.string().max(20).optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const existing = await ctx.db.query.customRoles.findFirst({
+        where: and(
+          eq(customRoles.id, input.roleId),
+          eq(customRoles.creatorId, ctx.creatorId)
+        ),
+      });
+
+      if (!existing) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Rol no encontrado." });
+      }
+
+      if (existing.isSystem && input.permissions) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "No se pueden modificar los permisos de roles del sistema.",
+        });
+      }
+
+      const updates: Record<string, unknown> = { updatedAt: new Date() };
+      if (input.name) updates.name = input.name;
+      if (input.description !== undefined) updates.description = input.description;
+      if (input.color) updates.color = input.color;
+      if (input.permissions) {
+        updates.permissions = input.permissions.filter((p) =>
+          (ALL_PERMISSIONS as readonly string[]).includes(p)
+        );
+      }
+
+      await ctx.db
+        .update(customRoles)
+        .set(updates)
+        .where(eq(customRoles.id, input.roleId));
+
+      return { success: true };
+    }),
+
+  // 16. Delete custom role
+  deleteCustomRole: ownerProcedure
+    .input(z.object({ roleId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const existing = await ctx.db.query.customRoles.findFirst({
+        where: and(
+          eq(customRoles.id, input.roleId),
+          eq(customRoles.creatorId, ctx.creatorId)
+        ),
+      });
+
+      if (!existing) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Rol no encontrado." });
+      }
+
+      if (existing.isSystem) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "No se pueden eliminar roles del sistema.",
+        });
+      }
+
+      // Nullify customRoleId on team members using this role
+      await ctx.db
+        .update(teamMembers)
+        .set({ customRoleId: null, updatedAt: new Date() })
+        .where(eq(teamMembers.customRoleId, input.roleId));
+
+      await ctx.db
+        .delete(customRoles)
+        .where(eq(customRoles.id, input.roleId));
+
+      log.info({ creatorId: ctx.creatorId, roleId: input.roleId }, "Custom role deleted");
+
+      logTeamAction(ctx.db, {
+        creatorId: ctx.creatorId,
+        userId: ctx.actingUserId,
+        userName: ctx.session!.user.name ?? "Unknown",
+        action: "role.deleted",
+        entityType: "role",
+        entityId: input.roleId,
+        details: { name: existing.name },
+      });
+
+      return { success: true };
+    }),
+
+  // 17. Assign custom role to team member
+  assignCustomRole: ownerProcedure
+    .input(
+      z.object({
+        userId: z.string().uuid(),
+        customRoleId: z.string().uuid().nullable(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      if (input.customRoleId) {
+        const role = await ctx.db.query.customRoles.findFirst({
+          where: and(
+            eq(customRoles.id, input.customRoleId),
+            eq(customRoles.creatorId, ctx.creatorId)
+          ),
+        });
+
+        if (!role) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Rol no encontrado." });
+        }
+      }
+
+      await ctx.db
+        .update(teamMembers)
+        .set({ customRoleId: input.customRoleId, updatedAt: new Date() })
+        .where(
+          and(
+            eq(teamMembers.creatorId, ctx.creatorId),
+            eq(teamMembers.userId, input.userId),
+            eq(teamMembers.isActive, true)
+          )
+        );
+
+      return { success: true };
+    }),
+
+  // 18. Get my effective permissions
+  getMyPermissions: protectedProcedure.query(async ({ ctx }) => {
+    const permissions = await resolveUserPermissions(
+      ctx.db,
+      ctx.creatorId,
+      ctx.actingUserId
+    );
+    return { permissions };
+  }),
 });

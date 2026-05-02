@@ -5,6 +5,7 @@ import { TRPCError } from "@trpc/server";
 import { createTRPCRouter, protectedProcedure } from "../trpc";
 import { creators } from "@/server/db/schema";
 import { getStripe } from "@/lib/stripe";
+import { SUPPORTED_LANGUAGES, isValidLanguageCode } from "@/server/services/language-utils";
 
 export const accountRouter = createTRPCRouter({
   /** Get current account info */
@@ -126,6 +127,52 @@ export const accountRouter = createTRPCRouter({
       // Delete creator — cascading deletes handle all related data
       await ctx.db.delete(creators).where(eq(creators.id, ctx.creatorId));
 
+      return { success: true };
+    }),
+
+  /** Get language settings */
+  getLanguageSettings: protectedProcedure.query(async ({ ctx }) => {
+    const creator = await ctx.db.query.creators.findFirst({
+      where: eq(creators.id, ctx.creatorId),
+      columns: { settings: true },
+    });
+    const settings = (creator?.settings ?? {}) as Record<string, unknown>;
+    return {
+      responseLanguage: (settings.responseLanguage as string) ?? "es",
+      analysisLanguage: (settings.analysisLanguage as string) ?? "es",
+      supportedLanguages: SUPPORTED_LANGUAGES,
+    };
+  }),
+
+  /** Save language settings */
+  saveLanguageSettings: protectedProcedure
+    .input(
+      z.object({
+        responseLanguage: z.string().min(2).max(5),
+        analysisLanguage: z.string().min(2).max(5),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      if (!isValidLanguageCode(input.responseLanguage) || !isValidLanguageCode(input.analysisLanguage)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Codigo de idioma no soportado." });
+      }
+
+      const creator = await ctx.db.query.creators.findFirst({
+        where: eq(creators.id, ctx.creatorId),
+        columns: { settings: true },
+      });
+      const currentSettings = (creator?.settings ?? {}) as Record<string, unknown>;
+      await ctx.db
+        .update(creators)
+        .set({
+          settings: {
+            ...currentSettings,
+            responseLanguage: input.responseLanguage,
+            analysisLanguage: input.analysisLanguage,
+          },
+          updatedAt: new Date(),
+        })
+        .where(eq(creators.id, ctx.creatorId));
       return { success: true };
     }),
 });

@@ -4,7 +4,7 @@ import type { AIConfig } from "./ai";
 import { decrypt } from "@/lib/crypto";
 import type { db as dbInstance } from "@/server/db";
 
-type TaskType = "suggestion" | "analysis" | "summary" | "report" | "price_advice";
+type TaskType = "suggestion" | "analysis" | "summary" | "report" | "price_advice" | "coaching" | "content_gap";
 
 type Database = typeof dbInstance;
 

@@ -8,6 +8,7 @@ import { publishEvent } from "@/lib/redis-pubsub";
 const log = createChildLogger("messages-router");
 import { messages, conversations, contacts } from "@/server/db/schema";
 import { analysisQueue, telegramOutgoingQueue } from "@/server/queues";
+import { logTeamAction } from "@/server/services/team-audit";
 
 export const messagesRouter = createTRPCRouter({
   list: protectedProcedure
@@ -175,6 +176,19 @@ export const messagesRouter = createTRPCRouter({
             role: "creator",
           },
         }).catch(() => {});
+      }
+
+      // Audit log for team members
+      if (ctx.teamRole) {
+        logTeamAction(ctx.db, {
+          creatorId: ctx.creatorId,
+          userId: ctx.actingUserId,
+          userName: ctx.session!.user.name ?? "Unknown",
+          action: "message.sent",
+          entityType: "message",
+          entityId: message?.id,
+          details: { conversationId: input.conversationId },
+        });
       }
 
       // If conversation is on Telegram, enqueue outgoing message

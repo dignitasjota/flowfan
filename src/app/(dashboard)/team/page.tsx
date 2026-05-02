@@ -1,8 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
+import { PermissionBadge } from "@/components/team/permission-badge";
 
 const roleBadgeStyles: Record<string, string> = {
   owner: "bg-amber-900/50 text-amber-400",
@@ -121,12 +123,26 @@ export default function TeamPage() {
       {/* Header */}
       <div className="flex items-center justify-between border-b border-gray-800 px-6 py-4">
         <h2 className="text-lg font-semibold text-white">Equipo</h2>
-        <button
-          onClick={() => setShowInviteForm(!showInviteForm)}
-          className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 transition-colors"
-        >
-          {showInviteForm ? "Cancelar" : "Invitar miembro"}
-        </button>
+        <div className="flex gap-2">
+          <Link
+            href="/team/roles"
+            className="rounded-lg border border-gray-700 px-4 py-2 text-sm font-medium text-gray-300 hover:bg-gray-800 hover:text-white transition-colors"
+          >
+            Gestionar roles
+          </Link>
+          <Link
+            href="/team/audit-log"
+            className="rounded-lg border border-gray-700 px-4 py-2 text-sm font-medium text-gray-300 hover:bg-gray-800 hover:text-white transition-colors"
+          >
+            Audit log
+          </Link>
+          <button
+            onClick={() => setShowInviteForm(!showInviteForm)}
+            className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 transition-colors"
+          >
+            {showInviteForm ? "Cancelar" : "Invitar miembro"}
+          </button>
+        </div>
       </div>
 
       <div className="flex-1 space-y-8 px-6 py-6">
@@ -269,6 +285,12 @@ export default function TeamPage() {
                       >
                         {roleLabels[member.role] ?? member.role}
                       </span>
+                      {member.customRoleName && (
+                        <PermissionBadge
+                          name={member.customRoleName}
+                          color={member.customRoleColor}
+                        />
+                      )}
                     </div>
                     <span className="text-xs text-gray-400">
                       {member.userEmail}

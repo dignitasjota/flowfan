@@ -22,6 +22,7 @@ const navigation = [
   { name: "Media Vault", href: "/media", icon: "🖼️", access: "manager" as const },
   { name: "Automatizaciones", href: "/workflows", icon: "⚡", access: "manager" as const },
   { name: "Secuencias", href: "/sequences", icon: "🔄", access: "manager" as const },
+  { name: "Content Gaps", href: "/content-gaps", icon: "🔍", access: "manager" as const },
   { name: "Programados", href: "/scheduled", icon: "⏰", access: "all" as const },
   { name: "Broadcasts", href: "/broadcasts", icon: "📢", access: "manager" as const },
   { name: "Equipo", href: "/team", icon: "👤", access: "owner" as const },

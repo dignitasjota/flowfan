@@ -1,4 +1,5 @@
 import { type AIConfig, callAIProvider, stripThinkingBlocks } from "./ai";
+import { getLanguageInstruction } from "./language-utils";
 
 // ============================================================
 // Types
@@ -17,6 +18,7 @@ export type SummaryInput = {
   contactUsername: string;
   funnelStage: string;
   messages: { role: "fan" | "creator"; content: string }[];
+  language?: string;
 };
 
 // ============================================================
@@ -80,9 +82,14 @@ export async function summarizeConversation(
     ),
   ].join("\n");
 
+  let systemPrompt = SUMMARY_SYSTEM_PROMPT;
+  if (input.language) {
+    systemPrompt += `\n\n${getLanguageInstruction(input.language)}`;
+  }
+
   const result = await callAIProvider(
     config,
-    SUMMARY_SYSTEM_PROMPT,
+    systemPrompt,
     [{ role: "user", content: context }],
     512
   );

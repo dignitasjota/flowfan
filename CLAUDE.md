@@ -34,7 +34,10 @@ SaaS CRM para creadores de contenido con asistente IA para gestionar conversacio
 - `managerProcedure` for actions requiring manager role (create/update/delete contacts)
 - AI service in `src/server/services/ai.ts` handles prompt construction and API calls
 - Personality configuration per platform stored as JSONB
-- Team support with roles: `manager` (full access) and `chatter` (only assigned conversations)
+- Team support with base roles (`owner`, `manager`, `chatter`) + custom roles with granular permissions
+- `ownerProcedure` for owner-only actions, `permissionProcedure(...perms)` for permission-gated actions
+- Real-time collaboration via SSE + Redis Pub/Sub (presence, typing, viewing indicators)
+- Team audit log for tracking all team member actions
 
 ## AI System
 
@@ -59,21 +62,119 @@ Each creator can configure different models for different tasks:
 - `summary` — conversation summaries
 - `report` — contact reports
 - `price_advice` — pricing recommendations
+- `coaching` — negotiation coaching sessions
+- `content_gap` — content gap analysis reports
 
 ### Prompt construction
 
 `buildSystemPrompt()` assembles the prompt from:
 1. Base system instructions (variant generation rules)
-2. Platform type
-3. Platform-specific personality config (role, tone, style, message length, goals, restrictions, example messages, custom instructions)
-4. **Conversation mode context** (OnlyFans only — mode name, description, type)
-5. Global creator instructions
-6. Contact profile (engagement, funnel stage, payment probability)
-7. Creator notes about the contact
+2. **Language instruction** (if configured — "Responde siempre en {language}")
+3. Platform type
+4. Platform-specific personality config (role, tone, style, message length, goals, restrictions, example messages, custom instructions)
+5. **Conversation mode context** (OnlyFans only — mode name, description, type)
+6. Global creator instructions
+7. Contact profile (engagement, funnel stage, payment probability)
+8. Creator notes about the contact
 
 ### Suggestion variants
 
 Each AI response generates 3 variants with different approaches. The variant types change based on the contact's funnel stage and conversation mode. Variants are parsed from tagged format: `[CASUAL] message --- [SALES] message --- [RETENTION] message`.
+
+### Multi-Language Support (`src/server/services/language-utils.ts`)
+
+Creators can configure the language for AI responses and analysis output.
+
+- **Supported languages:** es (Español), en (English), pt (Português), fr (Français), de (Deutsch), it (Italiano)
+- **Storage:** `creators.settings.responseLanguage` and `creators.settings.analysisLanguage` (JSONB, no migration needed)
+- **Integration:** Language instruction injected into all AI prompts — `buildSystemPrompt()` (suggestions), analysis, summaries, reports, price advice, coaching, content gap analysis
+- **API:** `account.getLanguageSettings` / `account.saveLanguageSettings`
+- Default: `"es"` (backward compatible — existing behavior unchanged when not configured)
+
+### AI Negotiation Coaching (`src/server/services/negotiation-coach.ts`)
+
+AI-powered coaching that analyzes conversations and provides strategic negotiation advice.
+
+**Coaching types:**
+- `negotiation` — pricing, exclusivity, value framing, buying signals
+- `retention` — re-engagement, loyalty, fan recovery
+- `upsell` — tier upgrades, premium content, exclusive experiences
+
+**Output structure (JSONB):**
+- `situationAssessment` — current negotiation state
+- `fanProfile` — psychological profile of the fan
+- `currentLeverage` — creator's leverage points
+- `tactics[]` — 3-5 concrete tactics with name, description, example, riskLevel (low/medium/high)
+- `suggestedNextMove` — best immediate action
+- `risks[]` and `avoidList[]` — pitfalls to avoid
+
+**API** (in `src/server/api/routers/ai.ts`):
+- `getCoaching` mutation — generates coaching, saves to `coachingSessions`, logs usage
+- `listCoachingSessions` — history per conversation
+- `getCoachingSession` — single session detail
+
+**Limits:** free=5/month, starter=20, pro=100, business=unlimited
+
+**UI** (`src/components/conversations/coaching-panel.tsx`):
+- "Coaching" button in chat panel header (next to manual mode toggle)
+- Opens modal with coaching type selector (3 cards: Negociacion, Retencion, Upsell)
+- Results view: situation assessment, fan profile, leverage, expandable tactics with risk badges, next move, risks/avoid lists
+- Session history: load previous coaching sessions for the conversation
+
+### Content Gap Analysis (`src/server/services/content-gap-analyzer.ts`)
+
+Identifies content gaps by analyzing conversation patterns across all contacts.
+
+**Two-phase architecture:**
+1. **Aggregation (no AI):** `aggregateConversationData()` queries `contactProfiles.behavioralSignals.topicFrequency` across all contacts, computes topic frequencies, sentiment averages, engagement drop counts, platform breakdown
+2. **AI Analysis:** `analyzeContentGaps()` sends pre-aggregated data (not raw messages) to AI for interpretation
+
+**Output structure (JSONB):**
+- `topRequestedTopics[]` — topics with frequency, avgSentiment, sampleQuotes
+- `engagementDropPoints[]` — patterns where engagement drops + suggestions
+- `contentOpportunities[]` — content to create with estimatedDemand/estimatedRevenue
+- `platformBreakdown[]` — per-platform insights
+- `trendingThemes[]` and `summary`
+
+**API** (`src/server/api/routers/content-gaps.ts`):
+- `generate` mutation — aggregates + AI analysis, saves to `contentGapReports` (Pro+ only)
+- `list` / `get` — report history
+- `getTopicTrends` query — free, no AI: top 20 topics from contact profiles
+
+**UI** (`src/app/(dashboard)/content-gaps/page.tsx`):
+- Sidebar link "Content Gaps" (manager access)
+- 3 tabs: Topic Trends (free bar chart of most discussed topics), Reporte IA (generate + view report), Historial (past reports)
+- Report view: executive summary, trending themes tags, top requested topics with sentiment + quotes, content opportunities grid, engagement drop points, platform breakdown
+- Period selector (7/30/90 days) for report generation
+
+### A/B Testing for Conversation Modes (`src/server/services/ab-experiment.ts`)
+
+Test different conversation mode configurations against each other with statistical significance tracking.
+
+**How it works:**
+1. Creator creates an experiment with two mode config variants (A/B) for a specific mode type
+2. Contacts are deterministically assigned to variants via hash (same contact always gets same variant)
+3. Metrics recorded automatically: `fan_replied`, `conversion` (funnel stage change), `response_sent`, `tip_received`
+4. Results include per-variant metrics and statistical confidence (z-test)
+5. Winner can be applied to the actual conversation mode config
+
+**Schema:**
+- `conversationModeExperiments` — experiment definition with status lifecycle (draft → running → completed)
+- `experimentAssignments` — deterministic contact-to-variant mapping
+- `experimentMetrics` — per-event metric recording
+
+**Constraint:** Only one running experiment per mode type per creator.
+
+**API** (`src/server/api/routers/ab-experiments.ts`):
+- `list`, `get`, `create`, `start`, `stop`, `getResults`, `applyWinner`
+
+**Integration in AI router:** After resolving conversation mode, checks for running experiment and overrides personality config with the assigned variant's config.
+
+**UI** (`src/components/settings/ab-experiments-settings.tsx`):
+- Section at bottom of Settings > "Modos conversacion" tab
+- Create form: name, mode type selector, traffic split slider, variant A/B config (tone, style, message length, objectives, instructions)
+- Experiment list with status badges (draft/running/completed), lifecycle buttons (start/stop/declare winner/apply winner)
+- Results panel: per-variant metrics (contacts, replies, conversions), statistical confidence percentage, suggested winner
 
 ## Conversation Modes (OnlyFans only)
 
@@ -127,7 +228,7 @@ Conversation modes control how the AI generates responses for OnlyFans contacts.
 
 ### UI
 
-- **Settings tab** "Modos conversacion" (`src/components/settings/conversation-modes-settings.tsx`) — list, edit, toggle modes
+- **Settings tab** "Modos conversacion" (`src/components/settings/conversation-modes-settings.tsx`) — list, edit, toggle modes + A/B experiments section at bottom
 - **Contact panel badge** (`ConversationModeBadge` in `src/components/conversations/contact-panel.tsx`) — shows active mode for OnlyFans contacts, refreshes on message send
 
 ## Conversation Management
@@ -147,7 +248,7 @@ Features:
 
 Three-panel responsive layout:
 - **Left:** Conversation list (w-80 on desktop, full width on mobile)
-- **Center:** Chat panel with AI suggestions
+- **Center:** Chat panel with AI suggestions + coaching button in header
 - **Right:** Contact panel with stats, scoring, revenue, reports (w-80 on desktop, toggle on mobile)
 
 ## Contact Management
@@ -174,12 +275,15 @@ Three-panel responsive layout:
 
 Tabs:
 1. **Personalidad** — Per-platform personality configuration (role, tone, style, goals, restrictions, example messages)
-2. **Instrucciones globales** — Global AI instructions applied to all platforms
-3. **Modos conversacion** — OnlyFans conversation modes configuration
+2. **Instrucciones globales** — Global AI instructions + language settings (response language + analysis language dropdowns)
+3. **Modos conversacion** — OnlyFans conversation modes configuration + A/B experiments section
 4. **Modelo IA** — AI provider and model selection per task
-5. **Templates** — Message templates
-6. **Telegram** — Telegram bot integration settings
-7. **Cuenta** — Account settings + email notification preferences (3 toggles)
+5. **Scoring** — Per-platform scoring weights, benchmarks, funnel thresholds, contact age factor
+6. **Templates** — Message templates
+7. **Auto-respuestas** — Per-platform auto-response configuration
+8. **API & Webhooks** — API keys management + outgoing webhooks configuration
+9. **Telegram** — Telegram bot integration settings
+10. **Cuenta** — Account settings + email notification preferences (3 toggles)
 
 ## Contact Scoring
 
@@ -196,6 +300,24 @@ Contacts have behavioral profiles (`contactProfiles` table) with:
 - `churnUpdatedAt` (timestamp)
 
 Scoring is updated asynchronously via BullMQ worker when messages are sent. Churn score is calculated in real-time during scoring pipeline and recalculated in batch every 6 hours.
+
+### Contextual Scoring by Platform
+
+Scoring weights and benchmarks can be customized per platform via `platformScoringConfigs` table. Configuration merges in 3 layers: DEFAULT → PLATFORM_DEFAULT → creator override.
+
+**Platform defaults** (`PLATFORM_SCORING_DEFAULTS` in `scoring.ts`):
+- **OnlyFans**: maxMsgLength: 100, maxMessages: 15, intent weight: 0.35
+- **Telegram**: maxMessages: 50, recencyHours: 336, convCount weight: 0.15
+- **Twitter/Reddit**: depth weight: 0.10, sentiment weight: 0.25
+- **Instagram**: global defaults (baseline)
+
+**Contact age factor**: Optional boost for new contacts. When enabled, engagement is multiplied by a factor that decays linearly from `boostFactor` to 1.0 over `newContactDays`. Disabled by default.
+
+**API** (`src/server/api/routers/scoring-config.ts`):
+- `getByPlatform(platformType)` — merged config (defaults + override)
+- `getDefaults(platformType)` — platform defaults (read-only)
+- `upsert({ platformType, engagementWeights?, paymentWeights?, benchmarks?, funnelThresholds?, contactAgeFactor? })` — owner only
+- `resetToDefaults(platformType)` — delete override, revert to defaults
 
 ## Churn Prediction
 
@@ -341,6 +463,70 @@ UI: Settings → Cuenta tab, "Notificaciones por email" section with 3 toggles.
 - **API:** `src/server/api/routers/revenue.ts` — CRUD, summaries, top spenders, ROI calculations, export
 - **UI:** Revenue section in contact panel with inline transaction form
 
+## Public API
+
+### REST API (`/api/v1/`)
+
+All endpoints require `Authorization: Bearer ff_live_xxx` header. API access is plan-gated: Pro (read-only), Business (full read/write). Rate limited per key: 60 req/min (Business), 30 req/min (Pro).
+
+| Endpoint | Method | Description | Access |
+|----------|--------|-------------|--------|
+| `/api/v1/contacts` | GET | List contacts (paginated, filters: search, platform, funnel_stage) | Pro+ |
+| `/api/v1/contacts` | POST | Create contact + empty profile | Business |
+| `/api/v1/contacts/[id]` | GET | Contact detail + profile | Pro+ |
+| `/api/v1/conversations` | GET | List conversations (paginated, filter by status) | Pro+ |
+| `/api/v1/conversations/[id]/messages` | GET | Messages for a conversation (paginated) | Pro+ |
+| `/api/v1/analytics/overview` | GET | Summary: totalContacts, revenue30d, avgEngagement, funnelDistribution | Pro+ |
+
+### API Keys (`src/server/services/api-keys.ts`)
+
+- Key format: `ff_live_` + 32 hex chars (16 random bytes)
+- Storage: SHA-256 hash for lookup + AES-256-GCM encrypted full key
+- Key shown only once at creation, never retrievable after
+- `createApiKey`, `validateApiKey` (by hash lookup), `revokeApiKey`, `listApiKeys`
+
+### Auth Middleware (`src/server/api/middleware/api-key-auth.ts`)
+
+- Extracts `Bearer` token, validates via `validateApiKey`
+- Checks plan: Pro = readonly, Business = full, others = 403
+- In-memory rate limiting per keyId with sliding window
+- Returns `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset` headers
+
+### tRPC Routers
+
+- `apiKeys` (`src/server/api/routers/api-keys.ts`) — list, create, revoke (ownerProcedure)
+- `webhooksOutgoing` (`src/server/api/routers/webhooks-outgoing.ts`) — list, create, update, delete, getDeliveryLogs, testWebhook (ownerProcedure)
+
+## Outgoing Webhooks
+
+### Overview
+
+Webhooks send HTTP POST notifications to external URLs when events occur in FanFlow. Each webhook config has a secret used for HMAC-SHA256 signature verification.
+
+### Events
+
+| Event | Trigger Location | Payload |
+|-------|-----------------|---------|
+| `contact.created` | `contacts.ts` router (create mutation) | contactId, username, platformType |
+| `contact.updated` | `profile-updater.ts` (after scoring update) | contactId, engagementLevel, paymentProbability, funnelStage |
+| `message.received` | `worker.ts` (message-analysis handler) | contactId, conversationId, messageId, sentiment, topics |
+| `funnel_stage.changed` | `profile-updater.ts` (on stage change) | contactId, previousStage, newStage |
+| `transaction.created` | `revenue.ts` router (create mutation) | transactionId, contactId, type, amount |
+
+### Delivery
+
+- `webhookDeliveryQueue` ("webhook-delivery") with BullMQ, 3 attempts, exponential 5s backoff
+- Worker concurrency: 5
+- Request headers: `X-FanFlow-Signature: sha256=HMAC(payload, secret)`, `X-FanFlow-Event`, `Content-Type: application/json`
+- All deliveries logged in `webhookDeliveryLogs` (statusCode, responseBody, error, attempt)
+- 10 second timeout per delivery
+
+### Dispatcher (`src/server/services/webhook-dispatcher.ts`)
+
+- `dispatchWebhookEvent(db, creatorId, event, payload)` — finds active configs with matching event, enqueues delivery (fire-and-forget)
+- `generateWebhookSignature(payload, secret)` — HMAC-SHA256 signature
+- `deliverWebhook(db, webhookConfigId, event, payload, url, secret, attempt)` — POST + log result
+
 ## Key Database Tables
 
 | Table | Purpose |
@@ -351,6 +537,7 @@ UI: Settings → Cuenta tab, "Notificaciones por email" section with 3 toggles.
 | `conversations` | Per-contact conversations with `isPinned`, status (active/paused/archived) |
 | `messages` | Chat messages (role: fan/creator) |
 | `platforms` | Platform configs per creator with personality JSONB |
+| `platformScoringConfigs` | Per-platform scoring weight/benchmark overrides per creator |
 | `conversationModes` | OnlyFans conversation mode configs per creator |
 | `aiConfigs` | AI provider/model config per creator per task |
 | `fanTransactions` | Revenue tracking per contact |
@@ -361,3 +548,13 @@ UI: Settings → Cuenta tab, "Notificaciones por email" section with 3 toggles.
 | `sequences` | Automated message sequences (nurturing/followup/custom) |
 | `sequenceEnrollments` | Contact enrollment tracking for sequences |
 | `autoResponseConfigs` | Per-platform auto-response settings |
+| `apiKeys` | API keys per creator (hash + encrypted key, prefix, last used, active/revoked) |
+| `webhookConfigs` | Outgoing webhook configs per creator (url, events, encrypted secret) |
+| `webhookDeliveryLogs` | Webhook delivery attempts with status, response, errors |
+| `customRoles` | Custom team roles with granular permissions (14 dot-separated) per creator |
+| `teamAuditLog` | Audit trail for team actions (who did what, with details JSONB) |
+| `conversationModeExperiments` | A/B test experiments for conversation modes (variants A/B config, traffic split, lifecycle) |
+| `experimentAssignments` | Contact-to-variant assignments for A/B experiments |
+| `experimentMetrics` | Metric events (response_sent, fan_replied, conversion, etc.) per experiment variant |
+| `coachingSessions` | AI coaching session results (negotiation/retention/upsell) per conversation |
+| `contentGapReports` | Content gap analysis reports with aggregated topic/engagement data |

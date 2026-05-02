@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import OpenAI from "openai";
+import { getLanguageInstruction } from "./language-utils";
 
 // ============================================================
 // Types
@@ -51,6 +52,7 @@ export type SuggestionInput = {
   contactNotes: string[];
   fanMessage: string;
   conversationMode?: ConversationModeContext;
+  language?: string;
 };
 
 type SuggestionResult = {
@@ -244,6 +246,10 @@ REGLAS IMPORTANTES:
 - Nunca generes contenido que involucre menores
 - Respeta las restricciones definidas por el creador
 - ${variantInstructions}`);
+
+  if (input.language) {
+    parts.push(`\n${getLanguageInstruction(input.language)}`);
+  }
 
   parts.push(`\nPLATAFORMA: ${input.platformType}`);
 

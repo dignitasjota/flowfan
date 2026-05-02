@@ -9,6 +9,7 @@ import { platformTypeSchema, funnelStageSchema } from "@/lib/constants";
 import { scrapeInstagramProfile } from "@/server/services/instagram-scraper";
 import { createChildLogger } from "@/lib/logger";
 import { dispatchWebhookEvent } from "@/server/services/webhook-dispatcher";
+import { logTeamAction } from "@/server/services/team-audit";
 
 const log = createChildLogger("contacts-router");
 
@@ -148,6 +149,16 @@ export const contactsRouter = createTRPCRouter({
           .catch((err) => log.error({ err }, "Instagram Scraper background error"));
       }
 
+      logTeamAction(ctx.db, {
+        creatorId: ctx.creatorId,
+        userId: ctx.actingUserId,
+        userName: ctx.session!.user.name ?? "Unknown",
+        action: "contact.created",
+        entityType: "contact",
+        entityId: contact!.id,
+        details: { username: input.username, platformType: input.platformType },
+      });
+
       return contact;
     }),
 
@@ -168,6 +179,17 @@ export const contactsRouter = createTRPCRouter({
         .set(data)
         .where(and(eq(contacts.id, id), eq(contacts.creatorId, ctx.creatorId)))
         .returning();
+
+      logTeamAction(ctx.db, {
+        creatorId: ctx.creatorId,
+        userId: ctx.actingUserId,
+        userName: ctx.session!.user.name ?? "Unknown",
+        action: "contact.updated",
+        entityType: "contact",
+        entityId: id,
+        details: { changes: data },
+      });
+
       return updated;
     }),
 
@@ -211,6 +233,17 @@ export const contactsRouter = createTRPCRouter({
       await ctx.db
         .delete(contacts)
         .where(eq(contacts.id, input.id));
+
+      logTeamAction(ctx.db, {
+        creatorId: ctx.creatorId,
+        userId: ctx.actingUserId,
+        userName: ctx.session!.user.name ?? "Unknown",
+        action: "contact.deleted",
+        entityType: "contact",
+        entityId: input.id,
+        details: { username: contact.username },
+      });
+
       return { action: "deleted" as const, reason: null };
     }),
 });

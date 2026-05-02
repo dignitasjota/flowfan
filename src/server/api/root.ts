@@ -26,6 +26,10 @@ import { sequencesRouter } from "./routers/sequences";
 import { scoringConfigRouter } from "./routers/scoring-config";
 import { apiKeysRouter } from "./routers/api-keys";
 import { webhooksOutgoingRouter } from "./routers/webhooks-outgoing";
+import { auditLogRouter } from "./routers/audit-log";
+import { presenceRouter } from "./routers/presence";
+import { abExperimentsRouter } from "./routers/ab-experiments";
+import { contentGapsRouter } from "./routers/content-gaps";
 
 export const appRouter = createTRPCRouter({
   contacts: contactsRouter,
@@ -55,6 +59,10 @@ export const appRouter = createTRPCRouter({
   scoringConfig: scoringConfigRouter,
   apiKeys: apiKeysRouter,
   webhooksOutgoing: webhooksOutgoingRouter,
+  auditLog: auditLogRouter,
+  presence: presenceRouter,
+  abExperiments: abExperimentsRouter,
+  contentGaps: contentGapsRouter,
 });
 
 export type AppRouter = typeof appRouter;

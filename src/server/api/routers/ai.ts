@@ -16,6 +16,8 @@ import {
   aiConfigs,
   creators,
   contactReports,
+  coachingSessions,
+  conversationModes as conversationModesTable,
 } from "@/server/db/schema";
 import { generateSuggestion } from "@/server/services/ai";
 import type { ConversationModeContext } from "@/server/services/ai";
@@ -26,14 +28,15 @@ import { generateContactReport } from "@/server/services/contact-report";
 import { getPriceAdvice } from "@/server/services/price-advisor";
 import { resolveAIConfig } from "@/server/services/ai-config-resolver";
 import type { BehavioralSignals } from "@/server/services/scoring";
-import { checkAIMessageLimit, checkReportLimit, checkFeatureAccess } from "@/server/services/usage-limits";
+import { checkAIMessageLimit, checkReportLimit, checkFeatureAccess, checkCoachingLimit } from "@/server/services/usage-limits";
+import { generateCoaching, type CoachingType } from "@/server/services/negotiation-coach";
 import {
   resolveConversationMode,
   mergePersonalityWithMode,
   DEFAULT_CONVERSATION_MODES,
 } from "@/server/services/conversation-mode-resolver";
 import type { ConversationMode } from "@/server/services/conversation-mode-resolver";
-import { conversationModes as conversationModesTable } from "@/server/db/schema";
+import { getExperimentModeConfig } from "@/server/services/ab-experiment";
 
 export const aiRouter = createTRPCRouter({
   suggest: protectedProcedure
@@ -90,6 +93,8 @@ export const aiRouter = createTRPCRouter({
 
       const creatorSettings = (creator?.settings ?? {}) as Record<string, unknown>;
       const globalInstructions = (creatorSettings.globalInstructions as string) || undefined;
+      const responseLanguage = (creatorSettings.responseLanguage as string) || undefined;
+      const analysisLanguage = (creatorSettings.analysisLanguage as string) || undefined;
 
       // Get contact notes
       const contactNotes = await ctx.db.query.notes.findMany({
@@ -180,6 +185,27 @@ export const aiRouter = createTRPCRouter({
         }
       }
 
+      // Check for A/B experiment override
+      if (conversationMode) {
+        const expResult = await getExperimentModeConfig(
+          ctx.db,
+          ctx.creatorId,
+          conversationMode.modeType,
+          conversation.contactId
+        );
+        if (expResult) {
+          const expConfig = expResult.config;
+          const overrides: Record<string, unknown> = {};
+          if (expConfig.tone) overrides.tone = expConfig.tone;
+          if (expConfig.style) overrides.style = expConfig.style;
+          if (expConfig.messageLength) overrides.messageLength = expConfig.messageLength;
+          if (expConfig.objectives) overrides.goals = expConfig.objectives;
+          if (expConfig.restrictions) overrides.restrictions = expConfig.restrictions;
+          if (expConfig.additionalInstructions) overrides.customInstructions = expConfig.additionalInstructions;
+          finalPersonality = { ...finalPersonality, ...overrides };
+        }
+      }
+
       // Run suggestion + analysis in parallel (each may use different model)
       const analysisConfigResolved = analysisConfig ?? suggestionConfig;
       const [suggestionResult, analysisResult] = await Promise.all([
@@ -192,11 +218,13 @@ export const aiRouter = createTRPCRouter({
           contactNotes: contactNotes.map((n) => n.content),
           fanMessage: input.fanMessage,
           conversationMode,
+          language: responseLanguage,
         }),
         analyzeMessage(analysisConfigResolved, {
           message: input.fanMessage,
           conversationHistory: conversationHistory.slice(-5),
           platformType: conversation.platformType,
+          language: analysisLanguage,
         }),
       ]);
 
@@ -300,6 +328,7 @@ export const aiRouter = createTRPCRouter({
 
       const creatorSettings = (creator?.settings ?? {}) as Record<string, unknown>;
       const globalInstructions = (creatorSettings.globalInstructions as string) || undefined;
+      const responseLanguage = (creatorSettings.responseLanguage as string) || undefined;
 
       const contactNotes = await ctx.db.query.notes.findMany({
         where: and(
@@ -369,6 +398,27 @@ export const aiRouter = createTRPCRouter({
         }
       }
 
+      // Check for A/B experiment override
+      if (conversationMode) {
+        const expResult = await getExperimentModeConfig(
+          ctx.db,
+          ctx.creatorId,
+          conversationMode.modeType,
+          conversation.contactId
+        );
+        if (expResult) {
+          const expConfig = expResult.config;
+          const overrides: Record<string, unknown> = {};
+          if (expConfig.tone) overrides.tone = expConfig.tone;
+          if (expConfig.style) overrides.style = expConfig.style;
+          if (expConfig.messageLength) overrides.messageLength = expConfig.messageLength;
+          if (expConfig.objectives) overrides.goals = expConfig.objectives;
+          if (expConfig.restrictions) overrides.restrictions = expConfig.restrictions;
+          if (expConfig.additionalInstructions) overrides.customInstructions = expConfig.additionalInstructions;
+          finalPersonality = { ...finalPersonality, ...overrides };
+        }
+      }
+
       const result = await generateSuggestion(
         config,
         {
@@ -383,6 +433,7 @@ export const aiRouter = createTRPCRouter({
           contactNotes: contactNotes.map((n) => n.content),
           fanMessage: lastFanMessage.content,
           conversationMode,
+          language: responseLanguage,
         }
       );
 
@@ -427,6 +478,12 @@ export const aiRouter = createTRPCRouter({
         throw new TRPCError({ code: "NOT_FOUND", message: "Conversacion no encontrada" });
       }
 
+      const creatorForSummary = await ctx.db.query.creators.findFirst({
+        where: eq(creators.id, ctx.creatorId),
+        columns: { settings: true },
+      });
+      const summarySettings = (creatorForSummary?.settings ?? {}) as Record<string, unknown>;
+
       const result = await summarizeConversation(config, {
         platformType: conversation.platformType,
         contactUsername: conversation.contact.username,
@@ -435,6 +492,7 @@ export const aiRouter = createTRPCRouter({
           role: m.role,
           content: m.content,
         })),
+        language: (summarySettings.responseLanguage as string) || undefined,
       });
 
       await ctx.db
@@ -492,6 +550,12 @@ export const aiRouter = createTRPCRouter({
 
       const signals = contact.profile?.behavioralSignals as BehavioralSignals | null;
 
+      const creatorForReport = await ctx.db.query.creators.findFirst({
+        where: eq(creators.id, ctx.creatorId),
+        columns: { settings: true },
+      });
+      const reportSettings = (creatorForReport?.settings ?? {}) as Record<string, unknown>;
+
       const result = await generateContactReport(config, {
         contactUsername: contact.username,
         platformType: contact.platformType,
@@ -511,6 +575,7 @@ export const aiRouter = createTRPCRouter({
         sentimentTrend: signals?.sentimentTrend ?? 0,
         messageCount: signals?.messageCount ?? 0,
         recentMessages: recentMessages.slice(-10),
+        language: (reportSettings.responseLanguage as string) || undefined,
       });
 
       const modelUsed = `${config.provider}/${config.model}`;
@@ -609,6 +674,12 @@ export const aiRouter = createTRPCRouter({
 
       const signals = contact.profile?.behavioralSignals as BehavioralSignals | null;
 
+      const creatorForPrice = await ctx.db.query.creators.findFirst({
+        where: eq(creators.id, ctx.creatorId),
+        columns: { settings: true },
+      });
+      const priceSettings = (creatorForPrice?.settings ?? {}) as Record<string, unknown>;
+
       const result = await getPriceAdvice(config, {
         platformType: contact.platformType,
         funnelStage: contact.profile?.funnelStage ?? "cold",
@@ -623,6 +694,7 @@ export const aiRouter = createTRPCRouter({
               .map(([t]) => t)
           : [],
         recentMessages,
+        language: (priceSettings.responseLanguage as string) || undefined,
       });
 
       await ctx.db.insert(aiUsageLog).values({
@@ -633,5 +705,127 @@ export const aiRouter = createTRPCRouter({
       });
 
       return result;
+    }),
+
+  // ============================================================
+  // Coaching
+  // ============================================================
+
+  getCoaching: protectedProcedure
+    .input(
+      z.object({
+        conversationId: z.string().uuid(),
+        coachingType: z.enum(["negotiation", "retention", "upsell"]),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      await checkCoachingLimit(ctx.db, ctx.creatorId);
+
+      const config = await resolveAIConfig(ctx.db, ctx.creatorId, "coaching");
+      const fallbackConfig = config ?? (await resolveAIConfig(ctx.db, ctx.creatorId, "suggestion"));
+
+      if (!fallbackConfig) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "No has configurado tu proveedor de IA.",
+        });
+      }
+
+      const conversation = await ctx.db.query.conversations.findFirst({
+        where: and(
+          eq(conversations.id, input.conversationId),
+          eq(conversations.creatorId, ctx.creatorId)
+        ),
+        with: {
+          contact: { with: { profile: true } },
+          messages: { orderBy: (m, { desc }) => [desc(m.createdAt)], limit: 30 },
+        },
+      });
+
+      if (!conversation) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Conversacion no encontrada" });
+      }
+
+      const creatorForCoaching = await ctx.db.query.creators.findFirst({
+        where: eq(creators.id, ctx.creatorId),
+        columns: { settings: true },
+      });
+      const coachingSettings = (creatorForCoaching?.settings ?? {}) as Record<string, unknown>;
+
+      const result = await generateCoaching(fallbackConfig, {
+        coachingType: input.coachingType as CoachingType,
+        platformType: conversation.platformType,
+        funnelStage: conversation.contact.profile?.funnelStage ?? "cold",
+        engagementLevel: conversation.contact.profile?.engagementLevel ?? 0,
+        paymentProbability: conversation.contact.profile?.paymentProbability ?? 0,
+        conversationHistory: conversation.messages.reverse().map((m) => ({
+          role: m.role,
+          content: m.content,
+        })),
+        language: (coachingSettings.responseLanguage as string) || undefined,
+      });
+
+      // Save coaching session
+      const [session] = await ctx.db
+        .insert(coachingSessions)
+        .values({
+          creatorId: ctx.creatorId,
+          conversationId: input.conversationId,
+          contactId: conversation.contactId,
+          coachingType: input.coachingType,
+          analysis: result,
+          modelUsed: `${fallbackConfig.provider}/${fallbackConfig.model}`,
+          tokensUsed: result.tokensUsed,
+        })
+        .returning();
+
+      // Log AI usage
+      await ctx.db.insert(aiUsageLog).values({
+        creatorId: ctx.creatorId,
+        requestType: "coaching",
+        tokensUsed: result.tokensUsed,
+        modelUsed: `${fallbackConfig.provider}/${fallbackConfig.model}`,
+      });
+
+      return { ...result, id: session!.id, createdAt: session!.createdAt };
+    }),
+
+  listCoachingSessions: protectedProcedure
+    .input(z.object({ conversationId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      // Verify conversation belongs to creator
+      const conversation = await ctx.db.query.conversations.findFirst({
+        where: and(
+          eq(conversations.id, input.conversationId),
+          eq(conversations.creatorId, ctx.creatorId)
+        ),
+      });
+
+      if (!conversation) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Conversacion no encontrada" });
+      }
+
+      return ctx.db.query.coachingSessions.findMany({
+        where: eq(coachingSessions.conversationId, input.conversationId),
+        orderBy: (s, { desc }) => [desc(s.createdAt)],
+        limit: 20,
+      });
+    }),
+
+  getCoachingSession: protectedProcedure
+    .input(z.object({ id: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const session = await ctx.db.query.coachingSessions.findFirst({
+        where: and(
+          eq(coachingSessions.id, input.id),
+          eq(coachingSessions.creatorId, ctx.creatorId)
+        ),
+      });
+
+      if (!session) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Sesion de coaching no encontrada" });
+      }
+
+      return session;
     }),
 });

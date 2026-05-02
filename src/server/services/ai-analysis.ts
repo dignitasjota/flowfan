@@ -1,4 +1,5 @@
 import { type AIConfig, callAIProvider, stripThinkingBlocks } from "./ai";
+import { getAnalysisLanguageInstruction } from "./language-utils";
 
 // ============================================================
 // Types
@@ -19,6 +20,7 @@ export type AnalysisInput = {
   message: string;
   conversationHistory?: { role: "fan" | "creator"; content: string }[];
   platformType?: string;
+  language?: string;
 };
 
 // ============================================================
@@ -104,7 +106,12 @@ export async function analyzeMessage(
     content: `Analiza este mensaje del fan: "${input.message}"`,
   });
 
-  const result = await callAIProvider(config, ANALYSIS_SYSTEM_PROMPT, messages, 512);
+  let systemPrompt = ANALYSIS_SYSTEM_PROMPT;
+  if (input.language) {
+    systemPrompt += `\n\n${getAnalysisLanguageInstruction(input.language)}`;
+  }
+
+  const result = await callAIProvider(config, systemPrompt, messages, 512);
   const parsed = parseAnalysisJSON(result.text);
 
   if (!parsed) {

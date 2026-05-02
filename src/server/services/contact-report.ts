@@ -1,4 +1,5 @@
 import { type AIConfig, callAIProvider, stripThinkingBlocks } from "./ai";
+import { getLanguageInstruction } from "./language-utils";
 
 // ============================================================
 // Types
@@ -33,6 +34,7 @@ export type ReportInput = {
   sentimentTrend: number;
   messageCount: number;
   recentMessages: { role: "fan" | "creator"; content: string }[];
+  language?: string;
 };
 
 // ============================================================
@@ -124,9 +126,14 @@ export async function generateContactReport(
     }
   }
 
+  let systemPrompt = REPORT_SYSTEM_PROMPT;
+  if (input.language) {
+    systemPrompt += `\n\n${getLanguageInstruction(input.language)}`;
+  }
+
   const result = await callAIProvider(
     config,
-    REPORT_SYSTEM_PROMPT,
+    systemPrompt,
     [{ role: "user", content: contextParts.join("\n") }],
     1024
   );

@@ -12,6 +12,22 @@ import { useSession } from "next-auth/react";
 import { trpc } from "@/lib/trpc";
 import type { RealtimeEvent } from "@/lib/redis-pubsub";
 
+type PresenceInfo = {
+  userId: string;
+  userName: string;
+  status: "online" | "away" | "offline";
+};
+
+type TypingInfo = {
+  userId: string;
+  userName: string;
+};
+
+type ViewerInfo = {
+  userId: string;
+  userName: string;
+};
+
 type RealtimeContextValue = {
   /** Conversation IDs with unread new messages */
   newMessageConversations: Set<string>;
@@ -19,12 +35,21 @@ type RealtimeContextValue = {
   markConversationSeen: (conversationId: string) => void;
   /** SSE connection status */
   status: "connecting" | "connected" | "disconnected";
+  /** Online team members */
+  onlineMembers: Map<string, PresenceInfo>;
+  /** Typing users per conversation */
+  typingUsers: Map<string, TypingInfo[]>;
+  /** Viewers per conversation */
+  conversationViewers: Map<string, ViewerInfo[]>;
 };
 
 export const RealtimeContext = createContext<RealtimeContextValue>({
   newMessageConversations: new Set(),
   markConversationSeen: () => {},
   status: "disconnected",
+  onlineMembers: new Map(),
+  typingUsers: new Map(),
+  conversationViewers: new Map(),
 });
 
 export function useRealtimeContext() {
@@ -40,6 +65,15 @@ export function useRealtime() {
   const [newMessageConversations, setNewMessageConversations] = useState<
     Set<string>
   >(new Set());
+  const [onlineMembers, setOnlineMembers] = useState<Map<string, PresenceInfo>>(
+    new Map()
+  );
+  const [typingUsers, setTypingUsers] = useState<Map<string, TypingInfo[]>>(
+    new Map()
+  );
+  const [conversationViewers, setConversationViewers] = useState<
+    Map<string, ViewerInfo[]>
+  >(new Map());
   const eventSourceRef = useRef<EventSource | null>(null);
   const notificationPermissionAsked = useRef(false);
 
@@ -75,7 +109,11 @@ export function useRealtime() {
 
     es.onmessage = (e) => {
       try {
-        const event = JSON.parse(e.data) as { type: string; data: Record<string, unknown>; timestamp: number };
+        const event = JSON.parse(e.data) as {
+          type: string;
+          data: Record<string, unknown>;
+          timestamp: number;
+        };
 
         if (event.type === "connected") return;
 
@@ -85,18 +123,15 @@ export function useRealtime() {
             const role = event.data.role as string;
             const contactName = event.data.contactName as string | undefined;
 
-            // Invalidate queries so data refreshes
             utils.conversations.getById.invalidate({ id: conversationId });
             utils.conversations.list.invalidate();
 
-            // Track unread conversation
             setNewMessageConversations((prev) => {
               const next = new Set(prev);
               next.add(conversationId);
               return next;
             });
 
-            // Browser notification for fan messages when tab is hidden
             if (
               role === "fan" &&
               typeof document !== "undefined" &&
@@ -123,6 +158,90 @@ export function useRealtime() {
           case "conversation_update":
             utils.conversations.list.invalidate();
             break;
+
+          case "presence_update": {
+            const userId = event.data.userId as string;
+            const presenceStatus = event.data.status as
+              | "online"
+              | "away"
+              | "offline";
+            const userName = (event.data.userName as string) ?? "";
+
+            setOnlineMembers((prev) => {
+              const next = new Map(prev);
+              if (presenceStatus === "offline") {
+                next.delete(userId);
+              } else {
+                next.set(userId, { userId, userName, status: presenceStatus });
+              }
+              return next;
+            });
+            break;
+          }
+
+          case "typing_start": {
+            const userId = event.data.userId as string;
+            const conversationId = event.data.conversationId as string;
+            const userName = (event.data.userName as string) ?? "";
+
+            setTypingUsers((prev) => {
+              const next = new Map(prev);
+              const current = next.get(conversationId) ?? [];
+              if (!current.some((t) => t.userId === userId)) {
+                next.set(conversationId, [...current, { userId, userName }]);
+              }
+              return next;
+            });
+            break;
+          }
+
+          case "typing_stop": {
+            const userId = event.data.userId as string;
+            const conversationId = event.data.conversationId as string;
+
+            setTypingUsers((prev) => {
+              const next = new Map(prev);
+              const current = next.get(conversationId) ?? [];
+              const filtered = current.filter((t) => t.userId !== userId);
+              if (filtered.length === 0) {
+                next.delete(conversationId);
+              } else {
+                next.set(conversationId, filtered);
+              }
+              return next;
+            });
+            break;
+          }
+
+          case "viewing_conversation": {
+            const userId = event.data.userId as string;
+            const conversationId = event.data.conversationId as string;
+            const userName = (event.data.userName as string) ?? "";
+            const action = event.data.action as "join" | "leave";
+
+            setConversationViewers((prev) => {
+              const next = new Map(prev);
+              const current = next.get(conversationId) ?? [];
+
+              if (action === "join") {
+                if (!current.some((v) => v.userId === userId)) {
+                  next.set(conversationId, [
+                    ...current,
+                    { userId, userName },
+                  ]);
+                }
+              } else {
+                const filtered = current.filter((v) => v.userId !== userId);
+                if (filtered.length === 0) {
+                  next.delete(conversationId);
+                } else {
+                  next.set(conversationId, filtered);
+                }
+              }
+              return next;
+            });
+            break;
+          }
         }
       } catch {
         // Ignore parse errors
@@ -145,5 +264,8 @@ export function useRealtime() {
     newMessageConversations,
     markConversationSeen,
     status: connectionStatus,
+    onlineMembers,
+    typingUsers,
+    conversationViewers,
   };
 }

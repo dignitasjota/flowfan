@@ -43,6 +43,7 @@ type PlanLimits = {
   optimalTimeSuggestion: boolean;
   apiAccess: "none" | "readonly" | "full";
   webhooks: boolean;
+  coachingPerMonth: number;
 };
 
 export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
@@ -70,6 +71,7 @@ export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
     optimalTimeSuggestion: false,
     apiAccess: "none",
     webhooks: false,
+    coachingPerMonth: 5,
   },
   starter: {
     contacts: 50,
@@ -95,6 +97,7 @@ export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
     optimalTimeSuggestion: false,
     apiAccess: "none",
     webhooks: false,
+    coachingPerMonth: 20,
   },
   pro: {
     contacts: -1,
@@ -120,6 +123,7 @@ export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
     optimalTimeSuggestion: true,
     apiAccess: "readonly",
     webhooks: false,
+    coachingPerMonth: 100,
   },
   business: {
     contacts: -1,
@@ -145,6 +149,7 @@ export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
     optimalTimeSuggestion: true,
     apiAccess: "full",
     webhooks: true,
+    coachingPerMonth: -1,
   },
 };
 
@@ -288,6 +293,31 @@ export async function checkReportLimit(db: Db, creatorId: string) {
     throw new TRPCError({
       code: "FORBIDDEN",
       message: `Has alcanzado el límite de ${limits.reportsPerMonth} reportes/mes en el plan ${plan}. Actualiza tu plan para más reportes.`,
+    });
+  }
+}
+
+export async function checkCoachingLimit(db: Db, creatorId: string) {
+  const plan = await getCreatorPlan(db, creatorId);
+  const limits = PLAN_LIMITS[plan];
+  if (limits.coachingPerMonth === -1) return;
+
+  const monthStart = startOfMonth();
+  const [result] = await db
+    .select({ count: count() })
+    .from(aiUsageLog)
+    .where(
+      and(
+        eq(aiUsageLog.creatorId, creatorId),
+        eq(aiUsageLog.requestType, "coaching"),
+        gte(aiUsageLog.createdAt, monthStart)
+      )
+    );
+
+  if ((result?.count ?? 0) >= limits.coachingPerMonth) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: `Has alcanzado el límite de ${limits.coachingPerMonth} sesiones de coaching/mes en el plan ${plan}.`,
     });
   }
 }

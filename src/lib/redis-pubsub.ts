@@ -3,7 +3,11 @@ import Redis from "ioredis";
 export type RealtimeEventType =
   | "new_message"
   | "notification"
-  | "conversation_update";
+  | "conversation_update"
+  | "presence_update"
+  | "typing_start"
+  | "typing_stop"
+  | "viewing_conversation";
 
 export type RealtimeEvent = {
   type: RealtimeEventType;

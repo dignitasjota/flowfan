@@ -85,6 +85,8 @@ export const aiRequestTypeEnum = pgEnum("ai_request_type", [
   "analysis",
   "scoring",
   "summary",
+  "coaching",
+  "content_gap",
 ]);
 
 export const aiProviderEnum = pgEnum("ai_provider", [
@@ -101,6 +103,8 @@ export const aiTaskTypeEnum = pgEnum("ai_task_type", [
   "summary",
   "report",
   "price_advice",
+  "coaching",
+  "content_gap",
 ]);
 
 export const transactionTypeEnum = pgEnum("transaction_type", [
@@ -923,6 +927,37 @@ export const scheduledMessages = pgTable(
 
 export const teamRoleEnum = pgEnum("team_role", ["owner", "manager", "chatter"]);
 
+// --- Custom Roles ---
+
+export const customRoles = pgTable(
+  "custom_roles",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    creatorId: uuid("creator_id")
+      .notNull()
+      .references(() => creators.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 100 }).notNull(),
+    description: text("description"),
+    permissions: text("permissions").array().notNull(),
+    color: varchar("color", { length: 20 }),
+    isSystem: boolean("is_system").default(false).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("custom_roles_creator_name_idx").on(table.creatorId, table.name),
+    index("custom_roles_creator_idx").on(table.creatorId),
+  ]
+);
+
+export const customRolesRelations = relations(customRoles, ({ one, many }) => ({
+  creator: one(creators, {
+    fields: [customRoles.creatorId],
+    references: [creators.id],
+  }),
+  teamMembers: many(teamMembers),
+}));
+
 export const teamMembers = pgTable(
   "team_members",
   {
@@ -937,6 +972,9 @@ export const teamMembers = pgTable(
     isActive: boolean("is_active").default(true).notNull(),
     joinedAt: timestamp("joined_at").defaultNow().notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
+    customRoleId: uuid("custom_role_id").references(() => customRoles.id, {
+      onDelete: "set null",
+    }),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
   (table) => [
@@ -958,6 +996,9 @@ export const teamInvites = pgTable(
     expiresAt: timestamp("expires_at").notNull(),
     acceptedAt: timestamp("accepted_at"),
     acceptedByUserId: uuid("accepted_by_user_id").references(() => creators.id),
+    customRoleId: uuid("custom_role_id").references(() => customRoles.id, {
+      onDelete: "set null",
+    }),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
   (table) => [
@@ -1330,6 +1371,10 @@ export const teamMembersRelations = relations(teamMembers, ({ one }) => ({
     references: [creators.id],
     relationName: "teamUser",
   }),
+  customRole: one(customRoles, {
+    fields: [teamMembers.customRoleId],
+    references: [customRoles.id],
+  }),
 }));
 
 export const teamInvitesRelations = relations(teamInvites, ({ one }) => ({
@@ -1614,3 +1659,259 @@ export const webhookDeliveryLogsRelations = relations(webhookDeliveryLogs, ({ on
     references: [webhookConfigs.id],
   }),
 }));
+
+// --- Team Audit Log ---
+
+export const teamAuditLog = pgTable(
+  "team_audit_log",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    creatorId: uuid("creator_id")
+      .notNull()
+      .references(() => creators.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").references(() => creators.id, {
+      onDelete: "set null",
+    }),
+    userName: varchar("user_name", { length: 255 }).notNull(),
+    action: varchar("action", { length: 100 }).notNull(),
+    entityType: varchar("entity_type", { length: 50 }).notNull(),
+    entityId: varchar("entity_id", { length: 255 }),
+    details: jsonb("details").default({}).notNull(),
+    ipAddress: varchar("ip_address", { length: 45 }),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("team_audit_log_creator_created_idx").on(
+      table.creatorId,
+      table.createdAt
+    ),
+    index("team_audit_log_creator_action_idx").on(
+      table.creatorId,
+      table.action
+    ),
+    index("team_audit_log_creator_user_idx").on(
+      table.creatorId,
+      table.userId
+    ),
+    index("team_audit_log_creator_entity_idx").on(
+      table.creatorId,
+      table.entityType
+    ),
+  ]
+);
+
+export const teamAuditLogRelations = relations(teamAuditLog, ({ one }) => ({
+  creator: one(creators, {
+    fields: [teamAuditLog.creatorId],
+    references: [creators.id],
+  }),
+  user: one(creators, {
+    fields: [teamAuditLog.userId],
+    references: [creators.id],
+    relationName: "auditUser",
+  }),
+}));
+
+// ============================================================
+// A/B TESTING - Conversation Mode Experiments
+// ============================================================
+
+export const conversationModeExperiments = pgTable(
+  "conversation_mode_experiments",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    creatorId: uuid("creator_id")
+      .notNull()
+      .references(() => creators.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 255 }).notNull(),
+    modeType: conversationModeTypeEnum("mode_type").notNull(),
+    status: varchar("status", { length: 20 }).notNull().default("draft"),
+    variantAConfig: jsonb("variant_a_config").notNull(),
+    variantBConfig: jsonb("variant_b_config").notNull(),
+    trafficSplit: integer("traffic_split").notNull().default(50),
+    startedAt: timestamp("started_at"),
+    endedAt: timestamp("ended_at"),
+    winner: varchar("winner", { length: 1 }),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("conv_mode_exp_creator_idx").on(table.creatorId),
+  ]
+);
+
+export const experimentAssignments = pgTable(
+  "experiment_assignments",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    experimentId: uuid("experiment_id")
+      .notNull()
+      .references(() => conversationModeExperiments.id, { onDelete: "cascade" }),
+    contactId: uuid("contact_id")
+      .notNull()
+      .references(() => contacts.id, { onDelete: "cascade" }),
+    variant: varchar("variant", { length: 1 }).notNull(),
+    assignedAt: timestamp("assigned_at").defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("exp_assignment_unique_idx").on(
+      table.experimentId,
+      table.contactId
+    ),
+  ]
+);
+
+export const experimentMetrics = pgTable(
+  "experiment_metrics",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    experimentId: uuid("experiment_id")
+      .notNull()
+      .references(() => conversationModeExperiments.id, { onDelete: "cascade" }),
+    contactId: uuid("contact_id")
+      .notNull()
+      .references(() => contacts.id, { onDelete: "cascade" }),
+    variant: varchar("variant", { length: 1 }).notNull(),
+    metricType: varchar("metric_type", { length: 50 }).notNull(),
+    value: integer("value").notNull().default(1),
+    recordedAt: timestamp("recorded_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("exp_metrics_exp_variant_idx").on(
+      table.experimentId,
+      table.variant
+    ),
+    index("exp_metrics_exp_type_idx").on(
+      table.experimentId,
+      table.metricType
+    ),
+  ]
+);
+
+export const conversationModeExperimentsRelations = relations(
+  conversationModeExperiments,
+  ({ one, many }) => ({
+    creator: one(creators, {
+      fields: [conversationModeExperiments.creatorId],
+      references: [creators.id],
+    }),
+    assignments: many(experimentAssignments),
+    metrics: many(experimentMetrics),
+  })
+);
+
+export const experimentAssignmentsRelations = relations(
+  experimentAssignments,
+  ({ one }) => ({
+    experiment: one(conversationModeExperiments, {
+      fields: [experimentAssignments.experimentId],
+      references: [conversationModeExperiments.id],
+    }),
+    contact: one(contacts, {
+      fields: [experimentAssignments.contactId],
+      references: [contacts.id],
+    }),
+  })
+);
+
+export const experimentMetricsRelations = relations(
+  experimentMetrics,
+  ({ one }) => ({
+    experiment: one(conversationModeExperiments, {
+      fields: [experimentMetrics.experimentId],
+      references: [conversationModeExperiments.id],
+    }),
+    contact: one(contacts, {
+      fields: [experimentMetrics.contactId],
+      references: [contacts.id],
+    }),
+  })
+);
+
+// ============================================================
+// COACHING SESSIONS
+// ============================================================
+
+export const coachingSessions = pgTable(
+  "coaching_sessions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    creatorId: uuid("creator_id")
+      .notNull()
+      .references(() => creators.id, { onDelete: "cascade" }),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    contactId: uuid("contact_id")
+      .notNull()
+      .references(() => contacts.id, { onDelete: "cascade" }),
+    coachingType: varchar("coaching_type", { length: 50 }).notNull(),
+    analysis: jsonb("analysis").notNull(),
+    modelUsed: varchar("model_used", { length: 100 }).notNull(),
+    tokensUsed: integer("tokens_used").notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("coaching_sessions_creator_created_idx").on(
+      table.creatorId,
+      table.createdAt
+    ),
+    index("coaching_sessions_conversation_idx").on(table.conversationId),
+  ]
+);
+
+export const coachingSessionsRelations = relations(
+  coachingSessions,
+  ({ one }) => ({
+    creator: one(creators, {
+      fields: [coachingSessions.creatorId],
+      references: [creators.id],
+    }),
+    conversation: one(conversations, {
+      fields: [coachingSessions.conversationId],
+      references: [conversations.id],
+    }),
+    contact: one(contacts, {
+      fields: [coachingSessions.contactId],
+      references: [contacts.id],
+    }),
+  })
+);
+
+// ============================================================
+// CONTENT GAP REPORTS
+// ============================================================
+
+export const contentGapReports = pgTable(
+  "content_gap_reports",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    creatorId: uuid("creator_id")
+      .notNull()
+      .references(() => creators.id, { onDelete: "cascade" }),
+    reportData: jsonb("report_data").notNull(),
+    periodStart: timestamp("period_start").notNull(),
+    periodEnd: timestamp("period_end").notNull(),
+    contactsAnalyzed: integer("contacts_analyzed").notNull(),
+    messagesAnalyzed: integer("messages_analyzed").notNull(),
+    modelUsed: varchar("model_used", { length: 100 }).notNull(),
+    tokensUsed: integer("tokens_used").notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("content_gap_reports_creator_created_idx").on(
+      table.creatorId,
+      table.createdAt
+    ),
+  ]
+);
+
+export const contentGapReportsRelations = relations(
+  contentGapReports,
+  ({ one }) => ({
+    creator: one(creators, {
+      fields: [contentGapReports.creatorId],
+      references: [creators.id],
+    }),
+  })
+);

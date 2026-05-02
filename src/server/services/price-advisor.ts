@@ -1,5 +1,6 @@
 import { type AIConfig, callAIProvider, stripThinkingBlocks } from "./ai";
 import type { BehavioralSignals } from "./scoring";
+import { getLanguageInstruction } from "./language-utils";
 
 // ============================================================
 // Types
@@ -24,6 +25,7 @@ export type PriceAdviceInput = {
   sentimentTrend: number;
   topics: string[];
   recentMessages: { role: "fan" | "creator"; content: string }[];
+  language?: string;
 };
 
 // ============================================================
@@ -106,9 +108,14 @@ export async function getPriceAdvice(
     ? `\n\nUltimos mensajes:\n${input.recentMessages.slice(-5).map((m) => `${m.role === "fan" ? "Fan" : "Creador"}: ${m.content}`).join("\n")}`
     : "";
 
+  let systemPrompt = PRICE_SYSTEM_PROMPT;
+  if (input.language) {
+    systemPrompt += `\n\n${getLanguageInstruction(input.language)}`;
+  }
+
   const result = await callAIProvider(
     config,
-    PRICE_SYSTEM_PROMPT,
+    systemPrompt,
     [{ role: "user", content: contextParts.join("\n") + recentContext }],
     512
   );

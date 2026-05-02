@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
+import { ABExperimentsSettings } from "@/components/settings/ab-experiments-settings";
 
 type ModeType = "BASE" | "POTENCIAL_PREMIUM" | "CONVERSION" | "VIP" | "LOW_VALUE";
 
@@ -362,6 +363,11 @@ export function ConversationModesSettings() {
           </div>
         </form>
       )}
+
+      {/* A/B Experiments section */}
+      <div className="mt-10 border-t border-gray-800 pt-8">
+        <ABExperimentsSettings />
+      </div>
     </div>
   );
 }

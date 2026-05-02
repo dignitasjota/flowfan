@@ -6,6 +6,11 @@ import { cn } from "@/lib/utils";
 import { useTrpcErrorHandler } from "@/hooks/useTrpcErrorHandler";
 import { useToast } from "@/components/ui/toast";
 import { MediaPicker } from "@/components/media/media-picker";
+import { useRealtimeContext } from "@/hooks/use-realtime";
+import { useSession } from "next-auth/react";
+import { TypingIndicator } from "@/components/conversations/typing-indicator";
+import { ActiveViewers } from "@/components/conversations/active-viewers";
+import { CoachingPanel } from "@/components/conversations/coaching-panel";
 
 type Message = {
   id: string;
@@ -49,6 +54,14 @@ type Props = {
 };
 
 export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact, highlightMessageId }: Props) {
+  const { data: sessionData } = useSession();
+  const { typingUsers, conversationViewers } = useRealtimeContext();
+  const currentTyping = typingUsers.get(conversation.id) ?? [];
+  const currentViewers = conversationViewers.get(conversation.id) ?? [];
+  const typingNames = currentTyping
+    .filter((t) => t.userId !== sessionData?.user?.id)
+    .map((t) => t.userName);
+
   const [fanMessageInput, setFanMessageInput] = useState("");
   const [creatorMessageInput, setCreatorMessageInput] = useState("");
   const [manualQueue, setManualQueue] = useState<ManualQueueItem[]>([]);
@@ -63,6 +76,7 @@ export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact
   const [scheduleDate, setScheduleDate] = useState("");
   const [showScheduleManual, setShowScheduleManual] = useState(false);
   const [scheduleManualDate, setScheduleManualDate] = useState("");
+  const [showCoaching, setShowCoaching] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
 
@@ -260,6 +274,25 @@ export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact
           </span>
         </div>
 
+        {currentViewers.length > 0 && (
+          <ActiveViewers
+            viewers={currentViewers}
+            currentUserId={sessionData?.user?.id}
+          />
+        )}
+
+        {/* Coaching button */}
+        <button
+          onClick={() => setShowCoaching(true)}
+          className="flex items-center gap-1.5 rounded-lg border border-gray-600 px-3 py-1.5 text-xs font-medium text-gray-400 transition-colors hover:bg-gray-800 hover:text-white"
+          title="Coaching IA"
+        >
+          <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+          </svg>
+          Coaching
+        </button>
+
         {/* Manual mode toggle */}
         <button
           onClick={() => {
@@ -375,6 +408,10 @@ export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact
 
           <div ref={messagesEndRef} />
         </div>
+
+        {typingNames.length > 0 && (
+          <TypingIndicator userNames={typingNames} />
+        )}
       </div>
 
       {/* AI Suggestions */}
@@ -721,6 +758,14 @@ export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact
           </>
         )}
       </div>
+
+      {/* Coaching Panel */}
+      {showCoaching && (
+        <CoachingPanel
+          conversationId={conversation.id}
+          onClose={() => setShowCoaching(false)}
+        />
+      )}
 
       {/* Media Picker */}
       {showMediaPicker && (

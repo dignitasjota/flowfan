@@ -7,6 +7,7 @@ import { workflowQueue } from "@/server/queues";
 import { createChildLogger } from "@/lib/logger";
 import { publishEvent } from "@/lib/redis-pubsub";
 import { dispatchWebhookEvent } from "./webhook-dispatcher";
+import { findContactExperiment, recordExperimentMetric } from "./ab-experiment";
 
 const log = createChildLogger("profile-updater");
 
@@ -211,6 +212,31 @@ export async function updateContactProfile(
           previousStage: prevFunnel,
           newStage: scores.funnelStage,
         }).catch(() => {});
+      }
+
+      // Record A/B experiment metrics if contact is enrolled
+      try {
+        const experiment = await findContactExperiment(db, contactId);
+        if (experiment) {
+          await recordExperimentMetric(
+            db,
+            experiment.experimentId,
+            contactId,
+            experiment.variant,
+            "fan_replied"
+          );
+          if (scores.funnelStage !== prevFunnel) {
+            await recordExperimentMetric(
+              db,
+              experiment.experimentId,
+              contactId,
+              experiment.variant,
+              "conversion"
+            );
+          }
+        }
+      } catch {
+        // Non-critical: don't break profile update
       }
 
       // Dispatch workflow event for significant sentiment change
