@@ -15,13 +15,20 @@ export type PublishResult = {
   error?: string;
 };
 
-const REDDIT_USER_AGENT = "FanFlow/1.0 (by /u/fanflow)";
+export const REDDIT_USER_AGENT = "FanFlow/1.0 (by /u/fanflow)";
+
+export function decryptRedditCredentials(
+  encryptedCredentials: string
+): RedditCredentials {
+  const json = decrypt(encryptedCredentials);
+  return JSON.parse(json) as RedditCredentials;
+}
 
 /**
  * Get a fresh OAuth token from Reddit using password grant
  * (script-type apps only — requires client_id+secret + user/pass).
  */
-async function getRedditAccessToken(
+export async function getRedditAccessToken(
   creds: RedditCredentials
 ): Promise<string> {
   const basic = Buffer.from(

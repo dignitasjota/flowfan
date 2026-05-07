@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
@@ -8,6 +8,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { ConversationList } from "@/components/conversations/conversation-list";
 import { ChatPanel } from "@/components/conversations/chat-panel";
 import { ContactPanel } from "@/components/conversations/contact-panel";
+import { ShortcutsCheatsheet } from "@/components/conversations/shortcuts-cheatsheet";
+import { useConversationShortcuts } from "@/hooks/use-conversation-shortcuts";
 
 export default function ConversationsPage() {
   const searchParams = useSearchParams();
@@ -47,6 +49,50 @@ export default function ConversationsPage() {
   }
 
   const hasConversation = selectedConversationId && conversationQuery.data;
+
+  const [showShortcuts, setShowShortcuts] = useState(false);
+
+  const orderedIds = useMemo(
+    () => (conversationsQuery.data ?? []).map((c) => c.id),
+    [conversationsQuery.data]
+  );
+
+  const archiveMutation = trpc.conversations.updateStatus.useMutation({
+    onSuccess: () => {
+      utils.conversations.list.invalidate();
+      setSelectedConversationId(null);
+    },
+  });
+
+  useConversationShortcuts({
+    onNext: () => {
+      if (orderedIds.length === 0) return;
+      const idx = selectedConversationId
+        ? orderedIds.indexOf(selectedConversationId)
+        : -1;
+      const next = orderedIds[Math.min(idx + 1, orderedIds.length - 1)];
+      if (next) handleSelectConversation(next);
+    },
+    onPrev: () => {
+      if (orderedIds.length === 0) return;
+      const idx = selectedConversationId
+        ? orderedIds.indexOf(selectedConversationId)
+        : 0;
+      const prev = orderedIds[Math.max(idx - 1, 0)];
+      if (prev) handleSelectConversation(prev);
+    },
+    onReply: () => {
+      window.dispatchEvent(new CustomEvent("fanflow:focus-reply"));
+    },
+    onArchive: () => {
+      if (!selectedConversationId) return;
+      archiveMutation.mutate({
+        id: selectedConversationId,
+        status: "archived",
+      });
+    },
+    onShowHelp: () => setShowShortcuts(true),
+  });
 
   return (
     <div className="flex h-full">
@@ -115,6 +161,11 @@ export default function ConversationsPage() {
           />
         </div>
       )}
+
+      <ShortcutsCheatsheet
+        open={showShortcuts}
+        onClose={() => setShowShortcuts(false)}
+      />
     </div>
   );
 }

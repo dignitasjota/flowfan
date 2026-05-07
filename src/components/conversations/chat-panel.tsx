@@ -11,6 +11,7 @@ import { useSession } from "next-auth/react";
 import { TypingIndicator } from "@/components/conversations/typing-indicator";
 import { ActiveViewers } from "@/components/conversations/active-viewers";
 import { CoachingPanel } from "@/components/conversations/coaching-panel";
+import { SlashTemplateMenu } from "@/components/conversations/slash-template-menu";
 
 type Message = {
   id: string;
@@ -79,6 +80,18 @@ export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact
   const [showCoaching, setShowCoaching] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const creatorTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // Listen for the global "focus reply" shortcut (fired by `r` keybinding).
+  // In AI mode there is no creator textarea so the shortcut is a no-op.
+  useEffect(() => {
+    function onFocusReply() {
+      creatorTextareaRef.current?.focus();
+    }
+    window.addEventListener("fanflow:focus-reply", onFocusReply);
+    return () =>
+      window.removeEventListener("fanflow:focus-reply", onFocusReply);
+  }, []);
 
   const utils = trpc.useUtils();
   const suggestMutation = trpc.ai.suggest.useMutation();
@@ -617,21 +630,36 @@ export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact
                 <label className="mb-1 block text-[11px] font-medium uppercase tracking-wider text-gray-500">
                   Tu respuesta
                 </label>
-                <div className="flex gap-2">
-                  <textarea
-                    value={creatorMessageInput}
-                    onChange={(e) => setCreatorMessageInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && !e.shiftKey) {
-                        e.preventDefault();
-                        addToQueue("creator", creatorMessageInput);
-                      }
-                    }}
-                    placeholder="Pega tu respuesta... (Shift+Enter para nueva línea)"
-                    rows={3}
-                    className="flex-1 rounded-lg border border-gray-700 bg-gray-800 px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:border-indigo-500 focus:outline-none resize-none"
-                    disabled={isSendingManual}
-                  />
+                <div className="relative flex gap-2">
+                  <div className="relative flex-1">
+                    <textarea
+                      ref={creatorTextareaRef}
+                      value={creatorMessageInput}
+                      onChange={(e) => setCreatorMessageInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault();
+                          addToQueue("creator", creatorMessageInput);
+                        }
+                      }}
+                      placeholder="Escribe tu respuesta o usa / para templates"
+                      rows={3}
+                      className="w-full rounded-lg border border-gray-700 bg-gray-800 px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:border-indigo-500 focus:outline-none resize-none"
+                      disabled={isSendingManual}
+                    />
+                    <SlashTemplateMenu
+                      value={creatorMessageInput}
+                      inputRef={creatorTextareaRef}
+                      onInsert={(next) => setCreatorMessageInput(next)}
+                      vars={{
+                        displayName:
+                          conversation.contact.displayName ??
+                          conversation.contact.username,
+                        username: conversation.contact.username,
+                      }}
+                      platformType={conversation.platformType}
+                    />
+                  </div>
                   <button
                     onClick={() => addToQueue("creator", creatorMessageInput)}
                     disabled={isSendingManual || !creatorMessageInput.trim()}

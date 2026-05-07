@@ -694,6 +694,16 @@ async function startScheduler() {
       log.error({ err }, "Error checking sequence steps");
     }
 
+    // Poll Reddit for new comments on tracked posts
+    try {
+      const { pollRedditComments } = await import(
+        "@/server/services/reddit-poller"
+      );
+      await pollRedditComments(db);
+    } catch (err) {
+      log.error({ err }, "Error polling Reddit comments");
+    }
+
     // Inactivity followup enrollment every 30 min (every 6th interval of 5 min)
     inactivityFollowupCounter++;
     if (inactivityFollowupCounter >= 6) {
@@ -1137,6 +1147,34 @@ const scheduledPostWorker = new Worker<ScheduledPostJobData>(
             url: result.externalUrl,
           };
           successCount++;
+
+          // Sync to socialPosts so the comment poller picks up replies on
+          // this submission. Skip silently if duplicate (unique index).
+          if (result.externalId) {
+            try {
+              const { socialPosts: socialPostsTable } = await import(
+                "./db/schema"
+              );
+              await db
+                .insert(socialPostsTable)
+                .values({
+                  creatorId,
+                  platformType: "reddit",
+                  externalPostId: result.externalId,
+                  url: result.externalUrl ?? null,
+                  title: post.title ?? null,
+                  content: post.content,
+                  publishedAt: new Date(),
+                })
+                .onConflictDoNothing();
+            } catch (syncErr) {
+              log.warn(
+                { syncErr, scheduledPostId },
+                "Failed to sync scheduled post to social_posts (non-critical)"
+              );
+            }
+          }
+
           dispatchWebhookEvent(db, creatorId, "post.published", {
             scheduledPostId,
             platform,
