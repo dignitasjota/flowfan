@@ -727,4 +727,25 @@ export const intelligenceRouter = createTRPCRouter({
         updatedAt: profile.churnUpdatedAt,
       };
     }),
+
+  // ============================================================
+  // Audience Insights
+  // ============================================================
+
+  audienceInsights: protectedProcedure
+    .input(
+      z
+        .object({
+          sinceDays: z.number().int().min(1).max(365).default(30),
+        })
+        .optional()
+    )
+    .query(async ({ ctx, input }) => {
+      const { computeAudienceInsights } = await import(
+        "@/server/services/audience-insights"
+      );
+      return computeAudienceInsights(ctx.db, ctx.creatorId, {
+        sinceDays: input?.sinceDays ?? 30,
+      });
+    }),
 });

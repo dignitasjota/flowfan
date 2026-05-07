@@ -10,6 +10,7 @@ import { useTheme } from "@/hooks/useTheme";
 import { useSession } from "next-auth/react";
 import { TeamSwitcher } from "./team-switcher";
 import { GlobalSearch } from "./global-search";
+import { useRealtimeContext } from "@/hooks/use-realtime";
 import Image from "next/image";
 
 // access: "all" = any team member, "manager" = owner+manager, "owner" = owner only
@@ -24,6 +25,7 @@ const navigation = [
   { name: "Automatizaciones", href: "/workflows", icon: "⚡", access: "manager" as const },
   { name: "Secuencias", href: "/sequences", icon: "🔄", access: "manager" as const },
   { name: "Content Gaps", href: "/content-gaps", icon: "🔍", access: "manager" as const },
+  { name: "Insights", href: "/insights", icon: "📈", access: "manager" as const },
   { name: "Programados", href: "/scheduled", icon: "⏰", access: "all" as const },
   { name: "Scheduler", href: "/scheduler", icon: "📅", access: "manager" as const },
   { name: "Broadcasts", href: "/broadcasts", icon: "📢", access: "manager" as const },
@@ -117,7 +119,8 @@ export function Sidebar({ user }: SidebarProps) {
             )}
           >
             <span>{item.icon}</span>
-            {item.name}
+            <span className="flex-1">{item.name}</span>
+            <SidebarBadge href={item.href} />
           </Link>
         ))}
         <NotificationBell />
@@ -205,6 +208,39 @@ export function Sidebar({ user }: SidebarProps) {
         {sidebarContent}
       </div>
     </>
+  );
+}
+
+function SidebarBadge({ href }: { href: string }) {
+  const realtime = useRealtimeContext();
+
+  // Only enable the comments query for the comments item to avoid global polling
+  const isCommentsItem = href === "/comments";
+  const commentsOverview = trpc.socialComments.overview.useQuery(undefined, {
+    enabled: isCommentsItem,
+    staleTime: 30_000,
+  });
+
+  if (href === "/conversations") {
+    const count = realtime.newMessageConversations.size;
+    if (count === 0) return null;
+    return <BadgePill value={count} />;
+  }
+
+  if (isCommentsItem) {
+    const count = commentsOverview.data?.unhandledCount ?? 0;
+    if (count === 0) return null;
+    return <BadgePill value={count} />;
+  }
+
+  return null;
+}
+
+function BadgePill({ value }: { value: number }) {
+  return (
+    <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1.5 text-[10px] font-bold text-white">
+      {value > 99 ? "99+" : value}
+    </span>
   );
 }
 
