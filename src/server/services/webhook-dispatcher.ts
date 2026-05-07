@@ -13,7 +13,12 @@ export type WebhookEvent =
   | "contact.updated"
   | "message.received"
   | "funnel_stage.changed"
-  | "transaction.created";
+  | "transaction.created"
+  | "comment.received"
+  | "post.scheduled"
+  | "post.publishing"
+  | "post.published"
+  | "post.failed";
 
 export async function dispatchWebhookEvent(
   db: DB,

@@ -1915,3 +1915,232 @@ export const contentGapReportsRelations = relations(
     }),
   })
 );
+
+// ============================================================
+// SOCIAL POSTS & COMMENTS (public engagement inbox)
+// ============================================================
+
+export const socialPosts = pgTable(
+  "social_posts",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    creatorId: uuid("creator_id")
+      .notNull()
+      .references(() => creators.id, { onDelete: "cascade" }),
+    platformType: platformTypeEnum("platform_type").notNull(),
+    externalPostId: varchar("external_post_id", { length: 255 }),
+    url: text("url"),
+    title: text("title"),
+    content: text("content"),
+    mediaUrls: text("media_urls").array().default([]),
+    publishedAt: timestamp("published_at"),
+    commentsCount: integer("comments_count").default(0).notNull(),
+    unhandledCount: integer("unhandled_count").default(0).notNull(),
+    metadata: jsonb("metadata").default({}),
+    lastCommentAt: timestamp("last_comment_at"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("social_posts_creator_idx").on(table.creatorId),
+    index("social_posts_creator_platform_idx").on(
+      table.creatorId,
+      table.platformType
+    ),
+    uniqueIndex("social_posts_external_idx").on(
+      table.creatorId,
+      table.platformType,
+      table.externalPostId
+    ),
+  ]
+);
+
+export const socialComments = pgTable(
+  "social_comments",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    creatorId: uuid("creator_id")
+      .notNull()
+      .references(() => creators.id, { onDelete: "cascade" }),
+    postId: uuid("post_id")
+      .notNull()
+      .references(() => socialPosts.id, { onDelete: "cascade" }),
+    parentCommentId: uuid("parent_comment_id"),
+    platformType: platformTypeEnum("platform_type").notNull(),
+    externalCommentId: varchar("external_comment_id", { length: 255 }),
+    authorContactId: uuid("author_contact_id").references(() => contacts.id, {
+      onDelete: "set null",
+    }),
+    authorUsername: varchar("author_username", { length: 255 }).notNull(),
+    authorDisplayName: varchar("author_display_name", { length: 255 }),
+    authorAvatarUrl: text("author_avatar_url"),
+    role: messageRoleEnum("role").default("fan").notNull(),
+    content: text("content").notNull(),
+    sentiment: jsonb("sentiment"),
+    aiSuggestion: text("ai_suggestion"),
+    aiSuggestionUsed: boolean("ai_suggestion_used"),
+    isHandled: boolean("is_handled").default(false).notNull(),
+    handledAt: timestamp("handled_at"),
+    handledById: uuid("handled_by_id").references(() => creators.id, {
+      onDelete: "set null",
+    }),
+    creatorReplyId: uuid("creator_reply_id"),
+    publishedAt: timestamp("published_at"),
+    source: varchar("source", { length: 20 }).default("manual").notNull(),
+    metadata: jsonb("metadata").default({}),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("social_comments_creator_idx").on(table.creatorId),
+    index("social_comments_creator_handled_idx").on(
+      table.creatorId,
+      table.isHandled
+    ),
+    index("social_comments_post_idx").on(table.postId, table.createdAt),
+    index("social_comments_parent_idx").on(table.parentCommentId),
+    index("social_comments_author_contact_idx").on(table.authorContactId),
+    uniqueIndex("social_comments_external_idx").on(
+      table.creatorId,
+      table.platformType,
+      table.externalCommentId
+    ),
+  ]
+);
+
+export const socialPostsRelations = relations(socialPosts, ({ one, many }) => ({
+  creator: one(creators, {
+    fields: [socialPosts.creatorId],
+    references: [creators.id],
+  }),
+  comments: many(socialComments),
+}));
+
+export const socialCommentsRelations = relations(
+  socialComments,
+  ({ one, many }) => ({
+    creator: one(creators, {
+      fields: [socialComments.creatorId],
+      references: [creators.id],
+    }),
+    post: one(socialPosts, {
+      fields: [socialComments.postId],
+      references: [socialPosts.id],
+    }),
+    parent: one(socialComments, {
+      fields: [socialComments.parentCommentId],
+      references: [socialComments.id],
+      relationName: "comment_thread",
+    }),
+    replies: many(socialComments, { relationName: "comment_thread" }),
+    authorContact: one(contacts, {
+      fields: [socialComments.authorContactId],
+      references: [contacts.id],
+    }),
+    handledBy: one(creators, {
+      fields: [socialComments.handledById],
+      references: [creators.id],
+      relationName: "comment_handler",
+    }),
+  })
+);
+
+// ============================================================
+// SOCIAL ACCOUNTS & SCHEDULED POSTS (publishing scheduler)
+// ============================================================
+
+export const socialAccountConnectionEnum = pgEnum("social_account_connection", [
+  "native",
+  "webhook",
+]);
+
+export const scheduledPostStatusEnum = pgEnum("scheduled_post_status", [
+  "scheduled",
+  "processing",
+  "posted",
+  "partial",
+  "failed",
+  "cancelled",
+]);
+
+export const socialAccounts = pgTable(
+  "social_accounts",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    creatorId: uuid("creator_id")
+      .notNull()
+      .references(() => creators.id, { onDelete: "cascade" }),
+    platformType: platformTypeEnum("platform_type").notNull(),
+    connectionType: socialAccountConnectionEnum("connection_type")
+      .default("webhook")
+      .notNull(),
+    accountUsername: varchar("account_username", { length: 255 }),
+    encryptedCredentials: text("encrypted_credentials"),
+    isActive: boolean("is_active").default(true).notNull(),
+    lastVerifiedAt: timestamp("last_verified_at"),
+    lastErrorMessage: text("last_error_message"),
+    metadata: jsonb("metadata").default({}),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("social_accounts_creator_platform_idx").on(
+      table.creatorId,
+      table.platformType
+    ),
+  ]
+);
+
+export const scheduledPosts = pgTable(
+  "scheduled_posts",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    creatorId: uuid("creator_id")
+      .notNull()
+      .references(() => creators.id, { onDelete: "cascade" }),
+    title: varchar("title", { length: 500 }),
+    content: text("content").notNull(),
+    mediaUrls: text("media_urls").array().default([]),
+    targetPlatforms: text("target_platforms").array().notNull(),
+    platformConfigs: jsonb("platform_configs").default({}),
+    scheduleAt: timestamp("schedule_at").notNull(),
+    timezone: varchar("timezone", { length: 60 }).default("UTC").notNull(),
+    status: scheduledPostStatusEnum("status").default("scheduled").notNull(),
+    attempts: integer("attempts").default(0).notNull(),
+    lastError: text("last_error"),
+    publishedAt: timestamp("published_at"),
+    externalPostIds: jsonb("external_post_ids").default({}),
+    jobId: varchar("job_id", { length: 255 }),
+    createdById: uuid("created_by_id").references(() => creators.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("scheduled_posts_creator_idx").on(table.creatorId),
+    index("scheduled_posts_creator_schedule_idx").on(
+      table.creatorId,
+      table.scheduleAt
+    ),
+    index("scheduled_posts_status_idx").on(table.status),
+  ]
+);
+
+export const socialAccountsRelations = relations(socialAccounts, ({ one }) => ({
+  creator: one(creators, {
+    fields: [socialAccounts.creatorId],
+    references: [creators.id],
+  }),
+}));
+
+export const scheduledPostsRelations = relations(scheduledPosts, ({ one }) => ({
+  creator: one(creators, {
+    fields: [scheduledPosts.creatorId],
+    references: [creators.id],
+  }),
+  createdBy: one(creators, {
+    fields: [scheduledPosts.createdById],
+    references: [creators.id],
+    relationName: "scheduled_post_creator",
+  }),
+}));

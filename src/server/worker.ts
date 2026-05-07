@@ -17,6 +17,7 @@ import type {
   EmailJobData,
   SequenceJobData,
   WebhookDeliveryJobData,
+  ScheduledPostJobData,
 } from "./queues";
 import { deliverWebhook, dispatchWebhookEvent } from "./services/webhook-dispatcher";
 import { importJobs, contactProfiles } from "./db/schema";
@@ -1020,6 +1021,177 @@ async function startSummaryScheduler() {
   }, 60 * 60 * 1000); // Every hour
 }
 
+// --- Scheduled post publishing worker ---
+
+const scheduledPostWorker = new Worker<ScheduledPostJobData>(
+  "scheduled-post-publish",
+  async (job) => {
+    const { scheduledPostId, creatorId } = job.data;
+    log.info({ jobId: job.id, scheduledPostId }, "Processing scheduled post");
+
+    const { eq, and } = await import("drizzle-orm");
+    const { scheduledPosts, socialAccounts } = await import(
+      "./db/schema"
+    );
+    const { publishToReddit } = await import(
+      "./services/scheduler-publisher"
+    );
+
+    const post = await db.query.scheduledPosts.findFirst({
+      where: eq(scheduledPosts.id, scheduledPostId),
+    });
+
+    if (!post) {
+      log.warn({ scheduledPostId }, "Scheduled post not found, skipping");
+      return;
+    }
+    if (post.status !== "scheduled" && post.status !== "failed") {
+      log.warn(
+        { scheduledPostId, status: post.status },
+        "Scheduled post not in publishable state, skipping"
+      );
+      return;
+    }
+
+    await db
+      .update(scheduledPosts)
+      .set({
+        status: "processing",
+        attempts: post.attempts + 1,
+        updatedAt: new Date(),
+      })
+      .where(eq(scheduledPosts.id, scheduledPostId));
+
+    const externalIds: Record<string, { id?: string; url?: string }> = {
+      ...((post.externalPostIds as Record<string, { id?: string; url?: string }>) ?? {}),
+    };
+    const errors: Record<string, string> = {};
+    let successCount = 0;
+
+    for (const platform of post.targetPlatforms) {
+      const account = await db.query.socialAccounts.findFirst({
+        where: and(
+          eq(socialAccounts.creatorId, creatorId),
+          eq(socialAccounts.platformType, platform as "reddit"),
+          eq(socialAccounts.isActive, true)
+        ),
+      });
+
+      if (!account) {
+        errors[platform] = "No active account configured";
+        dispatchWebhookEvent(db, creatorId, "post.failed", {
+          scheduledPostId,
+          platform,
+          error: errors[platform],
+        }).catch(() => {});
+        continue;
+      }
+
+      if (account.connectionType === "webhook") {
+        // Route C: dispatch webhook with full payload for Zapier/Make to publish
+        await dispatchWebhookEvent(db, creatorId, "post.publishing", {
+          scheduledPostId,
+          platform,
+          title: post.title,
+          content: post.content,
+          mediaUrls: post.mediaUrls ?? [],
+          platformConfig:
+            (post.platformConfigs as Record<string, unknown>)?.[platform] ?? {},
+        });
+        externalIds[platform] = { id: "webhook-dispatched" };
+        successCount++;
+        continue;
+      }
+
+      // Native publishers
+      if (platform === "reddit") {
+        const cfg = ((post.platformConfigs as Record<string, unknown>)?.reddit ??
+          {}) as { subreddit?: string; flairId?: string; nsfw?: boolean; spoiler?: boolean };
+        if (!cfg.subreddit) {
+          errors[platform] = "Missing subreddit in platform config";
+          continue;
+        }
+        if (!account.encryptedCredentials) {
+          errors[platform] = "Account has no stored credentials";
+          continue;
+        }
+        const result = await publishToReddit(account.encryptedCredentials, {
+          title: post.title ?? "(untitled)",
+          content: post.content,
+          subreddit: cfg.subreddit,
+          flairId: cfg.flairId,
+          nsfw: cfg.nsfw,
+          spoiler: cfg.spoiler,
+        });
+        if (result.success) {
+          externalIds[platform] = {
+            id: result.externalId,
+            url: result.externalUrl,
+          };
+          successCount++;
+          dispatchWebhookEvent(db, creatorId, "post.published", {
+            scheduledPostId,
+            platform,
+            externalId: result.externalId,
+            externalUrl: result.externalUrl,
+          }).catch(() => {});
+        } else {
+          errors[platform] = result.error ?? "Unknown error";
+          dispatchWebhookEvent(db, creatorId, "post.failed", {
+            scheduledPostId,
+            platform,
+            error: errors[platform],
+          }).catch(() => {});
+        }
+      } else {
+        errors[platform] = `Native publisher not implemented for ${platform}`;
+      }
+    }
+
+    const totalPlatforms = post.targetPlatforms.length;
+    const finalStatus =
+      successCount === totalPlatforms
+        ? "posted"
+        : successCount === 0
+        ? "failed"
+        : "partial";
+
+    await db
+      .update(scheduledPosts)
+      .set({
+        status: finalStatus,
+        externalPostIds: externalIds,
+        lastError:
+          Object.keys(errors).length > 0 ? JSON.stringify(errors) : null,
+        publishedAt: successCount > 0 ? new Date() : null,
+        updatedAt: new Date(),
+      })
+      .where(eq(scheduledPosts.id, scheduledPostId));
+
+    log.info(
+      { jobId: job.id, scheduledPostId, finalStatus, successCount, totalPlatforms },
+      "Scheduled post processed"
+    );
+
+    if (finalStatus === "failed" || finalStatus === "partial") {
+      throw new Error(
+        `Publishing finished with status=${finalStatus}: ${JSON.stringify(errors)}`
+      );
+    }
+  },
+  {
+    connection: {
+      host: redisUrl.hostname,
+      port: Number(redisUrl.port) || 6379,
+    },
+    concurrency: 3,
+  }
+);
+
+scheduledPostWorker.on("failed", (job, err) => {
+  log.error({ jobId: job?.id, err }, "Scheduled post job failed");
+});
+
 startScheduler();
 startSummaryScheduler();
 
@@ -1028,7 +1200,7 @@ process.on("SIGTERM", async () => {
   log.info("SIGTERM received, closing workers...");
   if (schedulerInterval) clearInterval(schedulerInterval);
   if (summarySchedulerInterval) clearInterval(summarySchedulerInterval);
-  await Promise.all([worker.close(), workflowWorker.close(), telegramOutgoingWorker.close(), telegramAutoReplyWorker.close(), broadcastProcessingWorker.close(), broadcastSendWorker.close(), scheduledMessageWorker.close(), importWorker.close(), emailWorker.close(), sequenceWorker.close(), webhookDeliveryWorker.close()]);
+  await Promise.all([worker.close(), workflowWorker.close(), telegramOutgoingWorker.close(), telegramAutoReplyWorker.close(), broadcastProcessingWorker.close(), broadcastSendWorker.close(), scheduledMessageWorker.close(), importWorker.close(), emailWorker.close(), sequenceWorker.close(), webhookDeliveryWorker.close(), scheduledPostWorker.close()]);
   process.exit(0);
 });
 
@@ -1036,6 +1208,6 @@ process.on("SIGINT", async () => {
   log.info("SIGINT received, closing workers...");
   if (schedulerInterval) clearInterval(schedulerInterval);
   if (summarySchedulerInterval) clearInterval(summarySchedulerInterval);
-  await Promise.all([worker.close(), workflowWorker.close(), telegramOutgoingWorker.close(), telegramAutoReplyWorker.close(), broadcastProcessingWorker.close(), broadcastSendWorker.close(), scheduledMessageWorker.close(), importWorker.close(), emailWorker.close(), sequenceWorker.close(), webhookDeliveryWorker.close()]);
+  await Promise.all([worker.close(), workflowWorker.close(), telegramOutgoingWorker.close(), telegramAutoReplyWorker.close(), broadcastProcessingWorker.close(), broadcastSendWorker.close(), scheduledMessageWorker.close(), importWorker.close(), emailWorker.close(), sequenceWorker.close(), webhookDeliveryWorker.close(), scheduledPostWorker.close()]);
   process.exit(0);
 });

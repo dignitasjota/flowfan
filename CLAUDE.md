@@ -477,6 +477,8 @@ All endpoints require `Authorization: Bearer ff_live_xxx` header. API access is 
 | `/api/v1/conversations` | GET | List conversations (paginated, filter by status) | Pro+ |
 | `/api/v1/conversations/[id]/messages` | GET | Messages for a conversation (paginated) | Pro+ |
 | `/api/v1/analytics/overview` | GET | Summary: totalContacts, revenue30d, avgEngagement, funnelDistribution | Pro+ |
+| `/api/v1/comments` | GET | List public comments (filters: post_id, unhandled, paginated) | Pro+ |
+| `/api/v1/comments` | POST | Ingest a public comment (auto-creates post if needed, idempotent by externalCommentId) | Business |
 
 ### API Keys (`src/server/services/api-keys.ts`)
 
@@ -512,6 +514,11 @@ Webhooks send HTTP POST notifications to external URLs when events occur in FanF
 | `message.received` | `worker.ts` (message-analysis handler) | contactId, conversationId, messageId, sentiment, topics |
 | `funnel_stage.changed` | `profile-updater.ts` (on stage change) | contactId, previousStage, newStage |
 | `transaction.created` | `revenue.ts` router (create mutation) | transactionId, contactId, type, amount |
+| `comment.received` | `social-comments.ts` router + `/api/v1/comments` | commentId, postId, platformType, authorUsername, authorContactId, content |
+| `post.scheduled` | `scheduler.ts` router (create mutation) | scheduledPostId, targetPlatforms, scheduleAt |
+| `post.publishing` | `worker.ts` (scheduledPost worker, webhook-routed platforms) | scheduledPostId, platform, title, content, mediaUrls, platformConfig |
+| `post.published` | `worker.ts` (after native publish success) | scheduledPostId, platform, externalId, externalUrl |
+| `post.failed` | `worker.ts` (on per-platform failure) | scheduledPostId, platform, error |
 
 ### Delivery
 
@@ -526,6 +533,82 @@ Webhooks send HTTP POST notifications to external URLs when events occur in FanF
 - `dispatchWebhookEvent(db, creatorId, event, payload)` — finds active configs with matching event, enqueues delivery (fire-and-forget)
 - `generateWebhookSignature(payload, secret)` — HMAC-SHA256 signature
 - `deliverWebhook(db, webhookConfigId, event, payload, url, secret, attempt)` — POST + log result
+
+## Public Comments Inbox
+
+### Overview
+
+Unified inbox for public comments on creator posts (Reddit, Instagram, Twitter), separate from DM conversations. Reuses the same AI infrastructure but with a prompt calibrated for public visibility (no pricing, no DM nudging, brevity).
+
+### Schema
+
+- **`socialPosts`** — creator posts with `commentsCount` and `unhandledCount` cached for fast list ordering. Unique by `(creatorId, platformType, externalPostId)`.
+- **`socialComments`** — threaded via `parentCommentId`, optionally linked to a `contacts` row via `authorContactId` (matched by `platformUserId` or `username`). Tracks `isHandled` + `handledById` + `handledAt`. Deduplication by `(creatorId, platformType, externalCommentId)`. Creator replies stored as child comments with `role = "creator"`.
+
+### AI Service (`src/server/services/ai-comment-suggester.ts`)
+
+- `generateCommentSuggestion(config, input)` — public-context prompt with explicit restrictions (no prices, no DM nudge, short responses).
+- 3 variants: CASUAL / ENGAGEMENT / RETENTION (no SALES variant for public surface).
+- Reuses `callAIProvider()` so all 5 providers work without changes.
+
+### API (`src/server/api/routers/social-comments.ts`)
+
+- `listPosts` — filters by platform and `onlyWithUnhandled`; ordered by unhandled count + recency.
+- `getPost`, `listComments` (per post, optional `onlyUnhandled`).
+- `createPost` (manager) — manual post creation for testing/external workflows.
+- `createComment` — auto-links author to existing contact if found.
+- `replyToComment` — inserts a `role = "creator"` child comment + auto-marks parent as handled + decrements `unhandledCount`.
+- `markHandled` — toggle handled state with delta on post counter.
+- `suggest` — generate AI variants for a specific comment.
+- `overview` — counters for header (posts, comments, unhandled).
+
+### UI (`src/app/(dashboard)/comments/page.tsx`)
+
+- 2-panel responsive layout: left `PostsList` with stats and filters; center `CommentThreadPanel`.
+- Thread view: chronological with creator replies indented. Handled/pending badges, contact-linked indicator, profile chips (engagement / payment / funnel).
+- Reply panel: AI suggest button → 3 colored variants → click to apply → textarea → publish or mark handled.
+- Sidebar link "🗨️ Comentarios" (access: all team members).
+
+## Publishing Scheduler
+
+### Overview
+
+Schedule public posts to native APIs (Reddit) or to any platform via outgoing webhooks (Twitter, Instagram, future). One account per platform per creator. Reddit uses script-type OAuth password grant; other platforms route through `post.publishing` webhooks (Zapier / Make / custom endpoints).
+
+### Schema
+
+- **`socialAccounts`** — one row per `(creatorId, platformType)`. `connectionType` is `native` (credentials cifrados via AES-256-GCM in `encryptedCredentials`) or `webhook` (no credentials, just a flag). `accountUsername` populated after `verifyRedditCredentials()`.
+- **`scheduledPosts`** — one-shot scheduled posts with `targetPlatforms` array, `platformConfigs` JSONB (e.g. `{reddit: {subreddit, flairId, nsfw, spoiler}}`), `status` enum (scheduled/processing/posted/partial/failed/cancelled), `attempts`, `lastError`, `externalPostIds` JSONB (`{platform: {id, url}}`), `jobId` (BullMQ job).
+
+### Reddit Publisher (`src/server/services/scheduler-publisher.ts`)
+
+- `verifyRedditCredentials(creds)` — auth handshake + `/api/v1/me` check, returns `{ok, username}`.
+- `publishToReddit(encryptedCreds, post)` — decrypts, OAuth password grant, `POST /api/submit kind=self`. Returns `{success, externalId, externalUrl, error}`.
+- Title trimmed to 300 chars; supports flair, nsfw, spoiler flags.
+- User-Agent: `FanFlow/1.0 (by /u/fanflow)`.
+
+### Queue and Worker
+
+- `scheduledPostQueue` ("scheduled-post-publish") with delayed jobs (`delay = scheduleAt - now`).
+- Worker iterates `targetPlatforms`:
+  - **`native`** + `reddit` → calls `publishToReddit`.
+  - **`webhook`** → dispatches `post.publishing` webhook with full payload.
+- Aggregates results into `externalPostIds` and computes final status (`posted` / `partial` / `failed`).
+- Retries: 3 attempts, exponential 5s backoff. Worker concurrency: 3.
+
+### API (`src/server/api/routers/scheduler.ts`)
+
+- **Accounts** — `listAccounts`, `connectReddit` (owner, validates + encrypts), `enableWebhookConnection` (owner), `disconnectAccount` (owner).
+- **Posts** — `list` (filters: status, date range), `getById`, `calendar` (per month), `create` (manager, validates active accounts for all target platforms), `cancel`, `reschedule` (removes old job, enqueues new delayed job).
+
+### UI (`src/app/(dashboard)/scheduler/page.tsx`)
+
+- 3 tabs: 📅 Calendario / 📋 Lista / 🔗 Cuentas.
+- **Calendar** (`scheduler-calendar.tsx`): month grid 7×6, post chips colored by status, click chip opens detail, click empty day opens composer pre-filled with date.
+- **List** — sortable table with status badges and inline detail view.
+- **Composer** (`post-composer.tsx`): platform selector (disabled if not connected), title, content, datetime-local picker, conditional subreddit input.
+- **Accounts** (`accounts-panel.tsx`): per-platform card; Reddit form for native (4-field credentials), button "Vía webhook" for the rest.
+- Sidebar link "📅 Scheduler" (access: manager+).
 
 ## Key Database Tables
 
@@ -558,3 +641,7 @@ Webhooks send HTTP POST notifications to external URLs when events occur in FanF
 | `experimentMetrics` | Metric events (response_sent, fan_replied, conversion, etc.) per experiment variant |
 | `coachingSessions` | AI coaching session results (negotiation/retention/upsell) per conversation |
 | `contentGapReports` | Content gap analysis reports with aggregated topic/engagement data |
+| `socialPosts` | Public posts the creator owns (Reddit/IG/Twitter), with cached `commentsCount` and `unhandledCount` for inbox sorting |
+| `socialComments` | Public comments threaded by `parentCommentId`, optionally linked to `contacts`, with `isHandled` state and AI suggestions |
+| `socialAccounts` | One row per `(creator, platform)`; native (encrypted credentials) or webhook (Zapier/Make) connection mode |
+| `scheduledPosts` | One-shot publishing jobs with `targetPlatforms` array, status lifecycle, BullMQ `jobId`, and `externalPostIds` map after publishing |

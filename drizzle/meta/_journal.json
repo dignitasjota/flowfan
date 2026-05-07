@@ -8,6 +8,20 @@
       "when": 1773301426302,
       "tag": "0000_strange_morph",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1778162592270,
+      "tag": "0001_dusty_thundra",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1778163976255,
+      "tag": "0002_nappy_inhumans",
+      "breakpoints": true
     }
   ]
 }

@@ -16,6 +16,7 @@ import Image from "next/image";
 const navigation = [
   { name: "Dashboard", href: "/dashboard", icon: "📊", access: "all" as const },
   { name: "Conversaciones", href: "/conversations", icon: "💬", access: "all" as const },
+  { name: "Comentarios", href: "/comments", icon: "🗨️", access: "all" as const },
   { name: "Contactos", href: "/contacts", icon: "👥", access: "all" as const },
   { name: "Segmentos", href: "/segments", icon: "🎯", access: "manager" as const },
   { name: "Revenue", href: "/revenue", icon: "💰", access: "manager" as const },
@@ -24,6 +25,7 @@ const navigation = [
   { name: "Secuencias", href: "/sequences", icon: "🔄", access: "manager" as const },
   { name: "Content Gaps", href: "/content-gaps", icon: "🔍", access: "manager" as const },
   { name: "Programados", href: "/scheduled", icon: "⏰", access: "all" as const },
+  { name: "Scheduler", href: "/scheduler", icon: "📅", access: "manager" as const },
   { name: "Broadcasts", href: "/broadcasts", icon: "📢", access: "manager" as const },
   { name: "Equipo", href: "/team", icon: "👤", access: "owner" as const },
   { name: "Billing", href: "/billing", icon: "💳", access: "owner" as const },

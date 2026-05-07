@@ -13,6 +13,11 @@ const WEBHOOK_EVENTS = [
   "message.received",
   "funnel_stage.changed",
   "transaction.created",
+  "comment.received",
+  "post.scheduled",
+  "post.publishing",
+  "post.published",
+  "post.failed",
 ] as const;
 
 export const webhooksOutgoingRouter = createTRPCRouter({

@@ -30,6 +30,8 @@ import { auditLogRouter } from "./routers/audit-log";
 import { presenceRouter } from "./routers/presence";
 import { abExperimentsRouter } from "./routers/ab-experiments";
 import { contentGapsRouter } from "./routers/content-gaps";
+import { socialCommentsRouter } from "./routers/social-comments";
+import { schedulerRouter } from "./routers/scheduler";
 
 export const appRouter = createTRPCRouter({
   contacts: contactsRouter,
@@ -63,6 +65,8 @@ export const appRouter = createTRPCRouter({
   presence: presenceRouter,
   abExperiments: abExperimentsRouter,
   contentGaps: contentGapsRouter,
+  socialComments: socialCommentsRouter,
+  scheduler: schedulerRouter,
 });
 
 export type AppRouter = typeof appRouter;

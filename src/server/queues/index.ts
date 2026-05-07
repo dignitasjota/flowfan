@@ -229,3 +229,23 @@ export type WebhookDeliveryJobData = {
   url: string;
   secret: string;
 };
+
+// --- Scheduled post publishing queue ---
+
+export const scheduledPostQueue = new Queue("scheduled-post-publish", {
+  connection: {
+    host: new URL(process.env.REDIS_URL ?? "redis://localhost:6379").hostname,
+    port: Number(new URL(process.env.REDIS_URL ?? "redis://localhost:6379").port) || 6379,
+  },
+  defaultJobOptions: {
+    attempts: 3,
+    backoff: { type: "exponential", delay: 5000 },
+    removeOnComplete: { count: 1000 },
+    removeOnFail: { count: 5000 },
+  },
+});
+
+export type ScheduledPostJobData = {
+  scheduledPostId: string;
+  creatorId: string;
+};
