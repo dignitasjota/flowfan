@@ -741,6 +741,48 @@ Take a blog URL (or pasted article text) and generate ready-to-post adaptations 
 - Each card has **"↻ Regenerar"** (re-runs generation with current input) and **"📅 Programar"** (opens `PostComposer` pre-filled with the draft — for Twitter/IG it concatenates `tweet + thread` and `caption + hashtags`).
 - Sidebar link "✨ Blog → Social" (manager+).
 
+## Team Audit Log
+
+### Helper (`src/server/services/team-audit.ts`)
+
+`logTeamAction(db, {creatorId, userId, userName, action, entityType, entityId?, details?})` — fire-and-forget insert into `teamAuditLog`. Wraps the insert in try/catch so audit failures never break the main flow.
+
+Most routers gate on `if (ctx.teamRole)` before calling — single-tenant solo creators don't need entries (they are the only actor). Multi-tenant deployments and delegated `manager` / `chatter` roles get full traceability.
+
+### Actions logged
+
+Tabla viva, no exhaustiva:
+
+| Action | Module | Details |
+|--------|--------|---------|
+| `message.sent` | messages router | conversationId |
+| `social_account.connected` | scheduler router | platform, connectionType (native/webhook), username if Reddit |
+| `social_account.disconnected` | scheduler router | platform |
+| `scheduled_post.created` | scheduler router | targetPlatforms, scheduleAt, recurring boolean |
+| `scheduled_post.cancelled` | scheduler router | — |
+| `scheduled_post.rescheduled` | scheduler router | newScheduleAt |
+| `comment.replied` | social-comments router | postId, replyId, platform |
+| `comment.marked_handled` / `comment.marked_pending` | social-comments router | postId |
+| (plus the existing team / billing / contact / message actions) | various | — |
+
+When adding a new mutation, follow the same pattern: import `logTeamAction`, gate on `ctx.teamRole`, fire after the DB write succeeds.
+
+## Testing
+
+### Stack
+
+- **Vitest** for unit tests under `__tests__/unit/`.
+- **Mocks**: services that touch `db`, `fetch`, BullMQ queues or webhook dispatcher are mocked at the module boundary (`vi.mock("@/...")`) so tests stay deterministic and fast.
+- Pre-commit hook (lint-staged → `vitest run --run`) executes the test suite on every commit; commits with failing tests are rejected before reaching git history.
+
+### Recently added coverage
+
+- **`recurrence.test.ts`** — `validateRecurrenceRule` (hour/minute/dayOfWeek/dayOfMonth/interval bounds) and `computeNextOccurrence` for daily/weekly/monthly with interval > 1, `until`, `maxCount`.
+- **`blog-to-social.test.ts`** — `extractContent` mocking `fetch`: `<title>`, `og:description` fallback, paragraph extraction from `<article>`, strip of `<script>` / `<style>`, HTML entity decoding, non-2xx error path.
+- **`social-comments-ingest.test.ts`** — `linkOrCreateCommentAuthor` matching by `platformUserId` vs creating a lightweight contact (with `contact.created` webhook); `enqueueCommentAnalysis` asserting `source: "comment"` payload.
+
+When adding new pure helpers (no DB), prefer this pattern: pure logic in a service file, module-level `vi.mock` for transitive deps, no test fixtures in DB.
+
 ## Key Database Tables
 
 | Table | Purpose |
