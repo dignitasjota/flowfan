@@ -16,6 +16,7 @@ import {
 } from "@/server/services/scheduler-publisher";
 import { dispatchWebhookEvent } from "@/server/services/webhook-dispatcher";
 import { validateRecurrenceRule } from "@/server/services/recurrence";
+import { logTeamAction } from "@/server/services/team-audit";
 
 const SCHEDULER_PLATFORMS = ["reddit", "twitter", "instagram"] as const;
 const PLATFORM_ENUM = z.enum(SCHEDULER_PLATFORMS);
@@ -117,6 +118,17 @@ export const schedulerRouter = createTRPCRouter({
           lastVerifiedAt: new Date(),
         })
         .returning();
+
+      logTeamAction(ctx.db, {
+        creatorId: ctx.creatorId,
+        userId: ctx.actingUserId,
+        userName: ctx.session!.user.name ?? "Unknown",
+        action: "social_account.connected",
+        entityType: "social_account",
+        entityId: created?.id,
+        details: { platform: "reddit", connectionType: "native", username: verify.username },
+      });
+
       return created;
     }),
 
@@ -156,12 +168,29 @@ export const schedulerRouter = createTRPCRouter({
           lastVerifiedAt: new Date(),
         })
         .returning();
+
+      logTeamAction(ctx.db, {
+        creatorId: ctx.creatorId,
+        userId: ctx.actingUserId,
+        userName: ctx.session!.user.name ?? "Unknown",
+        action: "social_account.connected",
+        entityType: "social_account",
+        entityId: created?.id,
+        details: { platform: input.platformType, connectionType: "webhook" },
+      });
+
       return created;
     }),
 
   disconnectAccount: ownerProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
+      const account = await ctx.db.query.socialAccounts.findFirst({
+        where: and(
+          eq(socialAccounts.id, input.id),
+          eq(socialAccounts.creatorId, ctx.creatorId)
+        ),
+      });
       await ctx.db
         .delete(socialAccounts)
         .where(
@@ -170,6 +199,19 @@ export const schedulerRouter = createTRPCRouter({
             eq(socialAccounts.creatorId, ctx.creatorId)
           )
         );
+
+      if (account) {
+        logTeamAction(ctx.db, {
+          creatorId: ctx.creatorId,
+          userId: ctx.actingUserId,
+          userName: ctx.session!.user.name ?? "Unknown",
+          action: "social_account.disconnected",
+          entityType: "social_account",
+          entityId: account.id,
+          details: { platform: account.platformType },
+        });
+      }
+
       return { ok: true };
     }),
 
@@ -321,6 +363,20 @@ export const schedulerRouter = createTRPCRouter({
         scheduleAt: input.scheduleAt.toISOString(),
       }).catch(() => {});
 
+      logTeamAction(ctx.db, {
+        creatorId: ctx.creatorId,
+        userId: ctx.actingUserId,
+        userName: ctx.session!.user.name ?? "Unknown",
+        action: "scheduled_post.created",
+        entityType: "scheduled_post",
+        entityId: post?.id,
+        details: {
+          targetPlatforms: input.targetPlatforms,
+          scheduleAt: input.scheduleAt.toISOString(),
+          recurring: !!input.recurrenceRule,
+        },
+      });
+
       return post;
     }),
 
@@ -357,6 +413,16 @@ export const schedulerRouter = createTRPCRouter({
         .set({ status: "cancelled", updatedAt: new Date() })
         .where(eq(scheduledPosts.id, input.id))
         .returning();
+
+      logTeamAction(ctx.db, {
+        creatorId: ctx.creatorId,
+        userId: ctx.actingUserId,
+        userName: ctx.session!.user.name ?? "Unknown",
+        action: "scheduled_post.cancelled",
+        entityType: "scheduled_post",
+        entityId: input.id,
+      });
+
       return updated;
     }),
 
@@ -413,6 +479,16 @@ export const schedulerRouter = createTRPCRouter({
         })
         .where(eq(scheduledPosts.id, input.id))
         .returning();
+
+      logTeamAction(ctx.db, {
+        creatorId: ctx.creatorId,
+        userId: ctx.actingUserId,
+        userName: ctx.session!.user.name ?? "Unknown",
+        action: "scheduled_post.rescheduled",
+        entityType: "scheduled_post",
+        entityId: input.id,
+        details: { newScheduleAt: input.scheduleAt.toISOString() },
+      });
 
       return updated;
     }),

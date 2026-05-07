@@ -24,6 +24,7 @@ import {
   enqueueCommentAnalysis,
 } from "@/server/services/social-comments-ingest";
 import { publishEvent } from "@/lib/redis-pubsub";
+import { logTeamAction } from "@/server/services/team-audit";
 
 const COMMENT_PLATFORMS = ["instagram", "reddit", "twitter"] as const;
 
@@ -298,6 +299,20 @@ export const socialCommentsRouter = createTRPCRouter({
         },
       }).catch(() => {});
 
+      if (ctx.teamRole) {
+        logTeamAction(ctx.db, {
+          creatorId: ctx.creatorId,
+          userId: ctx.actingUserId,
+          userName: ctx.session!.user.name ?? "Unknown",
+          action: input.isHandled
+            ? "comment.marked_handled"
+            : "comment.marked_pending",
+          entityType: "social_comment",
+          entityId: input.id,
+          details: { postId: existing.postId },
+        });
+      }
+
       return updated;
     }),
 
@@ -368,6 +383,22 @@ export const socialCommentsRouter = createTRPCRouter({
           role: "creator",
         },
       }).catch(() => {});
+
+      if (ctx.teamRole) {
+        logTeamAction(ctx.db, {
+          creatorId: ctx.creatorId,
+          userId: ctx.actingUserId,
+          userName: ctx.session!.user.name ?? "Unknown",
+          action: "comment.replied",
+          entityType: "social_comment",
+          entityId: parent.id,
+          details: {
+            postId: parent.postId,
+            replyId: reply?.id,
+            platform: parent.platformType,
+          },
+        });
+      }
 
       return reply;
     }),

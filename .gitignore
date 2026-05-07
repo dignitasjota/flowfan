@@ -8,3 +8,13 @@ dist/
 next-env.d.ts
 uploads/*
 !uploads/.gitkeep
+
+# OS / IDE artifacts
+.DS_Store
+**/.DS_Store
+
+# Claude Code session state
+.claude/scheduled_tasks.lock
+
+# Duplicated skill folders sometimes synced from external tools
+.agent/skills/*[0-9]
