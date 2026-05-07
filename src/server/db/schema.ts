@@ -2110,6 +2110,8 @@ export const scheduledPosts = pgTable(
     publishedAt: timestamp("published_at"),
     externalPostIds: jsonb("external_post_ids").default({}),
     jobId: varchar("job_id", { length: 255 }),
+    recurrenceRule: jsonb("recurrence_rule"),
+    recurrenceCount: integer("recurrence_count").default(0).notNull(),
     createdById: uuid("created_by_id").references(() => creators.id, {
       onDelete: "set null",
     }),

@@ -15,9 +15,24 @@ import {
   type RedditCredentials,
 } from "@/server/services/scheduler-publisher";
 import { dispatchWebhookEvent } from "@/server/services/webhook-dispatcher";
+import { validateRecurrenceRule } from "@/server/services/recurrence";
 
 const SCHEDULER_PLATFORMS = ["reddit", "twitter", "instagram"] as const;
 const PLATFORM_ENUM = z.enum(SCHEDULER_PLATFORMS);
+
+const RECURRENCE_RULE_SCHEMA = z
+  .object({
+    frequency: z.enum(["daily", "weekly", "monthly"]),
+    interval: z.number().int().min(1).max(60).optional(),
+    dayOfWeek: z.number().int().min(0).max(6).optional(),
+    dayOfMonth: z.number().int().min(1).max(31).optional(),
+    hour: z.number().int().min(0).max(23),
+    minute: z.number().int().min(0).max(59),
+    until: z.string().datetime().optional(),
+    maxCount: z.number().int().min(1).max(1000).optional(),
+  })
+  .nullable()
+  .optional();
 
 export const schedulerRouter = createTRPCRouter({
   // ---- Social Accounts ----
@@ -232,6 +247,7 @@ export const schedulerRouter = createTRPCRouter({
         timezone: z.string().max(60).default("UTC"),
         mediaUrls: z.array(z.string().url().max(2000)).default([]),
         platformConfigs: z.record(z.string(), z.record(z.string(), z.unknown())).default({}),
+        recurrenceRule: RECURRENCE_RULE_SCHEMA,
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -240,6 +256,16 @@ export const schedulerRouter = createTRPCRouter({
           code: "BAD_REQUEST",
           message: "La fecha programada está en el pasado.",
         });
+      }
+      if (input.recurrenceRule) {
+        try {
+          validateRecurrenceRule(input.recurrenceRule);
+        } catch (err) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: (err as Error).message,
+          });
+        }
       }
 
       // Verify each target platform has an active account
@@ -270,6 +296,7 @@ export const schedulerRouter = createTRPCRouter({
           targetPlatforms: input.targetPlatforms,
           mediaUrls: input.mediaUrls,
           platformConfigs: input.platformConfigs,
+          recurrenceRule: input.recurrenceRule ?? null,
           scheduleAt: input.scheduleAt,
           timezone: input.timezone,
           createdById: ctx.actingUserId,

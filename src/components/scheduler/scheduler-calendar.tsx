@@ -10,6 +10,7 @@ type CalendarPost = {
   scheduleAt: string | Date;
   status: string;
   targetPlatforms: string[];
+  isRecurring?: boolean;
 };
 
 type Props = {
@@ -177,6 +178,7 @@ export function SchedulerCalendar({ posts, onSelectPost, onSelectDay }: Props) {
                           .map((t) => PLATFORM_ICONS[t] ?? "🌐")
                           .join("")}
                       </span>
+                      {p.isRecurring && <span className="mr-0.5">↻</span>}
                       <span>{time}</span>{" "}
                       <span>{p.title ?? p.content.slice(0, 30)}</span>
                     </div>

@@ -22,6 +22,13 @@
       "when": 1778163976255,
       "tag": "0002_nappy_inhumans",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1778177381788,
+      "tag": "0003_flimsy_katie_power",
+      "breakpoints": true
     }
   ]
 }

@@ -104,6 +104,7 @@ export default function SchedulerPage() {
             scheduleAt: p.scheduleAt,
             status: p.status,
             targetPlatforms: p.targetPlatforms,
+            isRecurring: !!p.recurrenceRule,
           }))}
           onSelectPost={(id) => setSelectedPostId(id)}
           onSelectDay={(date) => openComposer(date)}
@@ -146,8 +147,18 @@ export default function SchedulerPage() {
                       ))}
                     </td>
                     <td className="p-3 text-gray-200">
-                      <div className="max-w-md truncate">
-                        {p.title || p.content.slice(0, 100)}
+                      <div className="flex max-w-md items-center gap-1.5 truncate">
+                        {p.recurrenceRule ? (
+                          <span
+                            className="rounded-full bg-purple-500/20 px-1.5 py-0.5 text-[10px] font-medium text-purple-300"
+                            title="Publicación recurrente"
+                          >
+                            ↻
+                          </span>
+                        ) : null}
+                        <span className="truncate">
+                          {p.title || p.content.slice(0, 100)}
+                        </span>
                       </div>
                     </td>
                     <td className="p-3">

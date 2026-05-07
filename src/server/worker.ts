@@ -1124,7 +1124,14 @@ const scheduledPostWorker = new Worker<ScheduledPostJobData>(
       // Native publishers
       if (platform === "reddit") {
         const cfg = ((post.platformConfigs as Record<string, unknown>)?.reddit ??
-          {}) as { subreddit?: string; flairId?: string; nsfw?: boolean; spoiler?: boolean };
+          {}) as {
+            subreddit?: string;
+            flairId?: string;
+            nsfw?: boolean;
+            spoiler?: boolean;
+            kind?: "self" | "link" | "image";
+            url?: string;
+          };
         if (!cfg.subreddit) {
           errors[platform] = "Missing subreddit in platform config";
           continue;
@@ -1137,6 +1144,8 @@ const scheduledPostWorker = new Worker<ScheduledPostJobData>(
           title: post.title ?? "(untitled)",
           content: post.content,
           subreddit: cfg.subreddit,
+          kind: cfg.kind ?? "self",
+          url: cfg.url,
           flairId: cfg.flairId,
           nsfw: cfg.nsfw,
           spoiler: cfg.spoiler,
@@ -1195,12 +1204,52 @@ const scheduledPostWorker = new Worker<ScheduledPostJobData>(
     }
 
     const totalPlatforms = post.targetPlatforms.length;
-    const finalStatus =
+    const baseStatus =
       successCount === totalPlatforms
         ? "posted"
         : successCount === 0
         ? "failed"
         : "partial";
+
+    // Recurrence: if the post has a rule and the next occurrence is still
+    // valid, re-arm it for the next slot rather than marking it complete.
+    let finalStatus: typeof baseStatus | "scheduled" = baseStatus;
+    let nextScheduleAt: Date | null = null;
+    let nextJobId: string | null = null;
+
+    const rule = post.recurrenceRule as
+      | import("./services/recurrence").RecurrenceRule
+      | null;
+
+    if (rule && successCount > 0) {
+      try {
+        const { computeNextOccurrence } = await import(
+          "./services/recurrence"
+        );
+        const nextOccurrencesSoFar = (post.recurrenceCount ?? 0) + 1;
+        nextScheduleAt = computeNextOccurrence(
+          rule,
+          new Date(),
+          nextOccurrencesSoFar
+        );
+        if (nextScheduleAt) {
+          const { scheduledPostQueue: queue } = await import("./queues");
+          const delay = Math.max(0, nextScheduleAt.getTime() - Date.now());
+          const nextJob = await queue.add(
+            "publish",
+            { scheduledPostId, creatorId },
+            { delay }
+          );
+          nextJobId = nextJob.id ?? null;
+          finalStatus = "scheduled";
+        }
+      } catch (recurErr) {
+        log.error(
+          { recurErr, scheduledPostId },
+          "Failed to schedule next recurrence (non-fatal)"
+        );
+      }
+    }
 
     await db
       .update(scheduledPosts)
@@ -1210,18 +1259,31 @@ const scheduledPostWorker = new Worker<ScheduledPostJobData>(
         lastError:
           Object.keys(errors).length > 0 ? JSON.stringify(errors) : null,
         publishedAt: successCount > 0 ? new Date() : null,
+        scheduleAt: nextScheduleAt ?? post.scheduleAt,
+        recurrenceCount: rule
+          ? (post.recurrenceCount ?? 0) + 1
+          : post.recurrenceCount,
+        jobId: nextJobId ?? post.jobId,
+        attempts: nextScheduleAt ? 0 : post.attempts + 0,
         updatedAt: new Date(),
       })
       .where(eq(scheduledPosts.id, scheduledPostId));
 
     log.info(
-      { jobId: job.id, scheduledPostId, finalStatus, successCount, totalPlatforms },
+      {
+        jobId: job.id,
+        scheduledPostId,
+        finalStatus,
+        successCount,
+        totalPlatforms,
+        nextScheduleAt,
+      },
       "Scheduled post processed"
     );
 
-    if (finalStatus === "failed" || finalStatus === "partial") {
+    if (baseStatus === "failed" || baseStatus === "partial") {
       throw new Error(
-        `Publishing finished with status=${finalStatus}: ${JSON.stringify(errors)}`
+        `Publishing finished with status=${baseStatus}: ${JSON.stringify(errors)}`
       );
     }
   },

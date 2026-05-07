@@ -62,12 +62,17 @@ export async function getRedditAccessToken(
   return data.access_token;
 }
 
+export type RedditPostKind = "self" | "link" | "image";
+
 export async function publishToReddit(
   encryptedCredentials: string,
   post: {
     title: string;
     content: string;
     subreddit: string;
+    kind?: RedditPostKind;
+    /** Required for kind=link or kind=image. For images Reddit accepts a public URL directly. */
+    url?: string;
     flairId?: string;
     nsfw?: boolean;
     spoiler?: boolean;
@@ -91,15 +96,29 @@ export async function publishToReddit(
     return { success: false, error: (err as Error).message };
   }
 
+  const kind: RedditPostKind = post.kind ?? "self";
+
+  if ((kind === "link" || kind === "image") && !post.url) {
+    return {
+      success: false,
+      error: `Reddit ${kind} post requires a url`,
+    };
+  }
+
   const body = new URLSearchParams({
     api_type: "json",
-    kind: "self",
+    kind,
     sr: post.subreddit,
     title: post.title.slice(0, 300),
-    text: post.content,
     nsfw: post.nsfw ? "true" : "false",
     spoiler: post.spoiler ? "true" : "false",
   });
+  if (kind === "self") {
+    body.append("text", post.content);
+  } else {
+    body.append("url", post.url!);
+    body.append("resubmit", "true");
+  }
   if (post.flairId) body.append("flair_id", post.flairId);
 
   try {

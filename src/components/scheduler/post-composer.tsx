@@ -36,6 +36,9 @@ function formatDateTimeLocal(d: Date): string {
   )}:${pad(d.getMinutes())}`;
 }
 
+type RedditKind = "self" | "link" | "image";
+type Frequency = "daily" | "weekly" | "monthly";
+
 export function PostComposer({ initialDate, accounts, onClose, onCreated }: Props) {
   const defaultDate = initialDate ?? new Date(Date.now() + 60 * 60 * 1000);
   const [title, setTitle] = useState("");
@@ -43,6 +46,16 @@ export function PostComposer({ initialDate, accounts, onClose, onCreated }: Prop
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [scheduleAt, setScheduleAt] = useState(formatDateTimeLocal(defaultDate));
   const [subreddit, setSubreddit] = useState("");
+  const [redditKind, setRedditKind] = useState<RedditKind>("self");
+  const [redditUrl, setRedditUrl] = useState("");
+  const [recurring, setRecurring] = useState(false);
+  const [recFrequency, setRecFrequency] = useState<Frequency>("weekly");
+  const [recDayOfWeek, setRecDayOfWeek] = useState(1);
+  const [recDayOfMonth, setRecDayOfMonth] = useState(1);
+  const [recHour, setRecHour] = useState(10);
+  const [recMinute, setRecMinute] = useState(0);
+  const [recUntil, setRecUntil] = useState("");
+  const [recMaxCount, setRecMaxCount] = useState("");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const create = trpc.scheduler.create.useMutation({
@@ -84,7 +97,52 @@ export function PostComposer({ initialDate, accounts, onClose, onCreated }: Prop
         setErrorMsg("Especifica el subreddit destino.");
         return;
       }
-      platformConfigs.reddit = { subreddit: subreddit.trim() };
+      if ((redditKind === "link" || redditKind === "image") && !redditUrl.trim()) {
+        setErrorMsg(
+          redditKind === "link"
+            ? "Pega la URL del enlace."
+            : "Pega la URL pública de la imagen."
+        );
+        return;
+      }
+      platformConfigs.reddit = {
+        subreddit: subreddit.trim(),
+        kind: redditKind,
+        ...(redditKind !== "self" ? { url: redditUrl.trim() } : {}),
+      };
+    }
+
+    let recurrenceRule:
+      | {
+          frequency: Frequency;
+          hour: number;
+          minute: number;
+          dayOfWeek?: number;
+          dayOfMonth?: number;
+          until?: string;
+          maxCount?: number;
+        }
+      | undefined;
+    if (recurring) {
+      recurrenceRule = {
+        frequency: recFrequency,
+        hour: recHour,
+        minute: recMinute,
+        ...(recFrequency === "weekly" ? { dayOfWeek: recDayOfWeek } : {}),
+        ...(recFrequency === "monthly" ? { dayOfMonth: recDayOfMonth } : {}),
+      };
+      if (recUntil) {
+        const u = new Date(recUntil);
+        if (!Number.isNaN(u.getTime())) {
+          recurrenceRule.until = u.toISOString();
+        }
+      }
+      if (recMaxCount) {
+        const n = Number(recMaxCount);
+        if (Number.isFinite(n) && n >= 1) {
+          recurrenceRule.maxCount = Math.floor(n);
+        }
+      }
     }
 
     create.mutate({
@@ -95,6 +153,7 @@ export function PostComposer({ initialDate, accounts, onClose, onCreated }: Prop
       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
       mediaUrls: [],
       platformConfigs,
+      recurrenceRule,
     });
   }
 
@@ -174,17 +233,66 @@ export function PostComposer({ initialDate, accounts, onClose, onCreated }: Prop
         </label>
 
         {selected.has("reddit") && (
-          <label className="mb-3 block">
-            <span className="mb-1 block text-xs font-medium text-gray-400">
-              Subreddit destino
-            </span>
-            <input
-              value={subreddit}
-              onChange={(e) => setSubreddit(e.target.value)}
-              placeholder="ej. AskReddit (sin r/)"
-              className="w-full rounded-md border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white placeholder-gray-500 focus:border-indigo-500 focus:outline-none"
-            />
-          </label>
+          <div className="mb-3 space-y-2 rounded-md border border-gray-800 bg-gray-950/40 p-3">
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium text-gray-400">
+                Subreddit destino
+              </span>
+              <input
+                value={subreddit}
+                onChange={(e) => setSubreddit(e.target.value)}
+                placeholder="ej. AskReddit (sin r/)"
+                className="w-full rounded-md border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white placeholder-gray-500 focus:border-indigo-500 focus:outline-none"
+              />
+            </label>
+
+            <div>
+              <span className="mb-1 block text-xs font-medium text-gray-400">
+                Tipo de post
+              </span>
+              <div className="flex gap-1">
+                {(["self", "link", "image"] as const).map((k) => (
+                  <button
+                    key={k}
+                    type="button"
+                    onClick={() => setRedditKind(k)}
+                    className={cn(
+                      "flex-1 rounded-md border px-2 py-1 text-xs transition",
+                      redditKind === k
+                        ? "border-indigo-500 bg-indigo-500/20 text-white"
+                        : "border-gray-700 bg-gray-800 text-gray-400 hover:text-white"
+                    )}
+                  >
+                    {k === "self"
+                      ? "Texto"
+                      : k === "link"
+                      ? "Enlace"
+                      : "Imagen"}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {(redditKind === "link" || redditKind === "image") && (
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium text-gray-400">
+                  {redditKind === "link" ? "URL del enlace" : "URL de la imagen pública"}
+                </span>
+                <input
+                  value={redditUrl}
+                  onChange={(e) => setRedditUrl(e.target.value)}
+                  placeholder="https://..."
+                  className="w-full rounded-md border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white placeholder-gray-500 focus:border-indigo-500 focus:outline-none"
+                />
+                {redditKind === "image" && (
+                  <span className="mt-1 block text-xs text-gray-500">
+                    La URL debe ser pública (i.imgur, redd.it, S3...). Reddit la
+                    rechaza si no es accesible.
+                  </span>
+                )}
+              </label>
+            )}
+          </div>
         )}
 
         <label className="mb-4 block">
@@ -198,6 +306,114 @@ export function PostComposer({ initialDate, accounts, onClose, onCreated }: Prop
             className="w-full rounded-md border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white focus:border-indigo-500 focus:outline-none"
           />
         </label>
+
+        <div className="mb-4 rounded-md border border-gray-800 bg-gray-950/40 p-3">
+          <label className="flex cursor-pointer items-center gap-2">
+            <input
+              type="checkbox"
+              checked={recurring}
+              onChange={(e) => setRecurring(e.target.checked)}
+              className="h-4 w-4 rounded border-gray-700 bg-gray-800 text-indigo-500 focus:ring-indigo-500"
+            />
+            <span className="text-xs font-medium text-gray-300">
+              Repetir publicación
+            </span>
+          </label>
+
+          {recurring && (
+            <div className="mt-3 space-y-2">
+              <div className="flex gap-1">
+                {(["daily", "weekly", "monthly"] as const).map((f) => (
+                  <button
+                    key={f}
+                    type="button"
+                    onClick={() => setRecFrequency(f)}
+                    className={cn(
+                      "flex-1 rounded-md border px-2 py-1 text-xs",
+                      recFrequency === f
+                        ? "border-indigo-500 bg-indigo-500/20 text-white"
+                        : "border-gray-700 bg-gray-800 text-gray-400 hover:text-white"
+                    )}
+                  >
+                    {f === "daily" ? "Diario" : f === "weekly" ? "Semanal" : "Mensual"}
+                  </button>
+                ))}
+              </div>
+
+              {recFrequency === "weekly" && (
+                <select
+                  value={recDayOfWeek}
+                  onChange={(e) => setRecDayOfWeek(Number(e.target.value))}
+                  className="w-full rounded-md border border-gray-700 bg-gray-800 px-2 py-1 text-xs text-white"
+                >
+                  <option value={1}>Lunes</option>
+                  <option value={2}>Martes</option>
+                  <option value={3}>Miércoles</option>
+                  <option value={4}>Jueves</option>
+                  <option value={5}>Viernes</option>
+                  <option value={6}>Sábado</option>
+                  <option value={0}>Domingo</option>
+                </select>
+              )}
+
+              {recFrequency === "monthly" && (
+                <input
+                  type="number"
+                  min={1}
+                  max={28}
+                  value={recDayOfMonth}
+                  onChange={(e) => setRecDayOfMonth(Number(e.target.value))}
+                  className="w-full rounded-md border border-gray-700 bg-gray-800 px-2 py-1 text-xs text-white"
+                  placeholder="Día del mes (1-28)"
+                />
+              )}
+
+              <div className="flex gap-2">
+                <input
+                  type="number"
+                  min={0}
+                  max={23}
+                  value={recHour}
+                  onChange={(e) => setRecHour(Number(e.target.value))}
+                  className="w-20 rounded-md border border-gray-700 bg-gray-800 px-2 py-1 text-xs text-white"
+                  placeholder="Hora"
+                />
+                <span className="self-center text-xs text-gray-500">:</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={59}
+                  value={recMinute}
+                  onChange={(e) => setRecMinute(Number(e.target.value))}
+                  className="w-20 rounded-md border border-gray-700 bg-gray-800 px-2 py-1 text-xs text-white"
+                  placeholder="Min"
+                />
+                <span className="self-center text-xs text-gray-500">UTC</span>
+              </div>
+
+              <div className="flex gap-2">
+                <input
+                  type="datetime-local"
+                  value={recUntil}
+                  onChange={(e) => setRecUntil(e.target.value)}
+                  className="flex-1 rounded-md border border-gray-700 bg-gray-800 px-2 py-1 text-xs text-white"
+                  placeholder="Hasta..."
+                />
+                <input
+                  type="number"
+                  min={1}
+                  value={recMaxCount}
+                  onChange={(e) => setRecMaxCount(e.target.value)}
+                  className="w-24 rounded-md border border-gray-700 bg-gray-800 px-2 py-1 text-xs text-white"
+                  placeholder="Nº veces"
+                />
+              </div>
+              <span className="block text-xs text-gray-500">
+                Sin fecha ni nº de veces, la serie se repite indefinidamente.
+              </span>
+            </div>
+          )}
+        </div>
 
         {errorMsg && (
           <div className="mb-3 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
