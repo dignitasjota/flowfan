@@ -628,15 +628,29 @@ Schedule public posts to native APIs (Reddit) or to any platform via outgoing we
 ### Schema
 
 - **`socialAccounts`** — one row per `(creatorId, platformType)`. `connectionType` is `native` (credentials cifrados via AES-256-GCM in `encryptedCredentials`) or `webhook` (no credentials, just a flag). `accountUsername` populated after `verifyRedditCredentials()`.
-- **`scheduledPosts`** — one-shot scheduled posts with `targetPlatforms` array, `platformConfigs` JSONB (e.g. `{reddit: {subreddit, flairId, nsfw, spoiler}}`), `status` enum (scheduled/processing/posted/partial/failed/cancelled), `attempts`, `lastError`, `externalPostIds` JSONB (`{platform: {id, url}}`), `jobId` (BullMQ job).
+- **`scheduledPosts`** — scheduled posts with `targetPlatforms` array, `platformConfigs` JSONB (e.g. `{reddit: {subreddit, kind, url, flairId, nsfw, spoiler}}`), `status` enum (scheduled/processing/posted/partial/failed/cancelled), `attempts`, `lastError`, `externalPostIds` JSONB (`{platform: {id, url}}`), `jobId` (BullMQ job), `recurrenceRule` JSONB (optional), `recurrenceCount` (incremented on each publish of a recurring series).
 
 ### Reddit Publisher (`src/server/services/scheduler-publisher.ts`)
 
 - `verifyRedditCredentials(creds)` — auth handshake + `/api/v1/me` check, returns `{ok, username}`.
-- `publishToReddit(encryptedCreds, post)` — decrypts, OAuth password grant, `POST /api/submit kind=self`. Returns `{success, externalId, externalUrl, error}`.
-- Title trimmed to 300 chars; supports flair, nsfw, spoiler flags.
+- `publishToReddit(encryptedCreds, post)` — decrypts, OAuth password grant, `POST /api/submit`. Supports three kinds:
+  - `kind: "self"` (default) — text post; sends `text` field with the content.
+  - `kind: "link"` — link to an external URL; requires `url`. Sends `resubmit=true`.
+  - `kind: "image"` — image post via public URL; requires `url`. Reddit accepts external public URLs (i.imgur, redd.it, S3...) directly without the `media/asset.json` upload flow. The URL must be publicly accessible or Reddit rejects the submission.
+  - Returns `{success, externalId, externalUrl, error}`.
+- Title trimmed to 300 chars; supports `flair_id`, `nsfw`, `spoiler` flags.
 - User-Agent: `FanFlow/1.0 (by /u/fanflow)`.
 - Exports `getRedditAccessToken`, `decryptRedditCredentials`, and `REDDIT_USER_AGENT` for reuse by the comment poller.
+
+### Recurrence (`src/server/services/recurrence.ts`)
+
+Lightweight rule subset (no full RFC5545):
+
+- `RecurrenceRule = {frequency, interval?, dayOfWeek?, dayOfMonth?, hour, minute, until?, maxCount?}`
+- `frequency`: `"daily" | "weekly" | "monthly"`. `weekly` requires `dayOfWeek` (0-6, Sun=0). `monthly` requires `dayOfMonth` (1-31, capped to 28 to avoid month overflow).
+- `computeNextOccurrence(rule, from, occurrencesSoFar)` — returns the next `Date` after `from`, or `null` if `until`/`maxCount` already exceeded.
+- `validateRecurrenceRule(rule)` — throws on invalid input; called from the tRPC router before insert.
+- The worker re-arms recurring posts: after a successful publish, if the rule still has a next occurrence the worker updates `scheduleAt` to that date, increments `recurrenceCount`, enqueues a fresh delayed BullMQ job, and keeps `status = "scheduled"`. When the series ends (`until` or `maxCount` exhausted), `status` flips to `"posted"` like a one-shot. Failed/partial outcomes still throw (BullMQ retries) and do NOT advance the recurrence.
 
 ### Queue and Worker
 
@@ -645,6 +659,7 @@ Schedule public posts to native APIs (Reddit) or to any platform via outgoing we
   - **`native`** + `reddit` → calls `publishToReddit`. On success, mirrors the published post into `socialPosts` (`onConflictDoNothing`) so the comment poller can pick up replies without manual setup.
   - **`webhook`** → dispatches `post.publishing` webhook with full payload.
 - Aggregates results into `externalPostIds` and computes final status (`posted` / `partial` / `failed`).
+- **Recurrence handling**: after computing the base status, if `recurrenceRule` is set and at least one platform succeeded, the worker calls `computeNextOccurrence`. If a next date exists, it updates `scheduleAt`, increments `recurrenceCount`, enqueues a new delayed job, and keeps the row in `status = "scheduled"` (no separate "active series" row — single record per series).
 - Retries: 3 attempts, exponential 5s backoff. Worker concurrency: 3.
 
 ### API (`src/server/api/routers/scheduler.ts`)
@@ -655,9 +670,9 @@ Schedule public posts to native APIs (Reddit) or to any platform via outgoing we
 ### UI (`src/app/(dashboard)/scheduler/page.tsx`)
 
 - 3 tabs: 📅 Calendario / 📋 Lista / 🔗 Cuentas.
-- **Calendar** (`scheduler-calendar.tsx`): month grid 7×6, post chips colored by status, click chip opens detail, click empty day opens composer pre-filled with date.
-- **List** — sortable table with status badges and inline detail view.
-- **Composer** (`post-composer.tsx`): platform selector (disabled if not connected), title, content, datetime-local picker, conditional subreddit input.
+- **Calendar** (`scheduler-calendar.tsx`): month grid 7×6, post chips colored by status, click chip opens detail, click empty day opens composer pre-filled with date. Recurring posts show a `↻` glyph in the chip.
+- **List** — sortable table with status badges and inline detail view; recurring posts show a `↻` purple pill next to the title.
+- **Composer** (`post-composer.tsx`): platform selector (disabled if not connected), title, content, datetime-local picker. Reddit block expands with: subreddit input, kind selector (Texto / Enlace / Imagen) with conditional URL field for link/image. "Repetir publicación" toggle reveals a recurrence form (frequency tabs, day-of-week / day-of-month picker, hour/minute UTC, optional `until` datetime and/or `maxCount` cap).
 - **Accounts** (`accounts-panel.tsx`): per-platform card; Reddit form for native (4-field credentials), button "Vía webhook" for the rest.
 - Sidebar link "📅 Scheduler" (access: manager+).
 
