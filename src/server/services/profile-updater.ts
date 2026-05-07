@@ -2,7 +2,7 @@ import { eq, and } from "drizzle-orm";
 import type { SentimentResult } from "./ai-analysis";
 import { updateSignals, calculateScores, type BehavioralSignals, type ScoringConfig } from "./scoring";
 import { calculateChurnScore } from "./churn-prediction";
-import { contactProfiles, messages, contacts, notifications, platformScoringConfigs } from "@/server/db/schema";
+import { contactProfiles, messages, contacts, notifications, platformScoringConfigs, socialComments } from "@/server/db/schema";
 import { workflowQueue } from "@/server/queues";
 import { createChildLogger } from "@/lib/logger";
 import { publishEvent } from "@/lib/redis-pubsub";
@@ -22,13 +22,21 @@ const FUNNEL_LABELS: Record<string, string> = {
   vip: "VIP",
 };
 
+export type AnalysisTarget =
+  | { type: "message"; id: string }
+  | { type: "comment"; id: string };
+
 export async function updateContactProfile(
   db: DB,
   contactId: string,
-  messageId: string,
+  messageOrTarget: string | AnalysisTarget,
   analysis: SentimentResult,
   creatorId?: string
 ): Promise<void> {
+  const target: AnalysisTarget =
+    typeof messageOrTarget === "string"
+      ? { type: "message", id: messageOrTarget }
+      : messageOrTarget;
   try {
     // 1. Read current profile
     const profile = await (db as any).query.contactProfiles.findFirst({
@@ -131,21 +139,27 @@ export async function updateContactProfile(
       })
       .where(eq(contactProfiles.contactId, contactId));
 
-    // 9. Update message sentiment
-    await (db as any)
-      .update(messages)
-      .set({
-        sentiment: {
-          score: analysis.score,
-          label: analysis.label,
-          emotionalTone: analysis.emotionalTone,
-          topics: analysis.topics,
-          purchaseIntent: analysis.purchaseIntent,
-          budgetMentions: analysis.budgetMentions,
-          keyPhrases: analysis.keyPhrases,
-        },
-      })
-      .where(eq(messages.id, messageId));
+    // 9. Update sentiment on message OR comment
+    const sentimentPayload = {
+      score: analysis.score,
+      label: analysis.label,
+      emotionalTone: analysis.emotionalTone,
+      topics: analysis.topics,
+      purchaseIntent: analysis.purchaseIntent,
+      budgetMentions: analysis.budgetMentions,
+      keyPhrases: analysis.keyPhrases,
+    };
+    if (target.type === "message") {
+      await (db as any)
+        .update(messages)
+        .set({ sentiment: sentimentPayload })
+        .where(eq(messages.id, target.id));
+    } else {
+      await (db as any)
+        .update(socialComments)
+        .set({ sentiment: sentimentPayload })
+        .where(eq(socialComments.id, target.id));
+    }
 
     // 10. Create notifications for significant changes
     const resolvedCreatorId = creatorId ?? contact?.creatorId;

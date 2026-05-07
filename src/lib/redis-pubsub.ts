@@ -7,7 +7,9 @@ export type RealtimeEventType =
   | "presence_update"
   | "typing_start"
   | "typing_stop"
-  | "viewing_conversation";
+  | "viewing_conversation"
+  | "new_comment"
+  | "comment_handled";
 
 export type RealtimeEvent = {
   type: RealtimeEventType;

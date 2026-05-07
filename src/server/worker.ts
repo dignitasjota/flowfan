@@ -31,9 +31,9 @@ const redisUrl = new URL(process.env.REDIS_URL ?? "redis://localhost:6379");
 const worker = new Worker<AnalysisJobData>(
   "message-analysis",
   async (job) => {
-    const { creatorId, contactId, messageId, conversationId, messageContent, platformType, conversationHistory } = job.data;
+    const { creatorId, contactId, messageId, conversationId, messageContent, platformType, conversationHistory, source = "message" } = job.data;
 
-    log.info({ jobId: job.id, contactId }, "Processing message analysis");
+    log.info({ jobId: job.id, contactId, source }, "Processing message analysis");
 
     // Resolve AI config for analysis
     const config = await resolveAIConfig(db, creatorId, "analysis");
@@ -49,17 +49,25 @@ const worker = new Worker<AnalysisJobData>(
       platformType,
     });
 
-    // Update contact profile
-    await updateContactProfile(db, contactId, messageId, analysis, creatorId);
-
-    // Dispatch webhook: message.received
-    dispatchWebhookEvent(db, creatorId, "message.received", {
+    // Update contact profile, routing the sentiment write to the correct table
+    await updateContactProfile(
+      db,
       contactId,
-      conversationId,
-      messageId,
-      sentiment: analysis.score,
-      topics: analysis.topics,
-    }).catch(() => {});
+      { type: source, id: messageId },
+      analysis,
+      creatorId
+    );
+
+    // Dispatch webhook for messages only (comments use comment.received on ingestion)
+    if (source === "message") {
+      dispatchWebhookEvent(db, creatorId, "message.received", {
+        contactId,
+        conversationId,
+        messageId,
+        sentiment: analysis.score,
+        topics: analysis.topics,
+      }).catch(() => {});
+    }
 
     // Dispatch keyword_detected workflow event
     try {

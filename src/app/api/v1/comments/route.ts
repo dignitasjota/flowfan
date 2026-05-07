@@ -5,9 +5,13 @@ import { authenticateApiKey } from "@/server/api/middleware/api-key-auth";
 import {
   socialPosts,
   socialComments,
-  contacts,
 } from "@/server/db/schema";
 import { dispatchWebhookEvent } from "@/server/services/webhook-dispatcher";
+import {
+  linkOrCreateCommentAuthor,
+  enqueueCommentAnalysis,
+} from "@/server/services/social-comments-ingest";
+import { publishEvent } from "@/lib/redis-pubsub";
 
 const ALLOWED_PLATFORMS = new Set(["instagram", "reddit", "twitter"]);
 
@@ -163,28 +167,18 @@ export async function POST(request: NextRequest) {
     if (parent) parentCommentId = parent.id;
   }
 
-  // Try to link author to existing contact
-  let authorContactId: string | null = null;
-  if (authorPlatformUserId) {
-    const existing = await db.query.contacts.findFirst({
-      where: and(
-        eq(contacts.creatorId, auth.creatorId),
-        eq(contacts.platformType, platformType as "instagram" | "reddit" | "twitter"),
-        eq(contacts.platformUserId, authorPlatformUserId)
-      ),
-    });
-    if (existing) authorContactId = existing.id;
-  }
-  if (!authorContactId) {
-    const byUsername = await db.query.contacts.findFirst({
-      where: and(
-        eq(contacts.creatorId, auth.creatorId),
-        eq(contacts.platformType, platformType as "instagram" | "reddit" | "twitter"),
-        eq(contacts.username, authorUsername)
-      ),
-    });
-    if (byUsername) authorContactId = byUsername.id;
-  }
+  // Resolve or create the contact for the comment author
+  const { contactId: authorContactId } = await linkOrCreateCommentAuthor(
+    db,
+    auth.creatorId,
+    platformType as "instagram" | "reddit" | "twitter",
+    {
+      username: authorUsername,
+      displayName: authorDisplayName,
+      avatarUrl: authorAvatarUrl,
+      platformUserId: authorPlatformUserId,
+    }
+  );
 
   // Idempotency: skip duplicate by external comment id
   if (externalCommentId) {
@@ -235,6 +229,26 @@ export async function POST(request: NextRequest) {
     authorUsername,
     authorContactId,
     content,
+  }).catch(() => {});
+
+  // Enqueue scoring/sentiment analysis on the comment
+  enqueueCommentAnalysis({
+    creatorId: auth.creatorId,
+    contactId: authorContactId,
+    commentId: comment!.id,
+    content: content!,
+    platformType: platformType!,
+  });
+
+  // Realtime push to the dashboard
+  publishEvent(auth.creatorId, {
+    type: "new_comment",
+    data: {
+      commentId: comment!.id,
+      postId: post.id,
+      platformType,
+      authorUsername,
+    },
   }).catch(() => {});
 
   return NextResponse.json({ data: comment }, { status: 201 });

@@ -9,7 +9,6 @@ import {
 import {
   socialPosts,
   socialComments,
-  contacts,
   notes,
   platforms,
   creators,
@@ -20,6 +19,11 @@ import { resolveAIConfig } from "@/server/services/ai-config-resolver";
 import { generateCommentSuggestion } from "@/server/services/ai-comment-suggester";
 import { dispatchWebhookEvent } from "@/server/services/webhook-dispatcher";
 import { checkAIMessageLimit } from "@/server/services/usage-limits";
+import {
+  linkOrCreateCommentAuthor,
+  enqueueCommentAnalysis,
+} from "@/server/services/social-comments-ingest";
+import { publishEvent } from "@/lib/redis-pubsub";
 
 const COMMENT_PLATFORMS = ["instagram", "reddit", "twitter"] as const;
 
@@ -170,28 +174,19 @@ export const socialCommentsRouter = createTRPCRouter({
         throw new TRPCError({ code: "NOT_FOUND", message: "Post no encontrado" });
       }
 
-      // Try to link to existing contact by platformUserId or username
-      let authorContactId: string | null = null;
-      if (input.authorPlatformUserId) {
-        const existing = await ctx.db.query.contacts.findFirst({
-          where: and(
-            eq(contacts.creatorId, ctx.creatorId),
-            eq(contacts.platformType, post.platformType),
-            eq(contacts.platformUserId, input.authorPlatformUserId)
-          ),
-        });
-        if (existing) authorContactId = existing.id;
-      }
-      if (!authorContactId) {
-        const byUsername = await ctx.db.query.contacts.findFirst({
-          where: and(
-            eq(contacts.creatorId, ctx.creatorId),
-            eq(contacts.platformType, post.platformType),
-            eq(contacts.username, input.authorUsername)
-          ),
-        });
-        if (byUsername) authorContactId = byUsername.id;
-      }
+      // Resolve or create the contact for the comment author so they can
+      // accumulate scoring/churn signals from public engagement.
+      const { contactId: authorContactId } = await linkOrCreateCommentAuthor(
+        ctx.db,
+        ctx.creatorId,
+        post.platformType as "instagram" | "reddit" | "twitter",
+        {
+          username: input.authorUsername,
+          displayName: input.authorDisplayName,
+          avatarUrl: input.authorAvatarUrl,
+          platformUserId: input.authorPlatformUserId,
+        }
+      );
 
       const [comment] = await ctx.db
         .insert(socialComments)
@@ -229,6 +224,26 @@ export const socialCommentsRouter = createTRPCRouter({
         authorUsername: input.authorUsername,
         authorContactId,
         content: input.content,
+      }).catch(() => {});
+
+      // Enqueue scoring/sentiment analysis (writes sentiment back to socialComments)
+      enqueueCommentAnalysis({
+        creatorId: ctx.creatorId,
+        contactId: authorContactId,
+        commentId: comment!.id,
+        content: input.content,
+        platformType: post.platformType,
+      });
+
+      // Realtime push so the comments inbox refreshes without polling
+      publishEvent(ctx.creatorId, {
+        type: "new_comment",
+        data: {
+          commentId: comment!.id,
+          postId: input.postId,
+          platformType: post.platformType,
+          authorUsername: input.authorUsername,
+        },
       }).catch(() => {});
 
       return comment;
@@ -273,6 +288,15 @@ export const socialCommentsRouter = createTRPCRouter({
           })
           .where(eq(socialPosts.id, existing.postId));
       }
+
+      publishEvent(ctx.creatorId, {
+        type: "comment_handled",
+        data: {
+          commentId: input.id,
+          postId: existing.postId,
+          isHandled: input.isHandled,
+        },
+      }).catch(() => {});
 
       return updated;
     }),
@@ -334,6 +358,16 @@ export const socialCommentsRouter = createTRPCRouter({
           lastCommentAt: new Date(),
         })
         .where(eq(socialPosts.id, parent.postId));
+
+      publishEvent(ctx.creatorId, {
+        type: "new_comment",
+        data: {
+          commentId: reply!.id,
+          postId: parent.postId,
+          parentCommentId: parent.id,
+          role: "creator",
+        },
+      }).catch(() => {});
 
       return reply;
     }),

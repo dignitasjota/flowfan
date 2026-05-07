@@ -213,6 +213,53 @@ export function useRealtime() {
             break;
           }
 
+          case "new_comment": {
+            const postId = event.data.postId as string | undefined;
+            const role = event.data.role as string | undefined;
+            const authorUsername = event.data.authorUsername as string | undefined;
+
+            utils.socialComments.listPosts.invalidate();
+            utils.socialComments.overview.invalidate();
+            if (postId) {
+              utils.socialComments.listComments.invalidate({
+                postId,
+                onlyUnhandled: false,
+              });
+              utils.socialComments.getPost.invalidate({ id: postId });
+            }
+
+            if (
+              role !== "creator" &&
+              typeof document !== "undefined" &&
+              document.hidden &&
+              typeof Notification !== "undefined" &&
+              Notification.permission === "granted"
+            ) {
+              new Notification("Nuevo comentario", {
+                body: authorUsername
+                  ? `${authorUsername} comentó en uno de tus posts`
+                  : "Nuevo comentario público",
+                icon: "/logo.png",
+                tag: postId ?? "comments",
+              });
+            }
+            break;
+          }
+
+          case "comment_handled": {
+            const postId = event.data.postId as string | undefined;
+            utils.socialComments.listPosts.invalidate();
+            utils.socialComments.overview.invalidate();
+            if (postId) {
+              utils.socialComments.listComments.invalidate({
+                postId,
+                onlyUnhandled: false,
+              });
+              utils.socialComments.getPost.invalidate({ id: postId });
+            }
+            break;
+          }
+
           case "viewing_conversation": {
             const userId = event.data.userId as string;
             const conversationId = event.data.conversationId as string;

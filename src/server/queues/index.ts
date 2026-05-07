@@ -21,6 +21,9 @@ export type AnalysisJobData = {
   messageContent: string;
   platformType: string;
   conversationHistory: { role: string; content: string }[];
+  // Optional: distinguishes scoring source. Default "message" (DM/conversation).
+  // For "comment", messageId refers to socialComments.id and conversationId may be empty.
+  source?: "message" | "comment";
 };
 
 // --- Workflow evaluation queue ---
