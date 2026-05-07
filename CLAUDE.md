@@ -251,6 +251,30 @@ Three-panel responsive layout:
 - **Center:** Chat panel with AI suggestions + coaching button in header
 - **Right:** Contact panel with stats, scoring, revenue, reports (w-80 on desktop, toggle on mobile)
 
+### Keyboard Shortcuts (`src/hooks/use-conversation-shortcuts.ts`)
+
+Global shortcuts active on `/conversations` while NOT typing in an input/textarea/contenteditable:
+
+| Key | Action |
+|-----|--------|
+| `j` / `↓` | Next conversation |
+| `k` / `↑` | Previous conversation |
+| `r` | Focus the reply textarea (fires the `fanflow:focus-reply` window event; `chat-panel` listens) |
+| `a` | Archive the selected conversation (`conversations.updateStatus` mutation, returns to list) |
+| `?` | Open `ShortcutsCheatsheet` modal |
+
+The `r` shortcut uses a custom window event rather than prop drilling so any consumer (chat-panel, future components) can subscribe.
+
+### Slash Templates in Chat Input (`src/components/conversations/slash-template-menu.tsx`)
+
+Inline command palette inside the manual-mode reply textarea:
+- Triggered by `/word` anchored to start-of-input or after whitespace.
+- Queries `trpc.templates.list({ platformType })` (templates without platform are included by the server).
+- Filters live by name/category as the user types.
+- Variable interpolation on insert: `{{displayName}}` and `{{username}}` from the conversation contact.
+- Keyboard: `↑`/`↓` navigate, `Enter`/`Tab` insert, `Esc` closes (replaces the slash range with empty string).
+- Mounted as `position: absolute` floating above the textarea.
+
 ## Contact Management
 
 ### Contacts page (`src/app/(dashboard)/contacts/page.tsx`)
@@ -299,7 +323,7 @@ Contacts have behavioral profiles (`contactProfiles` table) with:
 - `churnFactors` (JSONB: breakdown of 5 weighted factors)
 - `churnUpdatedAt` (timestamp)
 
-Scoring is updated asynchronously via BullMQ worker when messages are sent. Churn score is calculated in real-time during scoring pipeline and recalculated in batch every 6 hours.
+Scoring is updated asynchronously via BullMQ worker when messages are sent **or when public comments are received** (`AnalysisJobData.source` = `"message"` | `"comment"`). The worker dispatches `updateContactProfile()` with a target `{type, id}` so the resulting sentiment is written back to the correct table (`messages` or `socialComments`). This means a fan who only engages publicly via comments still accumulates engagement, sentiment trend and churn signals. Churn score is calculated in real-time during the scoring pipeline and recalculated in batch every 6 hours.
 
 ### Contextual Scoring by Platform
 
@@ -538,12 +562,28 @@ Webhooks send HTTP POST notifications to external URLs when events occur in FanF
 
 ### Overview
 
-Unified inbox for public comments on creator posts (Reddit, Instagram, Twitter), separate from DM conversations. Reuses the same AI infrastructure but with a prompt calibrated for public visibility (no pricing, no DM nudging, brevity).
+Unified inbox for public comments on creator posts (Reddit, Instagram, Twitter), separate from DM conversations. Reuses the same AI infrastructure but with a prompt calibrated for public visibility (no pricing, no DM nudging, brevity). Comments funnel through the same scoring/churn pipeline as DMs so a fan who only engages publicly can still advance.
 
 ### Schema
 
 - **`socialPosts`** — creator posts with `commentsCount` and `unhandledCount` cached for fast list ordering. Unique by `(creatorId, platformType, externalPostId)`.
-- **`socialComments`** — threaded via `parentCommentId`, optionally linked to a `contacts` row via `authorContactId` (matched by `platformUserId` or `username`). Tracks `isHandled` + `handledById` + `handledAt`. Deduplication by `(creatorId, platformType, externalCommentId)`. Creator replies stored as child comments with `role = "creator"`.
+- **`socialComments`** — threaded via `parentCommentId`, optionally linked to a `contacts` row via `authorContactId` (matched by `platformUserId` or `username`). Tracks `isHandled` + `handledById` + `handledAt`. Deduplication by `(creatorId, platformType, externalCommentId)`. Creator replies stored as child comments with `role = "creator"`. `source` distinguishes `manual` / `api` / `polling`.
+
+### Ingestion Helper (`src/server/services/social-comments-ingest.ts`)
+
+Shared helper used by the tRPC router, the REST endpoint and the Reddit poller:
+- `linkOrCreateCommentAuthor(db, creatorId, platformType, author)` — match priority `platformUserId` → `username` → create lightweight contact + empty profile + dispatch `contact.created` (with `metadata.source = "comment"`). This is what lets pure commenters accumulate signals.
+- `enqueueCommentAnalysis({...})` — pushes a job into `analysisQueue` with `source: "comment"` so the worker writes the resulting sentiment back to `socialComments` rather than `messages`.
+
+### Reddit Polling (`src/server/services/reddit-poller.ts`)
+
+Pull-based ingestion for Reddit (no OAuth callback needed thanks to script-type apps):
+- Worker scheduler (5-min tick in `worker.ts`) calls `pollRedditComments(db)`.
+- For each native+active Reddit `socialAccount`, fetches a fresh OAuth token (cached for the cycle) and iterates the 30 most recent `socialPosts` with `externalPostId`.
+- `GET /comments/{id}.json?depth=2&sort=new` → flatten the tree, dedupe by `externalCommentId` (`t1_xxx`), skip own-account replies.
+- For each new comment: `linkOrCreateCommentAuthor` → insert with `source: "polling"` → `comment.received` webhook → `enqueueCommentAnalysis` → `publishEvent("new_comment")` SSE.
+- Rate limit: ~55 req/min (1.1s sleep between posts) to stay under Reddit's 60/min OAuth quota.
+- Native publishes from the scheduler are mirrored into `socialPosts` (`onConflictDoNothing`) so they automatically enter the polling pool.
 
 ### AI Service (`src/server/services/ai-comment-suggester.ts`)
 
@@ -551,16 +591,25 @@ Unified inbox for public comments on creator posts (Reddit, Instagram, Twitter),
 - 3 variants: CASUAL / ENGAGEMENT / RETENTION (no SALES variant for public surface).
 - Reuses `callAIProvider()` so all 5 providers work without changes.
 
-### API (`src/server/api/routers/social-comments.ts`)
+### API
 
+**tRPC** (`src/server/api/routers/social-comments.ts`):
 - `listPosts` — filters by platform and `onlyWithUnhandled`; ordered by unhandled count + recency.
 - `getPost`, `listComments` (per post, optional `onlyUnhandled`).
 - `createPost` (manager) — manual post creation for testing/external workflows.
-- `createComment` — auto-links author to existing contact if found.
-- `replyToComment` — inserts a `role = "creator"` child comment + auto-marks parent as handled + decrements `unhandledCount`.
-- `markHandled` — toggle handled state with delta on post counter.
+- `createComment` — auto-links author via `linkOrCreateCommentAuthor`, enqueues analysis, publishes SSE.
+- `replyToComment` — inserts a `role = "creator"` child comment + auto-marks parent as handled + decrements `unhandledCount` + publishes SSE.
+- `markHandled` — toggle handled state with delta on post counter + publishes SSE.
 - `suggest` — generate AI variants for a specific comment.
 - `overview` — counters for header (posts, comments, unhandled).
+
+**REST** (`src/app/api/v1/comments/route.ts`):
+- `GET /api/v1/comments` (Pro+) — list with filters `post_id`, `unhandled`, paginated.
+- `POST /api/v1/comments` (Business) — idempotent ingest (auto-creates post by `externalPostId` if missing, dedupes by `externalCommentId`). Same auto-link + analysis + SSE pipeline as tRPC.
+
+### Realtime Events
+
+`RealtimeEventType` extended with `new_comment` and `comment_handled`. Published from `createComment`, `replyToComment`, `markHandled`, the REST endpoint, and the Reddit poller. The shared `useRealtime` hook invalidates `socialComments.{listPosts,listComments,getPost,overview}` and shows a browser `Notification` when the tab is hidden and a fan (not creator) comments.
 
 ### UI (`src/app/(dashboard)/comments/page.tsx`)
 
@@ -568,6 +617,7 @@ Unified inbox for public comments on creator posts (Reddit, Instagram, Twitter),
 - Thread view: chronological with creator replies indented. Handled/pending badges, contact-linked indicator, profile chips (engagement / payment / funnel).
 - Reply panel: AI suggest button → 3 colored variants → click to apply → textarea → publish or mark handled.
 - Sidebar link "🗨️ Comentarios" (access: all team members).
+- Auto-refreshes via SSE — no manual reload needed when comments arrive from polling or external ingestion.
 
 ## Publishing Scheduler
 
@@ -586,12 +636,13 @@ Schedule public posts to native APIs (Reddit) or to any platform via outgoing we
 - `publishToReddit(encryptedCreds, post)` — decrypts, OAuth password grant, `POST /api/submit kind=self`. Returns `{success, externalId, externalUrl, error}`.
 - Title trimmed to 300 chars; supports flair, nsfw, spoiler flags.
 - User-Agent: `FanFlow/1.0 (by /u/fanflow)`.
+- Exports `getRedditAccessToken`, `decryptRedditCredentials`, and `REDDIT_USER_AGENT` for reuse by the comment poller.
 
 ### Queue and Worker
 
 - `scheduledPostQueue` ("scheduled-post-publish") with delayed jobs (`delay = scheduleAt - now`).
 - Worker iterates `targetPlatforms`:
-  - **`native`** + `reddit` → calls `publishToReddit`.
+  - **`native`** + `reddit` → calls `publishToReddit`. On success, mirrors the published post into `socialPosts` (`onConflictDoNothing`) so the comment poller can pick up replies without manual setup.
   - **`webhook`** → dispatches `post.publishing` webhook with full payload.
 - Aggregates results into `externalPostIds` and computes final status (`posted` / `partial` / `failed`).
 - Retries: 3 attempts, exponential 5s backoff. Worker concurrency: 3.
