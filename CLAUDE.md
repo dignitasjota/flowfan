@@ -708,6 +708,38 @@ Lightweight rule subset (no full RFC5545):
 - **Composer** (`post-composer.tsx`): platform selector (disabled if not connected), title, content, datetime-local picker. Reddit block expands with: subreddit input, kind selector (Texto / Enlace / Imagen) with conditional URL field for link/image. "Repetir publicación" toggle reveals a recurrence form (frequency tabs, day-of-week / day-of-month picker, hour/minute UTC, optional `until` datetime and/or `maxCount` cap).
 - **Accounts** (`accounts-panel.tsx`): per-platform card; Reddit form for native (4-field credentials), button "Vía webhook" for the rest.
 - Sidebar link "📅 Scheduler" (access: manager+).
+- **`PostComposer`** accepts an optional `initialValues` prop (`{title?, content?, platforms?, redditSubreddit?}`) so other pages (notably Blog-to-Social) can open it pre-filled.
+
+## Blog-to-Social (AI repurposing)
+
+### Overview
+
+Take a blog URL (or pasted article text) and generate ready-to-post adaptations for Reddit, Twitter / X and Instagram. Drafts are ephemeral — edit inline and either schedule via the existing scheduler or discard. No new tables.
+
+### Service (`src/server/services/blog-to-social.ts`)
+
+- `extractContent(url)` — `fetch` capped to 500KB, no extra dependencies. Pulls `<title>` (with `og:title` fallback), `og:description` / `<meta name="description">` for excerpt, and paragraphs from `<article>` → `<main>` → `<body>` (in that order). Output truncated to 10K chars.
+- `generatePostsForPlatforms(config, content, platforms, {language})` — calls `callAIProvider` with a strict-JSON system prompt:
+  - **Reddit**: `{title (≤300), body (1500-3000 chars conversational)}`
+  - **Twitter**: `{tweet (≤270), thread[] (each ≤270, can be empty)}`
+  - **Instagram**: `{caption (≤2200), hashtags[] (5-10 specific tags, separated from caption)}`
+- `tryParseDrafts(text)` is tolerant: strips `<think>` blocks, accepts ```` ```json ```` fences, and slices between the first `{` and last `}`. Per-platform char limits are re-applied at parse time as a safety net.
+
+### API (`src/server/api/routers/blog-to-social.ts`)
+
+- `extract({url})` — manager. Returns `{title, excerpt, content, url}`. Errors if extracted body < 50 chars (with a hint to paste manually).
+- `generate({title?, excerpt?, url?, content, platforms})` — manager. Resolves AI config for task `"suggestion"`, enforces `checkAIMessageLimit`, logs token usage to `aiUsageLog`. Throws if the model returns no parseable JSON.
+
+### UI (`src/app/(dashboard)/blog-to-social/page.tsx`)
+
+- Input panel: URL field + Extract button (or paste content directly), title, content textarea, platform multi-select.
+- "✨ Generar posts con IA" button.
+- Drafts rendered as platform-specific cards with inline editable fields:
+  - Reddit: title + body textarea + char counters.
+  - Twitter: main tweet textarea + per-thread textarea blocks (`maxLength=270`).
+  - Instagram: caption textarea + hashtag pills.
+- Each card has **"↻ Regenerar"** (re-runs generation with current input) and **"📅 Programar"** (opens `PostComposer` pre-filled with the draft — for Twitter/IG it concatenates `tweet + thread` and `caption + hashtags`).
+- Sidebar link "✨ Blog → Social" (manager+).
 
 ## Key Database Tables
 
