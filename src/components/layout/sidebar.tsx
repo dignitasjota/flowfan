@@ -26,6 +26,7 @@ const navigation = [
   { name: "Secuencias", href: "/sequences", icon: "🔄", access: "manager" as const },
   { name: "Content Gaps", href: "/content-gaps", icon: "🔍", access: "manager" as const },
   { name: "Insights", href: "/insights", icon: "📈", access: "manager" as const },
+  { name: "Blog → Social", href: "/blog-to-social", icon: "✨", access: "manager" as const },
   { name: "Programados", href: "/scheduled", icon: "⏰", access: "all" as const },
   { name: "Scheduler", href: "/scheduler", icon: "📅", access: "manager" as const },
   { name: "Broadcasts", href: "/broadcasts", icon: "📢", access: "manager" as const },

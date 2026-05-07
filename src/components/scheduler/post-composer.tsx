@@ -15,6 +15,12 @@ type Props = {
   accounts: ConnectedAccount[];
   onClose: () => void;
   onCreated: () => void;
+  initialValues?: {
+    title?: string;
+    content?: string;
+    platforms?: ("reddit" | "twitter" | "instagram")[];
+    redditSubreddit?: string;
+  };
 };
 
 const PLATFORM_LABELS: Record<string, string> = {
@@ -39,13 +45,23 @@ function formatDateTimeLocal(d: Date): string {
 type RedditKind = "self" | "link" | "image";
 type Frequency = "daily" | "weekly" | "monthly";
 
-export function PostComposer({ initialDate, accounts, onClose, onCreated }: Props) {
+export function PostComposer({
+  initialDate,
+  accounts,
+  onClose,
+  onCreated,
+  initialValues,
+}: Props) {
   const defaultDate = initialDate ?? new Date(Date.now() + 60 * 60 * 1000);
-  const [title, setTitle] = useState("");
-  const [content, setContent] = useState("");
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [title, setTitle] = useState(initialValues?.title ?? "");
+  const [content, setContent] = useState(initialValues?.content ?? "");
+  const [selected, setSelected] = useState<Set<string>>(
+    new Set(initialValues?.platforms ?? [])
+  );
   const [scheduleAt, setScheduleAt] = useState(formatDateTimeLocal(defaultDate));
-  const [subreddit, setSubreddit] = useState("");
+  const [subreddit, setSubreddit] = useState(
+    initialValues?.redditSubreddit ?? ""
+  );
   const [redditKind, setRedditKind] = useState<RedditKind>("self");
   const [redditUrl, setRedditUrl] = useState("");
   const [recurring, setRecurring] = useState(false);
