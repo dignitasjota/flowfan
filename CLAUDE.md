@@ -275,6 +275,12 @@ Inline command palette inside the manual-mode reply textarea:
 - Keyboard: `↑`/`↓` navigate, `Enter`/`Tab` insert, `Esc` closes (replaces the slash range with empty string).
 - Mounted as `position: absolute` floating above the textarea.
 
+### Sidebar Unread Badges (`SidebarBadge` in `src/components/layout/sidebar.tsx`)
+
+Red pill (`99+` clamp) shown next to navigation items with pending work:
+- **Conversaciones** — count of `RealtimeContext.newMessageConversations` (Set of conversation IDs that received `new_message` SSE events this session). Ephemeral: clears on logout / page reload.
+- **Comentarios** — `socialComments.overview.unhandledCount` (persistent count from DB). Query enabled only for the comments item to avoid global polling; auto-invalidated by `useRealtime` when `new_comment` / `comment_handled` arrives.
+
 ## Contact Management
 
 ### Contacts page (`src/app/(dashboard)/contacts/page.tsx`)
@@ -366,6 +372,33 @@ Risk levels: `low` (0-24), `medium` (25-49), `high` (50-74), `critical` (75-100)
 - **Dashboard:** `ChurnPanel` component (`src/components/dashboard/churn-panel.tsx`) shows risk distribution bar + top at-risk contacts
 - **API:** `intelligence.getChurnDashboard` (counts + top 20 at-risk), `intelligence.getContactChurnDetails` (per-contact factors + actions)
 - `getSuggestedActions(funnelStage)` returns 3 retention actions per funnel stage
+
+## Audience Insights
+
+### Service (`src/server/services/audience-insights.ts`)
+
+Per-platform analytics aggregated from data already accumulated by the scoring pipeline (DMs **and** comments — comment authors are auto-linked as contacts so their signals contribute equally).
+
+`computeAudienceInsights(db, creatorId, { sinceDays })` runs three passes:
+1. **Stats SQL aggregate** (`drizzle.sql`) — per platform: contact count, avg engagement / payment / churn, count per funnel stage (`COUNT(*) FILTER WHERE`).
+2. **Revenue SQL aggregate** — per platform: `SUM(amount)` and `COUNT(*)` of `fanTransactions` since the window start.
+3. **Top topics in JS** — pulls the top 500 profiles by `engagementLevel`, aggregates `behavioralSignals.topicFrequency` JSONB in memory. Capped to a known volume to avoid scanning the entire dataset.
+
+Returns:
+- `perPlatform[]` — `{platformType, contactCount, avgEngagement, avgPayment, avgChurn, funnelDistribution, conversionRate, revenueCents, transactionCount, topTopics[]}` ordered by contact count.
+- `totals` — global rollup with weighted averages and overall conversion rate (% of contacts in `buyer` or `vip`).
+
+### API (`src/server/api/routers/intelligence.ts`)
+
+- `audienceInsights` query — accepts `{sinceDays: 1-365}` (default 30), returns the full payload above. No mutations.
+
+### UI (`src/app/(dashboard)/insights/page.tsx`)
+
+- Period selector (7/30/90 days) at the top.
+- Top-line stat cards: total contacts, avg engagement, global conversion rate, revenue in window.
+- Per-platform card grid: platform header, mini stats (engagement / payment / conversion / revenue), funnel distribution as a stacked colored bar with legend chips, top topics as indigo pills with frequency.
+- Empty state when no data has been accumulated yet.
+- Sidebar link "📈 Insights" (access: manager+).
 
 ## Sequences and Follow-Up
 
