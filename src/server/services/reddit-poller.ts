@@ -40,7 +40,7 @@ type RedditCommentNode = {
   };
 };
 
-function flattenComments(
+export function flattenComments(
   children: RedditCommentNode[] | undefined,
   out: RedditCommentNode["data"][] = []
 ): RedditCommentNode["data"][] {
