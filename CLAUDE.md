@@ -802,8 +802,51 @@ When adding a new mutation, follow the same pattern: import `logTeamAction`, gat
 - **`recurrence.test.ts`** — `validateRecurrenceRule` (hour/minute/dayOfWeek/dayOfMonth/interval bounds) and `computeNextOccurrence` for daily/weekly/monthly with interval > 1, `until`, `maxCount`.
 - **`blog-to-social.test.ts`** — `extractContent` mocking `fetch`: `<title>`, `og:description` fallback, paragraph extraction from `<article>`, strip of `<script>` / `<style>`, HTML entity decoding, non-2xx error path.
 - **`social-comments-ingest.test.ts`** — `linkOrCreateCommentAuthor` matching by `platformUserId` vs creating a lightweight contact (with `contact.created` webhook); `enqueueCommentAnalysis` asserting `source: "comment"` payload.
+- **`reddit-poller.test.ts`** — `flattenComments` recursive flattening with skips for `kind=more`, `[deleted]` authors, missing body, and Reddit's `replies: ""` empty-string convention. Deeply nested threads handled correctly.
+- **`audience-insights.test.ts`** — `computeAudienceInsights` with mocked DB shape: empty data, conversion rate calculation, revenue merge, weighted average global totals, top topics scoped per platform (no cross-platform leak), platform ordering by contact count.
+- **`scheduler.test.ts` (router logic)** — schedule date validation with 30s clock-skew window, missing-account detection, cancellable status transitions, BullMQ delay computation, post-publish recurrence advancement (rule + ≥1 success), final status computation.
+- **`social-comments.test.ts` (router logic)** — unhandled count delta on `markHandled`, post counter delta on creator reply, authoring strategy priority (`platformUserId` → `username` → create new), AI suggest variant tags differing for public vs private surfaces.
 
-When adding new pure helpers (no DB), prefer this pattern: pure logic in a service file, module-level `vi.mock` for transitive deps, no test fixtures in DB.
+When adding new pure helpers (no DB), prefer this pattern: pure logic in a service file, module-level `vi.mock` for transitive deps, no test fixtures in DB. For routers, extract decisional logic as small predicates and test those — avoids mocks of DB + queue + SSE that are brittle.
+
+## Landing Page & Onboarding
+
+### Landing (`src/app/page.tsx`)
+
+Public homepage when `getServerSession` returns null. Authenticated users redirect to `/conversations`.
+
+Section order (top to bottom):
+1. **`Hero`** — main pitch + CTA + capability stats grid (8 platforms, 5 AI providers, <2s latency) + dashboard mockup mockup illustrating chat panel + AI suggestions + scoring pills.
+2. **`SocialProof`** (`src/components/landing/social-proof.tsx`) — capability stats with detail (5 AI models, 9 webhook events, 6 languages, <2s latency) + supported-platform chips. Numbers reflect product capabilities, not customer counts (no fabricated adoption metrics).
+3. **`Features`** — feature cards.
+4. **`Showcase`** — visual showcase.
+5. **`Testimonials`** (`src/components/landing/testimonials.tsx`) — 4 representative quotes about real use cases (conversation modes, Reddit polling, team + audit log, blog-to-social). Visibly tagged with an amber **"Ejemplos de uso · pre-launch"** badge and an explicit subheader explaining they will be replaced by verified testimonials with explicit permission post-launch. **No fabricated names or photos.**
+6. **`PricingTable`** — pricing grid (free / starter / pro / business).
+7. **`FAQ`** — frequently asked questions.
+8. **`Footer`**.
+
+JSON-LD schema for `SoftwareApplication` is rendered inline for SEO. Canonical URL, OG tags and meta description come from the `seoConfig` singleton row (admin-editable).
+
+### Onboarding Wizard (`src/app/(dashboard)/onboarding/page.tsx`)
+
+Mounted at `/onboarding`. Triggered by `/register` redirect for new accounts and gated by `creators.onboardingCompleted` (guarded in `(dashboard)/layout.tsx`).
+
+3-step wizard (`OnboardingWizard` in `src/components/onboarding/`):
+1. **Plataforma** — pick primary platform.
+2. **IA** — connect AI provider + model.
+3. **Primer contacto** — add the first contact.
+
+"Skip all" available at every step. On finish (or skip): `billing.completeOnboarding` mutation + session refresh + redirect to `/conversations`.
+
+### Welcome Banner (`src/components/dashboard/welcome-banner.tsx`)
+
+Dismissible card at the top of `/dashboard` showing 4 next-step suggestions with direct links:
+- ✨ Personality presets
+- 📅 First scheduled post
+- 👥 Import contacts
+- 📝 Blog-to-social
+
+Dismissal persists in `localStorage` (`fanflow:welcome-dismissed = "1"`) so it never reappears for that browser. Independent from `creators.onboardingCompleted` — the wizard is the gate to enter the dashboard; this banner is the "what's next" guide once inside.
 
 ## Key Database Tables
 
