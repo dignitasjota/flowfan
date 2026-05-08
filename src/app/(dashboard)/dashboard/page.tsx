@@ -5,6 +5,7 @@ import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
 import { TrendChart } from "@/components/ui/trend-chart";
 import { ChurnPanel } from "@/components/dashboard/churn-panel";
+import { WelcomeBanner } from "@/components/dashboard/welcome-banner";
 
 const funnelLabels: Record<string, string> = {
   cold: "Frio",
@@ -96,6 +97,7 @@ export default function DashboardPage() {
 
   return (
     <div className="flex h-full flex-col overflow-y-auto">
+      <WelcomeBanner />
       <div className="border-b border-gray-800 px-6 py-4">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold text-white">Dashboard</h2>

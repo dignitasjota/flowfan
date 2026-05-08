@@ -2,10 +2,12 @@ import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/server/auth";
 import { Hero } from "@/components/landing/hero";
+import { SocialProof } from "@/components/landing/social-proof";
 import { Features } from "@/components/landing/features";
 import { PricingTable } from "@/components/landing/pricing-table";
 import { FAQ } from "@/components/landing/faq";
 import { Showcase } from "@/components/landing/showcase";
+import { Testimonials } from "@/components/landing/testimonials";
 import { Footer } from "@/components/landing/footer";
 import Link from "next/link";
 import Image from "next/image";
@@ -117,8 +119,10 @@ export default async function Home() {
       </nav>
 
       <Hero />
+      <SocialProof />
       <Features />
       <Showcase />
+      <Testimonials />
       <PricingTable isLanding />
       <FAQ />
       <Footer />
