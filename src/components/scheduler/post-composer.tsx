@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/lib/trpc";
+import { PostPreview } from "@/components/scheduler/post-preview";
 
 type ConnectedAccount = {
   platformType: string;
@@ -79,6 +80,9 @@ export function PostComposer({
   const [recUntil, setRecUntil] = useState("");
   const [recMaxCount, setRecMaxCount] = useState("");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [previewPlatform, setPreviewPlatform] = useState<
+    "reddit" | "twitter" | "instagram" | null
+  >(null);
 
   const create = trpc.scheduler.create.useMutation({
     onSuccess: () => {
@@ -425,6 +429,51 @@ export function PostComposer({
               <code> tweet </code>y<code> thread[] </code>para que Zapier /
               Make publiquen como hilo nativo en X.
             </p>
+          </div>
+        )}
+
+        {selected.size > 0 && (
+          <div className="mb-3">
+            <div className="mb-1 flex items-center justify-between">
+              <span className="text-xs font-medium text-gray-400">
+                Vista previa
+              </span>
+              <div className="flex gap-1">
+                {Array.from(selected).map((p) => {
+                  const platform = p as "reddit" | "twitter" | "instagram";
+                  const active = previewPlatform === platform;
+                  return (
+                    <button
+                      key={platform}
+                      type="button"
+                      onClick={() =>
+                        setPreviewPlatform(active ? null : platform)
+                      }
+                      className={cn(
+                        "rounded-md px-2 py-1 text-xs",
+                        active
+                          ? "bg-indigo-600 text-white"
+                          : "bg-gray-800 text-gray-400 hover:text-white"
+                      )}
+                    >
+                      {platform}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            {previewPlatform && (
+              <PostPreview
+                platform={previewPlatform}
+                title={title}
+                content={content}
+                redditSubreddit={subreddit}
+                redditKind={redditKind}
+                redditUrl={redditUrl}
+                twitterTweet={tweetMain}
+                twitterThread={tweetThread}
+              />
+            )}
           </div>
         )}
 

@@ -128,6 +128,12 @@ export const conversationModeTypeEnum = pgEnum("conversation_mode_type", [
   "LOW_VALUE",
 ]);
 
+export const commentModerationStatusEnum = pgEnum("comment_moderation_status", [
+  "visible",
+  "hidden",
+  "reported",
+]);
+
 // ============================================================
 // TABLES
 // ============================================================
@@ -1984,6 +1990,14 @@ export const socialComments = pgTable(
     handledById: uuid("handled_by_id").references(() => creators.id, {
       onDelete: "set null",
     }),
+    moderationStatus: commentModerationStatusEnum("moderation_status")
+      .default("visible")
+      .notNull(),
+    moderatedAt: timestamp("moderated_at"),
+    moderatedById: uuid("moderated_by_id").references(() => creators.id, {
+      onDelete: "set null",
+    }),
+    moderationReason: text("moderation_reason"),
     creatorReplyId: uuid("creator_reply_id"),
     publishedAt: timestamp("published_at"),
     source: varchar("source", { length: 20 }).default("manual").notNull(),

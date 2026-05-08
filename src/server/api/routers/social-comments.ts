@@ -79,6 +79,7 @@ export const socialCommentsRouter = createTRPCRouter({
       z.object({
         postId: z.string().uuid(),
         onlyUnhandled: z.boolean().default(false),
+        includeHidden: z.boolean().default(false),
       })
     )
     .query(async ({ ctx, input }) => {
@@ -96,6 +97,13 @@ export const socialCommentsRouter = createTRPCRouter({
       const conditions = [eq(socialComments.postId, input.postId)];
       if (input.onlyUnhandled) {
         conditions.push(eq(socialComments.isHandled, false));
+      }
+      // Hidden comments are excluded by default; reported still show up so
+      // the creator can review them with the report flag visible.
+      if (!input.includeHidden) {
+        conditions.push(
+          sql`${socialComments.moderationStatus} != 'hidden'`
+        );
       }
 
       return ctx.db.query.socialComments.findMany({
@@ -548,4 +556,173 @@ export const socialCommentsRouter = createTRPCRouter({
       commentsCount: commentsRow?.count ?? 0,
     };
   }),
+
+  // ---- Public thread coaching ----
+
+  coach: protectedProcedure
+    .input(z.object({ commentId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      await checkAIMessageLimit(ctx.db, ctx.creatorId);
+
+      const config = await resolveAIConfig(ctx.db, ctx.creatorId, "coaching");
+      if (!config) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "No has configurado tu proveedor de IA para coaching.",
+        });
+      }
+
+      const comment = await ctx.db.query.socialComments.findFirst({
+        where: and(
+          eq(socialComments.id, input.commentId),
+          eq(socialComments.creatorId, ctx.creatorId)
+        ),
+        with: { post: true },
+      });
+      if (!comment) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Comentario no encontrado",
+        });
+      }
+
+      const creator = await ctx.db.query.creators.findFirst({
+        where: eq(creators.id, ctx.creatorId),
+        columns: { settings: true },
+      });
+      const settings = (creator?.settings ?? {}) as Record<string, unknown>;
+      const responseLanguage =
+        (settings.responseLanguage as string) || undefined;
+
+      const threadComments = await ctx.db.query.socialComments.findMany({
+        where: eq(socialComments.postId, comment.postId),
+        orderBy: (c, { asc }) => [asc(c.createdAt)],
+        limit: 50,
+      });
+      const thread = threadComments
+        .filter((c) => c.id !== comment.id)
+        .map((c) => ({
+          author: c.authorUsername,
+          content: c.content,
+          role: c.role as "fan" | "creator",
+        }));
+
+      const { generatePublicCoaching } = await import(
+        "@/server/services/public-thread-coach"
+      );
+      const coachResult = await generatePublicCoaching(config, {
+        platformType: comment.platformType,
+        postContext: {
+          title: comment.post.title,
+          content: comment.post.content,
+          url: comment.post.url,
+        },
+        thread,
+        focusComment: {
+          author: comment.authorUsername,
+          content: comment.content,
+        },
+        language: responseLanguage,
+      });
+
+      if (!coachResult) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message:
+            "El modelo no devolvió un JSON parseable para el coaching. Reintenta o cambia de proveedor.",
+        });
+      }
+
+      await ctx.db.insert(aiUsageLog).values({
+        creatorId: ctx.creatorId,
+        requestType: "coaching" as const,
+        tokensUsed: coachResult.tokensUsed,
+        modelUsed: `${config.provider}/${config.model}`,
+      });
+
+      return coachResult.result;
+    }),
+
+  // ---- Moderation ----
+
+  setModerationStatus: protectedProcedure
+    .input(
+      z.object({
+        id: z.string().uuid(),
+        status: z.enum(["visible", "hidden", "reported"]),
+        reason: z.string().max(500).optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const existing = await ctx.db.query.socialComments.findFirst({
+        where: and(
+          eq(socialComments.id, input.id),
+          eq(socialComments.creatorId, ctx.creatorId)
+        ),
+      });
+      if (!existing) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Comentario no encontrado",
+        });
+      }
+
+      const wasHiddenLike =
+        existing.moderationStatus === "hidden" ||
+        existing.moderationStatus === "reported";
+      const willBeHiddenLike =
+        input.status === "hidden" || input.status === "reported";
+
+      const [updated] = await ctx.db
+        .update(socialComments)
+        .set({
+          moderationStatus: input.status,
+          moderatedAt: input.status === "visible" ? null : new Date(),
+          moderatedById:
+            input.status === "visible" ? null : ctx.actingUserId,
+          moderationReason:
+            input.status === "visible" ? null : input.reason ?? null,
+        })
+        .where(eq(socialComments.id, input.id))
+        .returning();
+
+      // Hidden + reported pending comments do not count as unhandled either,
+      // so adjust the post's unhandledCount when the visibility flips.
+      if (wasHiddenLike !== willBeHiddenLike && !existing.isHandled) {
+        const delta = willBeHiddenLike ? -1 : 1;
+        await ctx.db
+          .update(socialPosts)
+          .set({
+            unhandledCount: sql`GREATEST(0, ${socialPosts.unhandledCount} + ${delta})`,
+          })
+          .where(eq(socialPosts.id, existing.postId));
+      }
+
+      publishEvent(ctx.creatorId, {
+        type: "comment_handled",
+        data: {
+          commentId: input.id,
+          postId: existing.postId,
+          moderationStatus: input.status,
+        },
+      }).catch(() => {});
+
+      if (ctx.teamRole) {
+        logTeamAction(ctx.db, {
+          creatorId: ctx.creatorId,
+          userId: ctx.actingUserId,
+          userName: ctx.session!.user.name ?? "Unknown",
+          action: `comment.moderation_${input.status}`,
+          entityType: "social_comment",
+          entityId: input.id,
+          details: {
+            postId: existing.postId,
+            previous: existing.moderationStatus,
+            reason: input.reason,
+          },
+        });
+      }
+
+      return updated;
+    }),
 });

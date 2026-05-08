@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/lib/trpc";
+import { CoachingPublicModal } from "@/components/comments/coaching-public-modal";
 
 type Props = {
   postId: string;
@@ -56,6 +57,37 @@ export function CommentThreadPanel({ postId }: Props) {
       utils.socialComments.listComments.invalidate({ postId });
       utils.socialComments.listPosts.invalidate();
       utils.socialComments.overview.invalidate();
+    },
+  });
+
+  const setModeration = trpc.socialComments.setModerationStatus.useMutation({
+    onSuccess: () => {
+      utils.socialComments.listComments.invalidate({ postId });
+      utils.socialComments.listPosts.invalidate();
+      utils.socialComments.overview.invalidate();
+    },
+  });
+
+  const [coachingResult, setCoachingResult] = useState<
+    | {
+        situationRead: string;
+        audienceRisk: "low" | "medium" | "high";
+        suggestedTone: string;
+        tactics: {
+          name: string;
+          description: string;
+          example: string;
+          riskLevel: "low" | "medium" | "high";
+        }[];
+        whatToAvoid: string[];
+        suggestedNextMove: string;
+      }
+    | null
+  >(null);
+
+  const coach = trpc.socialComments.coach.useMutation({
+    onSuccess: (data) => {
+      setCoachingResult(data);
     },
   });
 
@@ -172,6 +204,19 @@ export function CommentThreadPanel({ postId }: Props) {
                           {c.isHandled ? "Resuelto" : "Pendiente"}
                         </span>
                       )}
+                      {(c.moderationStatus === "reported" ||
+                        c.moderationStatus === "hidden") && (
+                        <span
+                          className={cn(
+                            "rounded-full px-2 py-0.5 text-xs",
+                            c.moderationStatus === "reported"
+                              ? "bg-red-500/20 text-red-300"
+                              : "bg-gray-700 text-gray-500"
+                          )}
+                        >
+                          {c.moderationStatus === "reported" ? "🚩 Reportado" : "🔒 Oculto"}
+                        </span>
+                      )}
                       <span className="ml-auto text-xs text-gray-500">
                         {new Date(c.createdAt).toLocaleString("es-ES", {
                           day: "2-digit",
@@ -222,13 +267,23 @@ export function CommentThreadPanel({ postId }: Props) {
               <div className="text-gray-200">{activeComment.content}</div>
             </div>
 
-            <button
-              onClick={() => suggest.mutate({ commentId: activeComment.id })}
-              disabled={suggest.isPending}
-              className="mb-3 w-full rounded-md bg-indigo-600 px-3 py-2 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
-            >
-              {suggest.isPending ? "Generando..." : "✨ Sugerir respuesta IA"}
-            </button>
+            <div className="mb-3 grid grid-cols-2 gap-2">
+              <button
+                onClick={() => suggest.mutate({ commentId: activeComment.id })}
+                disabled={suggest.isPending}
+                className="rounded-md bg-indigo-600 px-3 py-2 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+              >
+                {suggest.isPending ? "Generando..." : "✨ Sugerir respuesta"}
+              </button>
+              <button
+                onClick={() => coach.mutate({ commentId: activeComment.id })}
+                disabled={coach.isPending}
+                className="rounded-md bg-purple-600 px-3 py-2 text-xs font-medium text-white hover:bg-purple-500 disabled:opacity-50"
+                title="Análisis estratégico del hilo público"
+              >
+                {coach.isPending ? "Analizando..." : "🧭 Coaching IA"}
+              </button>
+            </div>
 
             {variants && (
               <div className="mb-3 space-y-2">
@@ -285,6 +340,63 @@ export function CommentThreadPanel({ postId }: Props) {
               </button>
             </div>
 
+            <div className="mt-3 flex items-center justify-between border-t border-gray-800 pt-3">
+              <span className="text-xs text-gray-500">Moderación:</span>
+              <div className="flex gap-1">
+                {activeComment.moderationStatus !== "visible" && (
+                  <button
+                    onClick={() =>
+                      setModeration.mutate({
+                        id: activeComment.id,
+                        status: "visible",
+                      })
+                    }
+                    disabled={setModeration.isPending}
+                    className="rounded-md bg-gray-800 px-2 py-1 text-[11px] text-gray-300 hover:bg-gray-700 disabled:opacity-50"
+                    title="Restaurar"
+                  >
+                    Restaurar
+                  </button>
+                )}
+                {activeComment.moderationStatus !== "reported" && (
+                  <button
+                    onClick={() =>
+                      setModeration.mutate({
+                        id: activeComment.id,
+                        status: "reported",
+                      })
+                    }
+                    disabled={setModeration.isPending}
+                    className="rounded-md bg-red-500/20 px-2 py-1 text-[11px] text-red-300 hover:bg-red-500/30 disabled:opacity-50"
+                    title="Marcar como reportado (sigue visible)"
+                  >
+                    🚩 Reportar
+                  </button>
+                )}
+                {activeComment.moderationStatus !== "hidden" && (
+                  <button
+                    onClick={() => {
+                      if (
+                        confirm(
+                          "¿Ocultar este comentario de la lista? Se podrá restaurar después."
+                        )
+                      ) {
+                        setModeration.mutate({
+                          id: activeComment.id,
+                          status: "hidden",
+                        });
+                      }
+                    }}
+                    disabled={setModeration.isPending}
+                    className="rounded-md bg-gray-700 px-2 py-1 text-[11px] text-gray-300 hover:bg-gray-600 disabled:opacity-50"
+                    title="Ocultar de la lista"
+                  >
+                    🔒 Ocultar
+                  </button>
+                )}
+              </div>
+            </div>
+
             <p className="mt-3 text-xs text-gray-500">
               La respuesta se publicará en el hilo. Sin presión comercial; el AI
               está calibrado para tono público.
@@ -292,6 +404,17 @@ export function CommentThreadPanel({ postId }: Props) {
           </div>
         )}
       </div>
+
+      {coachingResult && (
+        <CoachingPublicModal
+          result={coachingResult}
+          onApplyExample={(example) => {
+            setReplyDraft(example);
+            setCoachingResult(null);
+          }}
+          onClose={() => setCoachingResult(null)}
+        />
+      )}
     </div>
   );
 }
