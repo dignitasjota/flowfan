@@ -646,12 +646,14 @@ Pull-based ingestion for Reddit (no OAuth callback needed thanks to script-type 
 
 **tRPC** (`src/server/api/routers/social-comments.ts`):
 - `listPosts` — filters by platform and `onlyWithUnhandled`; ordered by unhandled count + recency.
-- `getPost`, `listComments` (per post, optional `onlyUnhandled`).
+- `getPost`, `listComments` (per post, optional `onlyUnhandled`, `includeHidden`). By default `hidden` comments are excluded; `reported` always show up so the creator can review them.
 - `createPost` (manager) — manual post creation for testing/external workflows.
 - `createComment` — auto-links author via `linkOrCreateCommentAuthor`, enqueues analysis, publishes SSE.
 - `replyToComment` — inserts a `role = "creator"` child comment + auto-marks parent as handled + decrements `unhandledCount` + publishes SSE.
 - `markHandled` — toggle handled state with delta on post counter + publishes SSE.
+- `setModerationStatus` — sets `moderationStatus` to `visible | hidden | reported` with optional `reason`. Records `moderatedAt`/`moderatedById`, audit-logs the action, and adjusts `unhandledCount` when a pending comment is hidden/reported (so it stops counting as pending).
 - `suggest` — generate AI variants for a specific comment.
+- `coach` — public-thread coaching (see "Public-Thread Coaching" below).
 - `overview` — counters for header (posts, comments, unhandled).
 
 **REST** (`src/app/api/v1/comments/route.ts`):
@@ -662,11 +664,34 @@ Pull-based ingestion for Reddit (no OAuth callback needed thanks to script-type 
 
 `RealtimeEventType` extended with `new_comment` and `comment_handled`. Published from `createComment`, `replyToComment`, `markHandled`, the REST endpoint, and the Reddit poller. The shared `useRealtime` hook invalidates `socialComments.{listPosts,listComments,getPost,overview}` and shows a browser `Notification` when the tab is hidden and a fan (not creator) comments.
 
+### Public-Thread Coaching (`src/server/services/public-thread-coach.ts`)
+
+Strategic AI analysis for replying in public threads. Optimized for **brand reputation**, not private conversion — explicitly avoids price talk, DM nudges, anything that could be screenshotted against the creator.
+
+- `generatePublicCoaching(config, input)` — input includes platform, post context (title/content/url), the recent thread (last 50 comments) and the focus comment. Output is a strict JSON parsed via the same tolerant `tryParseCoaching` pattern (strip `<think>`, accept ```` ```json ```` fences, slice between `{...}`).
+- Output shape:
+  - `situationRead` — 2-3 sentence read of the thread.
+  - `audienceRisk` — `low | medium | high` (risk of damaging the brand if mishandled).
+  - `suggestedTone` — short phrase (e.g. "cálido y breve", "asertivo sin defenderse", "ignorar").
+  - `tactics[]` — 3-5 named tactics with `description`, `example` (literal copy-pasteable reply) and `riskLevel`.
+  - `whatToAvoid[]` — 2-4 concrete things not to say.
+  - `suggestedNextMove` — single recommended action ("respond now", "wait", "ignore", etc).
+- The router endpoint `socialComments.coach` resolves AI config for task `"coaching"`, enforces `checkAIMessageLimit`, and logs token usage.
+- UI: `CoachingPublicModal` with risk badge, expandable tactics with **"Usar este ejemplo"** button that fills the reply textarea, what-to-avoid card, and next-move highlight.
+
+### Moderation
+
+- Schema: `commentModerationStatusEnum = visible | hidden | reported` plus `moderatedAt`, `moderatedById`, `moderationReason` columns.
+- `hidden` removes the comment from default listings (creator-side only — does not affect the original platform). `reported` keeps it visible with a 🚩 badge so the creator can review and decide.
+- Setting a pending comment to `hidden`/`reported` decrements `unhandledCount` (so it stops counting as work to do); flipping back to `visible` increments it again.
+- All transitions audit-logged (`comment.moderation_visible | hidden | reported`).
+- UI: discrete buttons in the reply panel (Restaurar / 🚩 Reportar / 🔒 Ocultar with confirm). Comments themselves show 🚩/🔒 pills inline.
+
 ### UI (`src/app/(dashboard)/comments/page.tsx`)
 
 - 2-panel responsive layout: left `PostsList` with stats and filters; center `CommentThreadPanel`.
-- Thread view: chronological with creator replies indented. Handled/pending badges, contact-linked indicator, profile chips (engagement / payment / funnel).
-- Reply panel: AI suggest button → 3 colored variants → click to apply → textarea → publish or mark handled.
+- Thread view: chronological with creator replies indented. Handled/pending badges, contact-linked indicator, profile chips (engagement / payment / funnel), moderation pills (🚩/🔒).
+- Reply panel: 2-column header with **✨ Sugerir respuesta** (`suggest` mutation, 3 colored variants) and **🧭 Coaching IA** (full thread analysis modal). Reply textarea, Responder/Resuelto buttons, plus a moderation row.
 - Sidebar link "🗨️ Comentarios" (access: all team members).
 - Auto-refreshes via SSE — no manual reload needed when comments arrive from polling or external ingestion.
 
@@ -727,6 +752,7 @@ Lightweight rule subset (no full RFC5545):
 - **Composer** (`post-composer.tsx`): platform selector (disabled if not connected), title, content, datetime-local picker.
   - **Reddit block**: subreddit input, kind selector (Texto / Enlace / Imagen) with conditional URL field for link/image.
   - **Twitter / X block**: main tweet textarea (270 char counter) + editable thread list with "+ Añadir al hilo" / ✕ delete per row. `platformConfigs.twitter = {tweet, thread[]}` rides intact in the `post.publishing` webhook payload so Zapier / Make can post as a native thread on X.
+  - **Per-platform preview** (`post-preview.tsx`): toggle row with one button per selected platform; click renders an approximate preview in the platform's native style — Reddit subreddit card with title + body / link / image, Twitter / X numbered thread with avatar and per-tweet char count, Instagram caption + handle + media placeholder.
   - **Recurrence**: "Repetir publicación" toggle reveals a recurrence form (frequency tabs, day-of-week / day-of-month picker, hour/minute UTC, optional `until` datetime and/or `maxCount` cap).
 - **Accounts** (`accounts-panel.tsx`): per-platform card; Reddit form for native (4-field credentials), button "Vía webhook" for the rest.
 - Sidebar link "📅 Scheduler" (access: manager+).
@@ -785,6 +811,7 @@ Tabla viva, no exhaustiva:
 | `scheduled_post.rescheduled` | scheduler router | newScheduleAt |
 | `comment.replied` | social-comments router | postId, replyId, platform |
 | `comment.marked_handled` / `comment.marked_pending` | social-comments router | postId |
+| `comment.moderation_visible` / `comment.moderation_hidden` / `comment.moderation_reported` | social-comments router | postId, previous status, reason |
 | (plus the existing team / billing / contact / message actions) | various | — |
 
 When adding a new mutation, follow the same pattern: import `logTeamAction`, gate on `ctx.teamRole`, fire after the DB write succeeds.
