@@ -1140,16 +1140,20 @@ const scheduledPostWorker = new Worker<ScheduledPostJobData>(
           errors[platform] = "Account has no stored credentials";
           continue;
         }
-        const result = await publishToReddit(account.encryptedCredentials, {
-          title: post.title ?? "(untitled)",
-          content: post.content,
-          subreddit: cfg.subreddit,
-          kind: cfg.kind ?? "self",
-          url: cfg.url,
-          flairId: cfg.flairId,
-          nsfw: cfg.nsfw,
-          spoiler: cfg.spoiler,
-        });
+        const result = await publishToReddit(
+          account.encryptedCredentials,
+          {
+            title: post.title ?? "(untitled)",
+            content: post.content,
+            subreddit: cfg.subreddit,
+            kind: cfg.kind ?? "self",
+            url: cfg.url,
+            flairId: cfg.flairId,
+            nsfw: cfg.nsfw,
+            spoiler: cfg.spoiler,
+          },
+          creatorId
+        );
         if (result.success) {
           externalIds[platform] = {
             id: result.externalId,

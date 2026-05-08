@@ -1,3 +1,4 @@
+import { Redis } from "ioredis";
 import { decrypt } from "@/lib/crypto";
 
 export type RedditCredentials = {
@@ -7,6 +8,29 @@ export type RedditCredentials = {
   password: string;
   userAgent?: string;
 };
+
+// ---- Redis token cache (50 min TTL — Reddit OAuth tokens last 60 min) ----
+
+const TOKEN_TTL_SECONDS = 50 * 60;
+
+let cacheRedis: Redis | null = null;
+
+function getCacheRedis(): Redis {
+  if (!cacheRedis) {
+    cacheRedis = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379", {
+      maxRetriesPerRequest: 1,
+      lazyConnect: true,
+    });
+    cacheRedis.on("error", () => {
+      // Cache failures should never break publishing — fall through to fetch
+    });
+  }
+  return cacheRedis;
+}
+
+function tokenCacheKey(creatorId: string): string {
+  return `reddit:token:${creatorId}`;
+}
 
 export type PublishResult = {
   success: boolean;
@@ -28,6 +52,48 @@ export function decryptRedditCredentials(
  * Get a fresh OAuth token from Reddit using password grant
  * (script-type apps only — requires client_id+secret + user/pass).
  */
+/**
+ * Get a Reddit OAuth token using a Redis-cached value when available.
+ * Cache miss → fetch fresh token + store with 50-min TTL.
+ * If `creatorId` is omitted, falls through to a direct uncached fetch.
+ */
+export async function getRedditAccessTokenCached(
+  creatorId: string | null,
+  creds: RedditCredentials
+): Promise<string> {
+  if (!creatorId) {
+    return getRedditAccessToken(creds);
+  }
+  try {
+    const cached = await getCacheRedis().get(tokenCacheKey(creatorId));
+    if (cached) return cached;
+  } catch {
+    // Redis miss / down — continue to fetch
+  }
+
+  const token = await getRedditAccessToken(creds);
+  try {
+    await getCacheRedis().set(tokenCacheKey(creatorId), token, "EX", TOKEN_TTL_SECONDS);
+  } catch {
+    // Cache write failure is non-fatal
+  }
+  return token;
+}
+
+/**
+ * Invalidate a creator's cached Reddit token. Call this when credentials
+ * change or when an authenticated request fails with 401.
+ */
+export async function invalidateRedditTokenCache(
+  creatorId: string
+): Promise<void> {
+  try {
+    await getCacheRedis().del(tokenCacheKey(creatorId));
+  } catch {
+    // ignore
+  }
+}
+
 export async function getRedditAccessToken(
   creds: RedditCredentials
 ): Promise<string> {
@@ -76,7 +142,9 @@ export async function publishToReddit(
     flairId?: string;
     nsfw?: boolean;
     spoiler?: boolean;
-  }
+  },
+  /** When provided, the OAuth token is cached in Redis for 50 min */
+  creatorId?: string
 ): Promise<PublishResult> {
   let creds: RedditCredentials;
   try {
@@ -91,7 +159,7 @@ export async function publishToReddit(
 
   let token: string;
   try {
-    token = await getRedditAccessToken(creds);
+    token = await getRedditAccessTokenCached(creatorId ?? null, creds);
   } catch (err) {
     return { success: false, error: (err as Error).message };
   }
@@ -135,6 +203,11 @@ export async function publishToReddit(
 
     if (!response.ok) {
       const text = await response.text().catch(() => "");
+      // 401 means the cached token is stale (revoked / pwd changed).
+      // Invalidate so the next call refetches a fresh one.
+      if (response.status === 401 && creatorId) {
+        await invalidateRedditTokenCache(creatorId);
+      }
       return {
         success: false,
         error: `Reddit submit failed (${response.status}): ${text.slice(0, 300)}`,

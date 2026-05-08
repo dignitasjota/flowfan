@@ -33,6 +33,8 @@ type ComposerPreset = {
   content: string;
   platform: Platform;
   redditUrl?: string;
+  twitterTweet?: string;
+  twitterThread?: string[];
 };
 
 export default function BlogToSocialPage() {
@@ -112,6 +114,8 @@ export default function BlogToSocialPage() {
       setComposerPreset({
         content: fullThread,
         platform: "twitter",
+        twitterTweet: d.tweet,
+        twitterThread: d.thread,
       });
     } else {
       const captionWithTags = `${d.caption}\n\n${d.hashtags.join(" ")}`.trim();
@@ -255,6 +259,8 @@ export default function BlogToSocialPage() {
             title: composerPreset.title,
             content: composerPreset.content,
             platforms: [composerPreset.platform],
+            twitterTweet: composerPreset.twitterTweet,
+            twitterThread: composerPreset.twitterThread,
           }}
         />
       )}

@@ -20,6 +20,8 @@ type Props = {
     content?: string;
     platforms?: ("reddit" | "twitter" | "instagram")[];
     redditSubreddit?: string;
+    twitterTweet?: string;
+    twitterThread?: string[];
   };
 };
 
@@ -62,6 +64,10 @@ export function PostComposer({
   const [subreddit, setSubreddit] = useState(
     initialValues?.redditSubreddit ?? ""
   );
+  const [tweetMain, setTweetMain] = useState(initialValues?.twitterTweet ?? "");
+  const [tweetThread, setTweetThread] = useState<string[]>(
+    initialValues?.twitterThread ?? []
+  );
   const [redditKind, setRedditKind] = useState<RedditKind>("self");
   const [redditUrl, setRedditUrl] = useState("");
   const [recurring, setRecurring] = useState(false);
@@ -97,10 +103,6 @@ export function PostComposer({
       setErrorMsg("Selecciona al menos una plataforma.");
       return;
     }
-    if (!content.trim()) {
-      setErrorMsg("El contenido no puede estar vacío.");
-      return;
-    }
     const date = new Date(scheduleAt);
     if (Number.isNaN(date.getTime())) {
       setErrorMsg("Fecha inválida.");
@@ -126,6 +128,31 @@ export function PostComposer({
         kind: redditKind,
         ...(redditKind !== "self" ? { url: redditUrl.trim() } : {}),
       };
+    }
+
+    let twitterContentForFlatten: string | undefined;
+    if (selected.has("twitter")) {
+      const mainTweet = tweetMain.trim() || content.trim();
+      if (!mainTweet) {
+        setErrorMsg("Para Twitter / X necesitas al menos el tweet principal.");
+        return;
+      }
+      const cleanThread = tweetThread
+        .map((t) => t.trim())
+        .filter((t) => t.length > 0);
+      const tooLong = [mainTweet, ...cleanThread].find((t) => t.length > 270);
+      if (tooLong) {
+        setErrorMsg(
+          `Twitter/X limita a 270 caracteres por tweet. Hay un tweet con ${tooLong.length}.`
+        );
+        return;
+      }
+      platformConfigs.twitter = {
+        tweet: mainTweet,
+        thread: cleanThread,
+      };
+      // Flatten for content fallback (other platforms / general consumers)
+      twitterContentForFlatten = [mainTweet, ...cleanThread].join("\n\n");
     }
 
     let recurrenceRule:
@@ -161,9 +188,19 @@ export function PostComposer({
       }
     }
 
+    const finalContent =
+      content.trim() ||
+      twitterContentForFlatten ||
+      tweetMain.trim() ||
+      "";
+    if (!finalContent) {
+      setErrorMsg("El contenido no puede estar vacío.");
+      return;
+    }
+
     create.mutate({
       title: title.trim() || undefined,
-      content: content.trim(),
+      content: finalContent,
       targetPlatforms: platforms as ("reddit" | "twitter" | "instagram")[],
       scheduleAt: date,
       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
@@ -308,6 +345,86 @@ export function PostComposer({
                 )}
               </label>
             )}
+          </div>
+        )}
+
+        {selected.has("twitter") && (
+          <div className="mb-3 space-y-2 rounded-md border border-gray-800 bg-gray-950/40 p-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-gray-300">
+                🐦 Thread Twitter / X
+              </span>
+              <span className="text-xs text-gray-500">
+                {tweetThread.length} tweets en hilo
+              </span>
+            </div>
+
+            <label className="block">
+              <span className="mb-1 block text-xs text-gray-500">
+                Tweet principal
+              </span>
+              <textarea
+                value={tweetMain}
+                onChange={(e) => setTweetMain(e.target.value)}
+                maxLength={270}
+                rows={2}
+                placeholder="Tu primer tweet (máx 270 chars)"
+                className="w-full rounded-md border border-gray-700 bg-gray-800 px-2 py-1 text-xs text-white placeholder-gray-500 focus:border-indigo-500 focus:outline-none"
+              />
+              <span className="mt-0.5 block text-[10px] text-gray-500">
+                {tweetMain.length}/270
+              </span>
+            </label>
+
+            {tweetThread.length > 0 && (
+              <div className="space-y-1.5">
+                {tweetThread.map((t, idx) => (
+                  <div key={idx} className="flex items-start gap-2">
+                    <span className="mt-1 text-[10px] text-gray-500">
+                      {idx + 2}/
+                    </span>
+                    <textarea
+                      value={t}
+                      onChange={(e) => {
+                        const next = [...tweetThread];
+                        next[idx] = e.target.value;
+                        setTweetThread(next);
+                      }}
+                      maxLength={270}
+                      rows={2}
+                      placeholder={`Tweet ${idx + 2} del hilo`}
+                      className="flex-1 rounded-md border border-gray-700 bg-gray-800 px-2 py-1 text-xs text-white placeholder-gray-500 focus:border-indigo-500 focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setTweetThread(
+                          tweetThread.filter((_, i) => i !== idx)
+                        )
+                      }
+                      className="mt-1 rounded p-1 text-gray-500 hover:bg-red-500/20 hover:text-red-300"
+                      title="Eliminar tweet"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={() => setTweetThread([...tweetThread, ""])}
+              className="rounded-md bg-gray-800 px-2 py-1 text-xs text-gray-300 hover:bg-gray-700"
+            >
+              + Añadir al hilo
+            </button>
+
+            <p className="text-[11px] text-gray-500">
+              El payload del webhook <code>post.publishing</code> incluye
+              <code> tweet </code>y<code> thread[] </code>para que Zapier /
+              Make publiquen como hilo nativo en X.
+            </p>
           </div>
         )}
 

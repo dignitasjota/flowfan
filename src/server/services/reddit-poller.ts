@@ -5,7 +5,7 @@ import {
   socialComments,
 } from "@/server/db/schema";
 import {
-  getRedditAccessToken,
+  getRedditAccessTokenCached,
   decryptRedditCredentials,
   REDDIT_USER_AGENT,
 } from "./scheduler-publisher";
@@ -100,7 +100,7 @@ export async function pollRedditCommentsForCreator(
   let token: string;
   try {
     const creds = decryptRedditCredentials(account.encryptedCredentials);
-    token = await getRedditAccessToken(creds);
+    token = await getRedditAccessTokenCached(account.creatorId, creds);
   } catch (err) {
     log.warn(
       { err, creatorId: account.creatorId },
