@@ -304,7 +304,7 @@ Red pill (`99+` clamp) shown next to navigation items with pending work:
 ## Settings (`src/app/(dashboard)/settings/page.tsx`)
 
 Tabs:
-1. **Personalidad** — Per-platform personality configuration (role, tone, style, goals, restrictions, example messages)
+1. **Personalidad** — Per-platform personality configuration (role, tone, style, goals, restrictions, example messages). Includes a **Voice/Brand presets grid** at the top: 5 starter presets (`PERSONALITY_PRESETS` in `personality-presets.tsx` — Friendly / Professional / Quirky / Provocative / Mysterious) with predefined values for `tone`, `style`, `messageLength`, `goals`, `restrictions`, `customInstructions`. Click applies the values to the form for the creator to edit on top.
 2. **Instrucciones globales** — Global AI instructions + language settings (response language + analysis language dropdowns)
 3. **Modos conversacion** — OnlyFans conversation modes configuration + A/B experiments section
 4. **Modelo IA** — AI provider and model selection per task
@@ -399,6 +399,24 @@ Returns:
 - Per-platform card grid: platform header, mini stats (engagement / payment / conversion / revenue), funnel distribution as a stacked colored bar with legend chips, top topics as indigo pills with frequency.
 - Empty state when no data has been accumulated yet.
 - Sidebar link "📈 Insights" (access: manager+).
+
+## Unified Calendar
+
+### API (`intelligence.unifiedCalendar`)
+
+Single tRPC query that joins `scheduledPosts` + `scheduledMessages` for a given month and returns events with a discriminated `type`:
+- `{type: "post", id, date, title, content, status, platforms[], isRecurring}` — from `scheduledPosts`.
+- `{type: "message", id, date, title, content, status, platforms[], contactName}` — from `scheduledMessages` joined with `contacts` to surface the recipient name.
+
+Sorted by date ascending. Limited per-month query keeps payloads small.
+
+### UI (`src/app/(dashboard)/calendar/page.tsx`)
+
+- Month grid 7×6, same shape as the scheduler calendar but rendering heterogeneous events.
+- Chips are differentiated by icon (📅 post / 💬 message) plus platform glyph, status color, and the `↻` glyph for recurring posts.
+- Click on a chip routes to `/scheduler` or `/scheduled` based on the event type.
+- Filter pills at the top to toggle posts / messages.
+- Sidebar link "🗓️ Calendario" (access: manager+).
 
 ## Sequences and Follow-Up
 
@@ -666,14 +684,15 @@ Schedule public posts to native APIs (Reddit) or to any platform via outgoing we
 ### Reddit Publisher (`src/server/services/scheduler-publisher.ts`)
 
 - `verifyRedditCredentials(creds)` — auth handshake + `/api/v1/me` check, returns `{ok, username}`.
-- `publishToReddit(encryptedCreds, post)` — decrypts, OAuth password grant, `POST /api/submit`. Supports three kinds:
+- `publishToReddit(encryptedCreds, post, creatorId?)` — decrypts, OAuth password grant (cached when `creatorId` passed), `POST /api/submit`. Supports three kinds:
   - `kind: "self"` (default) — text post; sends `text` field with the content.
   - `kind: "link"` — link to an external URL; requires `url`. Sends `resubmit=true`.
   - `kind: "image"` — image post via public URL; requires `url`. Reddit accepts external public URLs (i.imgur, redd.it, S3...) directly without the `media/asset.json` upload flow. The URL must be publicly accessible or Reddit rejects the submission.
-  - Returns `{success, externalId, externalUrl, error}`.
+  - Returns `{success, externalId, externalUrl, error}`. On 401, invalidates the cached token automatically.
 - Title trimmed to 300 chars; supports `flair_id`, `nsfw`, `spoiler` flags.
 - User-Agent: `FanFlow/1.0 (by /u/fanflow)`.
-- Exports `getRedditAccessToken`, `decryptRedditCredentials`, and `REDDIT_USER_AGENT` for reuse by the comment poller.
+- **OAuth token cache (Redis)**: `getRedditAccessTokenCached(creatorId, creds)` stores tokens with 50-min TTL (Reddit tokens last 60 min — 10-min cushion). Cache miss → fetch + store. Failures fall through to direct fetch silently. `invalidateRedditTokenCache(creatorId)` for forced refresh on 401. Both publisher and `reddit-poller` use the cached version, going from ~289 token fetches/day per account to ~30.
+- Exports `getRedditAccessToken`, `getRedditAccessTokenCached`, `invalidateRedditTokenCache`, `decryptRedditCredentials`, `REDDIT_USER_AGENT`.
 
 ### Recurrence (`src/server/services/recurrence.ts`)
 
@@ -705,10 +724,13 @@ Lightweight rule subset (no full RFC5545):
 - 3 tabs: 📅 Calendario / 📋 Lista / 🔗 Cuentas.
 - **Calendar** (`scheduler-calendar.tsx`): month grid 7×6, post chips colored by status, click chip opens detail, click empty day opens composer pre-filled with date. Recurring posts show a `↻` glyph in the chip.
 - **List** — sortable table with status badges and inline detail view; recurring posts show a `↻` purple pill next to the title.
-- **Composer** (`post-composer.tsx`): platform selector (disabled if not connected), title, content, datetime-local picker. Reddit block expands with: subreddit input, kind selector (Texto / Enlace / Imagen) with conditional URL field for link/image. "Repetir publicación" toggle reveals a recurrence form (frequency tabs, day-of-week / day-of-month picker, hour/minute UTC, optional `until` datetime and/or `maxCount` cap).
+- **Composer** (`post-composer.tsx`): platform selector (disabled if not connected), title, content, datetime-local picker.
+  - **Reddit block**: subreddit input, kind selector (Texto / Enlace / Imagen) with conditional URL field for link/image.
+  - **Twitter / X block**: main tweet textarea (270 char counter) + editable thread list with "+ Añadir al hilo" / ✕ delete per row. `platformConfigs.twitter = {tweet, thread[]}` rides intact in the `post.publishing` webhook payload so Zapier / Make can post as a native thread on X.
+  - **Recurrence**: "Repetir publicación" toggle reveals a recurrence form (frequency tabs, day-of-week / day-of-month picker, hour/minute UTC, optional `until` datetime and/or `maxCount` cap).
 - **Accounts** (`accounts-panel.tsx`): per-platform card; Reddit form for native (4-field credentials), button "Vía webhook" for the rest.
 - Sidebar link "📅 Scheduler" (access: manager+).
-- **`PostComposer`** accepts an optional `initialValues` prop (`{title?, content?, platforms?, redditSubreddit?}`) so other pages (notably Blog-to-Social) can open it pre-filled.
+- **`PostComposer`** accepts an optional `initialValues` prop (`{title?, content?, platforms?, redditSubreddit?, twitterTweet?, twitterThread?}`) so other pages (notably Blog-to-Social) can open it pre-filled. Twitter drafts open with the thread editable as separate tweets, not flatten text.
 
 ## Blog-to-Social (AI repurposing)
 
