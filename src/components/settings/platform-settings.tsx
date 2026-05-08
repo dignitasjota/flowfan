@@ -3,6 +3,10 @@
 import { useState, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
 import { PLATFORM_OPTIONS, type PlatformType } from "@/lib/constants";
+import {
+  PersonalityPresets,
+  type PresetValues,
+} from "@/components/settings/personality-presets";
 
 export function PlatformSettings() {
   const [selectedPlatform, setSelectedPlatform] =
@@ -115,6 +119,17 @@ export function PlatformSettings() {
           </button>
         ))}
       </div>
+
+      <PersonalityPresets
+        onApply={(values: PresetValues) => {
+          setTone(values.tone);
+          setStyle(values.style);
+          setMessageLength(values.messageLength);
+          setGoals(values.goals);
+          setRestrictions(values.restrictions);
+          setCustomInstructions(values.customInstructions);
+        }}
+      />
 
       {/* Config form */}
       <form onSubmit={handleSave} className="max-w-2xl space-y-5">

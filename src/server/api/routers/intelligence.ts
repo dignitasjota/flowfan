@@ -748,4 +748,115 @@ export const intelligenceRouter = createTRPCRouter({
         sinceDays: input?.sinceDays ?? 30,
       });
     }),
+
+  // ============================================================
+  // Unified Calendar (scheduled posts + scheduled messages)
+  // ============================================================
+
+  unifiedCalendar: protectedProcedure
+    .input(
+      z.object({
+        year: z.number().int(),
+        month: z.number().int().min(0).max(11),
+      })
+    )
+    .query(async ({ ctx, input }) => {
+      const { scheduledPosts, scheduledMessages, contacts } = await import(
+        "@/server/db/schema"
+      );
+
+      const start = new Date(input.year, input.month, 1);
+      const end = new Date(input.year, input.month + 1, 1);
+
+      const [posts, messages] = await Promise.all([
+        ctx.db.query.scheduledPosts.findMany({
+          where: and(
+            eq(scheduledPosts.creatorId, ctx.creatorId),
+            gte(scheduledPosts.scheduleAt, start),
+            lte(scheduledPosts.scheduleAt, end)
+          ),
+          columns: {
+            id: true,
+            title: true,
+            content: true,
+            scheduleAt: true,
+            status: true,
+            targetPlatforms: true,
+            recurrenceRule: true,
+          },
+        }),
+        ctx.db
+          .select({
+            id: scheduledMessages.id,
+            content: scheduledMessages.content,
+            scheduledAt: scheduledMessages.scheduledAt,
+            status: scheduledMessages.status,
+            contactUsername: contacts.username,
+            contactDisplayName: contacts.displayName,
+            platformType: contacts.platformType,
+          })
+          .from(scheduledMessages)
+          .leftJoin(contacts, eq(scheduledMessages.contactId, contacts.id))
+          .where(
+            and(
+              eq(scheduledMessages.creatorId, ctx.creatorId),
+              gte(scheduledMessages.scheduledAt, start),
+              lte(scheduledMessages.scheduledAt, end)
+            )
+          ),
+      ]);
+
+      type CalendarEvent =
+        | {
+            type: "post";
+            id: string;
+            date: Date;
+            title: string | null;
+            content: string;
+            status: string;
+            platforms: string[];
+            isRecurring: boolean;
+          }
+        | {
+            type: "message";
+            id: string;
+            date: Date;
+            title: string | null;
+            content: string;
+            status: string;
+            platforms: string[];
+            contactName: string | null;
+          };
+
+      const events: CalendarEvent[] = [
+        ...posts.map(
+          (p): CalendarEvent => ({
+            type: "post",
+            id: p.id,
+            date: p.scheduleAt,
+            title: p.title,
+            content: p.content,
+            status: p.status,
+            platforms: p.targetPlatforms ?? [],
+            isRecurring: !!p.recurrenceRule,
+          })
+        ),
+        ...messages.map(
+          (m): CalendarEvent => ({
+            type: "message",
+            id: m.id,
+            date: m.scheduledAt,
+            title: m.contactDisplayName ?? m.contactUsername ?? null,
+            content: m.content,
+            status: m.status,
+            platforms: m.platformType ? [m.platformType] : [],
+            contactName: m.contactDisplayName ?? m.contactUsername,
+          })
+        ),
+      ];
+
+      events.sort((a, b) => a.date.getTime() - b.date.getTime());
+
+      return events;
+    }),
 });

@@ -29,6 +29,7 @@ const navigation = [
   { name: "Blog → Social", href: "/blog-to-social", icon: "✨", access: "manager" as const },
   { name: "Programados", href: "/scheduled", icon: "⏰", access: "all" as const },
   { name: "Scheduler", href: "/scheduler", icon: "📅", access: "manager" as const },
+  { name: "Calendario", href: "/calendar", icon: "🗓️", access: "manager" as const },
   { name: "Broadcasts", href: "/broadcasts", icon: "📢", access: "manager" as const },
   { name: "Equipo", href: "/team", icon: "👤", access: "owner" as const },
   { name: "Billing", href: "/billing", icon: "💳", access: "owner" as const },
