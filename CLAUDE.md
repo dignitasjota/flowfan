@@ -636,6 +636,44 @@ Pull-based ingestion for Reddit (no OAuth callback needed thanks to script-type 
 - Rate limit: ~55 req/min (1.1s sleep between posts) to stay under Reddit's 60/min OAuth quota.
 - Native publishes from the scheduler are mirrored into `socialPosts` (`onConflictDoNothing`) so they automatically enter the polling pool.
 
+### Twitter / X Polling (`src/server/services/twitter-poller.ts`)
+
+Polling fallback for replies on tracked tweets:
+- 5-min tick in `worker.ts` calls `pollTwitterComments(db)`.
+- For each native+active Twitter `socialAccount`: `ensureFreshTwitterToken` (refresh + persist if expired), then iterate the 20 most recent `socialPosts` with `externalPostId`.
+- `GET /2/tweets/search/recent?query=conversation_id:{id} -from:{selfId} -is:retweet` with `expansions=author_id` and `user.fields=username,name` for handle resolution.
+- `start_time` derived from `lastCommentAt - 60s` to minimize payload without missing the polling window.
+- 1.5s sleep between posts (~40 req/min — comfortably under Twitter v2 recent search quotas).
+- Same ingest pipeline as Reddit: `linkOrCreateCommentAuthor` → insert (`source: "polling"`) → webhook → analysis → SSE.
+- Tweets published from the scheduler are mirrored into `socialPosts` so they enter the polling pool automatically.
+
+### Twitter / X Filtered Stream (real-time, opt-in)
+
+When `TWITTER_BEARER_TOKEN` is set, a persistent worker subscribes to `/2/tweets/search/stream` for **real-time replies** (sub-second latency vs the 5-min poll cycle).
+
+- **`twitter-stream-rules.ts`**: wraps `/2/tweets/search/stream/rules` with app-only bearer auth.
+  - Tag encoding `c:{creatorId}:p:{postId}` — encodes the routing in the rule itself so we can dispatch the matched tweet without an extra DB lookup. `parseRuleTag()` reverses the encoding.
+  - `syncStreamRules(db)` reconciles every 5 min: posts tracked locally but missing a rule → add; rules with stale or unknown tag → delete. Rule id persisted in `socialPosts.metadata.twitterStreamRuleId`.
+  - `addStreamRuleForPost(db, args)` for immediate insertion right after a publish, so the rule is live before the first reply lands.
+  - Batching: 25 rules per add request, 100 ids per delete request (Twitter limits).
+- **`twitter-stream-worker.ts`**: singleton `TwitterStreamRunner` with persistent HTTP connection.
+  - Reconnect with exponential backoff (2^n capped at 60 s) using `AbortController`.
+  - Streaming JSON parser: decoder + line buffer + `indexOf("\n")` (Twitter emits one object per line plus keepalive heartbeats which are blank lines).
+  - For each matched tweet: parse the rule tag → look up the target post → run the standard ingest pipeline with `source: "stream"`.
+  - Skips own-account replies defensively (also filtered at the rule level).
+- **Coexistence with the poller**: both paths run when the bearer is set. `socialComments.externalCommentId` is unique so the poller deduplicates automatically when the stream got the comment first (and vice-versa when the stream is reconnecting).
+- **Disable**: simply unset `TWITTER_BEARER_TOKEN`. The stream worker becomes a no-op at boot; rules already in Twitter remain (the next `syncStreamRules` from a future deployment will clean them).
+
+### Instagram Webhooks (`src/app/api/webhooks/instagram/route.ts`)
+
+Push-based ingestion via Meta's webhooks:
+- **GET** verification: matches `hub.verify_token` against `META_WEBHOOK_VERIFY_TOKEN`, echoes `hub.challenge` back. Configured once in the FB app's Webhooks dashboard.
+- **POST** event delivery:
+  1. Validates `X-Hub-Signature-256` (HMAC SHA-256 of the raw body using `META_WEBHOOK_APP_SECRET`) with a constant-time compare.
+  2. For each `entry.id` (= Instagram Business Account id), looks up the matching `socialAccount` via `externalAccountId`. Multi-creator dispatch supported.
+  3. For each `change.field === "comments"` event: lazy-creates the parent `socialPosts` row if the IG media was published outside FanFlow, deduplicates by `externalCommentId`, resolves `parent_id` for threaded replies, and runs the standard ingest pipeline (`source: "webhook"`).
+- Meta delivers retries on 5xx; idempotency guaranteed by the unique index on `(creatorId, platformType, externalCommentId)`.
+
 ### AI Service (`src/server/services/ai-comment-suggester.ts`)
 
 - `generateCommentSuggestion(config, input)` — public-context prompt with explicit restrictions (no prices, no DM nudge, short responses).
@@ -681,11 +719,17 @@ Strategic AI analysis for replying in public threads. Optimized for **brand repu
 
 ### Moderation
 
-- Schema: `commentModerationStatusEnum = visible | hidden | reported` plus `moderatedAt`, `moderatedById`, `moderationReason` columns.
-- `hidden` removes the comment from default listings (creator-side only — does not affect the original platform). `reported` keeps it visible with a 🚩 badge so the creator can review and decide.
+- Schema: `commentModerationStatusEnum = visible | hidden | reported` plus `moderatedAt`, `moderatedById`, `moderationReason`, **`platformModerationApplied: bool`** and **`platformModerationError: text`** columns.
+- `hidden` removes the comment from default listings (creator-side default). `reported` keeps it visible with a 🚩 badge so the creator can review and decide.
 - Setting a pending comment to `hidden`/`reported` decrements `unhandledCount` (so it stops counting as work to do); flipping back to `visible` increments it again.
 - All transitions audit-logged (`comment.moderation_visible | hidden | reported`).
-- UI: discrete buttons in the reply panel (Restaurar / 🚩 Reportar / 🔒 Ocultar with confirm). Comments themselves show 🚩/🔒 pills inline.
+- UI: discrete buttons in the reply panel (Restaurar / 🚩 Reportar / 🔒 Ocultar with confirm). Comments themselves show 🚩/🔒 pills inline. A checkbox **"Aplicar también en {platform}"** lives below the buttons.
+
+**Platform moderation actions (`platform-moderation.ts`)** — applied when the creator ticks the checkbox:
+- **Twitter / X**: `PUT /2/tweets/{id}/hidden` toggles `{hidden: true|false}`. The creator hides replies on their own tweet thread. Delete is not supported (the reply isn't ours).
+- **Instagram**: `DELETE /{comment-id}` (requires the new `instagram_manage_comments` scope on the OAuth token). No "hide" toggle exists for IG comments. Restoring a deleted comment is not possible via API.
+- **Reddit**: not supported — Reddit's mod API requires being a moderator of the subreddit, which is rare for creators. The UI surfaces this with an explicit "— no soportado por la API" hint.
+- Result is persisted on the comment: `platformModerationApplied = true` on success, `platformModerationError` filled on failure. Badges in the UI surface both.
 
 ### UI (`src/app/(dashboard)/comments/page.tsx`)
 
@@ -732,7 +776,8 @@ Schedule public posts to native APIs (**Reddit, Twitter / X, Instagram**) or to 
 
 ### Instagram Publisher (Facebook Login → Graph API)
 
-- **`oauth-instagram.ts`**: full chain `code → short-lived token → long-lived token (~60 days) → resolve Facebook Page → resolve Instagram Business Account id`. Scopes: `pages_show_list pages_read_engagement instagram_basic instagram_content_publish`. **Pre-condition**: creator must have an Instagram Business/Creator account linked to a Facebook Page (clear error messages otherwise).
+- **`oauth-instagram.ts`**: full chain `code → short-lived token → long-lived token (~60 days) → enumerate Facebook Pages → resolve Instagram Business Account id per page`. Scopes: `pages_show_list pages_read_engagement instagram_basic instagram_content_publish instagram_manage_comments`. **Pre-condition**: creator must have an Instagram Business/Creator account linked to a Facebook Page (clear error messages otherwise).
+- **Multi-page selection**: `exchangeInstagramCode` returns `accounts[]` with one entry per FB Page that has an IG Business account linked. The OAuth callback creates / updates one `socialAccount` per IG account (multi-account schema already supports it). The creator disables the ones they don't want from `/scheduler → Cuentas`.
 - **`instagram-publisher.ts`**: `publishToInstagram({accessToken, igUserId, imageUrl, caption})` — 2-step flow:
   1. `POST /{ig_user_id}/media` with `image_url` → container `creation_id`.
   2. `POST /{ig_user_id}/media_publish` with `creation_id` → posted media id.
@@ -841,7 +886,7 @@ Tabla viva, no exhaustiva:
 | `scheduled_post.rescheduled` | scheduler router | newScheduleAt |
 | `comment.replied` | social-comments router | postId, replyId, platform |
 | `comment.marked_handled` / `comment.marked_pending` | social-comments router | postId |
-| `comment.moderation_visible` / `comment.moderation_hidden` / `comment.moderation_reported` | social-comments router | postId, previous status, reason |
+| `comment.moderation_visible` / `comment.moderation_hidden` / `comment.moderation_reported` | social-comments router | postId, previous status, reason, alsoOnPlatform, platformApplied, platformError |
 | (plus the existing team / billing / contact / message actions) | various | — |
 
 When adding a new mutation, follow the same pattern: import `logTeamAction`, gate on `ctx.teamRole`, fire after the DB write succeeds.
