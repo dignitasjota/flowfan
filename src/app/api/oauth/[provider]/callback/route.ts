@@ -131,10 +131,14 @@ async function upsertNativeAccount(args: {
     ? encrypt(args.oauthRefreshToken)
     : null;
 
+  // Multi-account: identity is (creator, platform, externalAccountId).
+  // Same externalAccountId → re-auth of an existing account.
+  // New externalAccountId → additional account on the same platform.
   const existing = await db.query.socialAccounts.findFirst({
     where: and(
       eq(socialAccounts.creatorId, args.creatorId),
-      eq(socialAccounts.platformType, args.platformType)
+      eq(socialAccounts.platformType, args.platformType),
+      eq(socialAccounts.externalAccountId, args.externalAccountId)
     ),
   });
 

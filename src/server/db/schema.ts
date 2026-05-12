@@ -2104,9 +2104,14 @@ export const socialAccounts = pgTable(
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
   (table) => [
-    uniqueIndex("social_accounts_creator_platform_idx").on(
+    index("social_accounts_creator_platform_idx").on(
       table.creatorId,
       table.platformType
+    ),
+    uniqueIndex("social_accounts_creator_external_idx").on(
+      table.creatorId,
+      table.platformType,
+      table.externalAccountId
     ),
   ]
 );

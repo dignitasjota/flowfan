@@ -6,9 +6,11 @@ import { trpc } from "@/lib/trpc";
 import { PostPreview } from "@/components/scheduler/post-preview";
 
 type ConnectedAccount = {
+  id?: string;
   platformType: string;
   connectionType: "native" | "webhook";
   isActive: boolean;
+  accountUsername?: string | null;
 };
 
 type Props = {
@@ -83,6 +85,11 @@ export function PostComposer({
   const [previewPlatform, setPreviewPlatform] = useState<
     "reddit" | "twitter" | "instagram" | null
   >(null);
+  // Multi-account: explicit account selection per platform. Empty string =
+  // "first active" (the server resolves it).
+  const [accountIdByPlatform, setAccountIdByPlatform] = useState<
+    Record<string, string>
+  >({});
 
   const create = trpc.scheduler.create.useMutation({
     onSuccess: () => {
@@ -114,6 +121,13 @@ export function PostComposer({
     }
 
     const platformConfigs: Record<string, Record<string, unknown>> = {};
+    // Inject explicit accountId for each selected platform if the user picked one
+    for (const p of platforms) {
+      const chosen = accountIdByPlatform[p];
+      if (chosen) {
+        platformConfigs[p] = { ...(platformConfigs[p] ?? {}), accountId: chosen };
+      }
+    }
     if (selected.has("reddit")) {
       if (!subreddit.trim()) {
         setErrorMsg("Especifica el subreddit destino.");
@@ -128,6 +142,7 @@ export function PostComposer({
         return;
       }
       platformConfigs.reddit = {
+        ...(platformConfigs.reddit ?? {}),
         subreddit: subreddit.trim(),
         kind: redditKind,
         ...(redditKind !== "self" ? { url: redditUrl.trim() } : {}),
@@ -152,6 +167,7 @@ export function PostComposer({
         return;
       }
       platformConfigs.twitter = {
+        ...(platformConfigs.twitter ?? {}),
         tweet: mainTweet,
         thread: cleanThread,
       };
@@ -230,6 +246,39 @@ export function PostComposer({
             ✕
           </button>
         </div>
+
+        {/* Multi-account selector: shows for any selected platform with >1 active accounts */}
+        {Array.from(selected).map((rawPlatform) => {
+          const platform = rawPlatform as "reddit" | "twitter" | "instagram";
+          const platformAccounts = accounts.filter(
+            (a) => a.isActive && a.platformType === platform && a.id
+          );
+          if (platformAccounts.length <= 1) return null;
+          return (
+            <label key={platform} className="mb-3 block">
+              <span className="mb-1 block text-xs font-medium text-gray-400">
+                Cuenta {PLATFORM_LABELS[platform]} ({platformAccounts.length} disponibles)
+              </span>
+              <select
+                value={accountIdByPlatform[platform] ?? ""}
+                onChange={(e) =>
+                  setAccountIdByPlatform((prev) => ({
+                    ...prev,
+                    [platform]: e.target.value,
+                  }))
+                }
+                className="w-full rounded-md border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white focus:border-indigo-500 focus:outline-none"
+              >
+                <option value="">Primera disponible (auto)</option>
+                {platformAccounts.map((a) => (
+                  <option key={a.id} value={a.id ?? ""}>
+                    @{a.accountUsername ?? "sin nombre"}
+                  </option>
+                ))}
+              </select>
+            </label>
+          );
+        })}
 
         <label className="mb-3 block">
           <span className="mb-1 block text-xs font-medium text-gray-400">

@@ -200,9 +200,11 @@ export default function SchedulerPage() {
         <PostComposer
           initialDate={composerDate}
           accounts={(accounts.data ?? []).map((a) => ({
+            id: a.id,
             platformType: a.platformType,
             connectionType: a.connectionType,
             isActive: a.isActive,
+            accountUsername: a.accountUsername,
           }))}
           onClose={() => setComposerOpen(false)}
           onCreated={() => {

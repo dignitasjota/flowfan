@@ -90,4 +90,6 @@ export const RATE_LIMITS = {
   aiMutation: { limit: 30, windowSeconds: 60 },
   /** General API: 100 requests per 60 seconds per user */
   api: { limit: 100, windowSeconds: 60 },
+  /** Comment ingest endpoint: 30 req/min per API key (stricter than global) */
+  commentsIngest: { limit: 30, windowSeconds: 60 },
 } as const;

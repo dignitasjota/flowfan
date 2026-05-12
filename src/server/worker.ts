@@ -1087,16 +1087,30 @@ const scheduledPostWorker = new Worker<ScheduledPostJobData>(
     let successCount = 0;
 
     for (const platform of post.targetPlatforms) {
+      // Multi-account: prefer the explicit accountId from platformConfigs,
+      // otherwise fall back to the first active account on that platform.
+      const platformCfg =
+        ((post.platformConfigs as Record<string, unknown>)?.[platform] ?? {}) as {
+          accountId?: string;
+        };
+
+      const accountConditions = [
+        eq(socialAccounts.creatorId, creatorId),
+        eq(socialAccounts.platformType, platform as "reddit"),
+        eq(socialAccounts.isActive, true),
+      ];
+      if (platformCfg.accountId) {
+        accountConditions.push(eq(socialAccounts.id, platformCfg.accountId));
+      }
+
       const account = await db.query.socialAccounts.findFirst({
-        where: and(
-          eq(socialAccounts.creatorId, creatorId),
-          eq(socialAccounts.platformType, platform as "reddit"),
-          eq(socialAccounts.isActive, true)
-        ),
+        where: and(...accountConditions),
       });
 
       if (!account) {
-        errors[platform] = "No active account configured";
+        errors[platform] = platformCfg.accountId
+          ? `Account ${platformCfg.accountId} not found or inactive`
+          : "No active account configured";
         dispatchWebhookEvent(db, creatorId, "post.failed", {
           scheduledPostId,
           platform,

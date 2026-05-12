@@ -12,6 +12,7 @@ import {
   enqueueCommentAnalysis,
 } from "@/server/services/social-comments-ingest";
 import { publishEvent } from "@/lib/redis-pubsub";
+import { rateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 
 const ALLOWED_PLATFORMS = new Set(["instagram", "reddit", "twitter"]);
 
@@ -78,6 +79,31 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       { error: "Write access requires Business plan" },
       { status: 403 }
+    );
+  }
+
+  // Endpoint-specific rate limit (stricter than the global per-key limit
+  // applied in the auth middleware). Prevents accidental flood of inserts
+  // from misconfigured clients.
+  const rl = await rateLimit(
+    `comments-ingest:${auth.keyId}`,
+    RATE_LIMITS.commentsIngest
+  );
+  if (!rl.success) {
+    return NextResponse.json(
+      {
+        error:
+          "Rate limit exceeded for POST /api/v1/comments. Try again after the window resets.",
+      },
+      {
+        status: 429,
+        headers: {
+          "Retry-After": Math.max(1, rl.resetAt - Math.floor(Date.now() / 1000)).toString(),
+          "X-RateLimit-Limit": RATE_LIMITS.commentsIngest.limit.toString(),
+          "X-RateLimit-Remaining": "0",
+          "X-RateLimit-Reset": rl.resetAt.toString(),
+        },
+      }
     );
   }
 

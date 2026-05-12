@@ -247,9 +247,11 @@ export default function BlogToSocialPage() {
       {composerPreset && (
         <PostComposer
           accounts={(accounts.data ?? []).map((a) => ({
+            id: a.id,
             platformType: a.platformType,
             connectionType: a.connectionType,
             isActive: a.isActive,
+            accountUsername: a.accountUsername,
           }))}
           onClose={() => setComposerPreset(null)}
           onCreated={() => {
