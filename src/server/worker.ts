@@ -704,6 +704,16 @@ async function startScheduler() {
       log.error({ err }, "Error polling Reddit comments");
     }
 
+    // Poll Twitter for new replies on tracked tweets
+    try {
+      const { pollTwitterComments } = await import(
+        "@/server/services/twitter-poller"
+      );
+      await pollTwitterComments(db);
+    } catch (err) {
+      log.error({ err }, "Error polling Twitter comments");
+    }
+
     // Inactivity followup enrollment every 30 min (every 6th interval of 5 min)
     inactivityFollowupCounter++;
     if (inactivityFollowupCounter >= 6) {
@@ -1263,6 +1273,32 @@ const scheduledPostWorker = new Worker<ScheduledPostJobData>(
               url: result.externalUrl,
             };
             successCount++;
+
+            // Mirror to socialPosts so the Twitter comment poller monitors
+            // this tweet for replies. Unique index dedupes on retries.
+            try {
+              const { socialPosts: socialPostsTable } = await import(
+                "./db/schema"
+              );
+              await db
+                .insert(socialPostsTable)
+                .values({
+                  creatorId,
+                  platformType: "twitter",
+                  externalPostId: result.externalId,
+                  url: result.externalUrl ?? null,
+                  title: null,
+                  content: post.content,
+                  publishedAt: new Date(),
+                })
+                .onConflictDoNothing();
+            } catch (syncErr) {
+              log.warn(
+                { syncErr, scheduledPostId },
+                "Failed to sync tweet to social_posts (non-critical)"
+              );
+            }
+
             dispatchWebhookEvent(db, creatorId, "post.published", {
               scheduledPostId,
               platform,
