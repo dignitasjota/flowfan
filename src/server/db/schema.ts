@@ -1998,6 +1998,12 @@ export const socialComments = pgTable(
       onDelete: "set null",
     }),
     moderationReason: text("moderation_reason"),
+    /** True when the moderation action was also propagated to the platform
+     * (e.g. Twitter PUT /tweets/{id}/hidden, Instagram DELETE /{comment-id}). */
+    platformModerationApplied: boolean("platform_moderation_applied")
+      .default(false)
+      .notNull(),
+    platformModerationError: text("platform_moderation_error"),
     creatorReplyId: uuid("creator_reply_id"),
     publishedAt: timestamp("published_at"),
     source: varchar("source", { length: 20 }).default("manual").notNull(),

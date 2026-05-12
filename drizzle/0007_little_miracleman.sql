@@ -1,0 +1,2 @@
+ALTER TABLE "social_comments" ADD COLUMN "platform_moderation_applied" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE "social_comments" ADD COLUMN "platform_moderation_error" text;

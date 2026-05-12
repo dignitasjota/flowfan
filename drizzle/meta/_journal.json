@@ -50,6 +50,13 @@
       "when": 1778598403345,
       "tag": "0006_thankful_black_queen",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1778599675539,
+      "tag": "0007_little_miracleman",
+      "breakpoints": true
     }
   ]
 }

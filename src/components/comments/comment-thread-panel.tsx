@@ -32,6 +32,7 @@ export function CommentThreadPanel({ postId }: Props) {
 
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
   const [replyDraft, setReplyDraft] = useState("");
+  const [alsoOnPlatform, setAlsoOnPlatform] = useState(false);
   const [variants, setVariants] = useState<
     { type: string; label: string; content: string }[] | null
   >(null);
@@ -340,61 +341,93 @@ export function CommentThreadPanel({ postId }: Props) {
               </button>
             </div>
 
-            <div className="mt-3 flex items-center justify-between border-t border-gray-800 pt-3">
-              <span className="text-xs text-gray-500">Moderación:</span>
-              <div className="flex gap-1">
-                {activeComment.moderationStatus !== "visible" && (
-                  <button
-                    onClick={() =>
-                      setModeration.mutate({
-                        id: activeComment.id,
-                        status: "visible",
-                      })
-                    }
-                    disabled={setModeration.isPending}
-                    className="rounded-md bg-gray-800 px-2 py-1 text-[11px] text-gray-300 hover:bg-gray-700 disabled:opacity-50"
-                    title="Restaurar"
-                  >
-                    Restaurar
-                  </button>
-                )}
-                {activeComment.moderationStatus !== "reported" && (
-                  <button
-                    onClick={() =>
-                      setModeration.mutate({
-                        id: activeComment.id,
-                        status: "reported",
-                      })
-                    }
-                    disabled={setModeration.isPending}
-                    className="rounded-md bg-red-500/20 px-2 py-1 text-[11px] text-red-300 hover:bg-red-500/30 disabled:opacity-50"
-                    title="Marcar como reportado (sigue visible)"
-                  >
-                    🚩 Reportar
-                  </button>
-                )}
-                {activeComment.moderationStatus !== "hidden" && (
-                  <button
-                    onClick={() => {
-                      if (
-                        confirm(
-                          "¿Ocultar este comentario de la lista? Se podrá restaurar después."
-                        )
-                      ) {
+            <div className="mt-3 border-t border-gray-800 pt-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-gray-500">Moderación:</span>
+                <div className="flex gap-1">
+                  {activeComment.moderationStatus !== "visible" && (
+                    <button
+                      onClick={() =>
                         setModeration.mutate({
                           id: activeComment.id,
-                          status: "hidden",
-                        });
+                          status: "visible",
+                          alsoOnPlatform,
+                        })
                       }
-                    }}
-                    disabled={setModeration.isPending}
-                    className="rounded-md bg-gray-700 px-2 py-1 text-[11px] text-gray-300 hover:bg-gray-600 disabled:opacity-50"
-                    title="Ocultar de la lista"
-                  >
-                    🔒 Ocultar
-                  </button>
-                )}
+                      disabled={setModeration.isPending}
+                      className="rounded-md bg-gray-800 px-2 py-1 text-[11px] text-gray-300 hover:bg-gray-700 disabled:opacity-50"
+                      title="Restaurar"
+                    >
+                      Restaurar
+                    </button>
+                  )}
+                  {activeComment.moderationStatus !== "reported" && (
+                    <button
+                      onClick={() =>
+                        setModeration.mutate({
+                          id: activeComment.id,
+                          status: "reported",
+                          alsoOnPlatform,
+                        })
+                      }
+                      disabled={setModeration.isPending}
+                      className="rounded-md bg-red-500/20 px-2 py-1 text-[11px] text-red-300 hover:bg-red-500/30 disabled:opacity-50"
+                      title="Marcar como reportado (sigue visible)"
+                    >
+                      🚩 Reportar
+                    </button>
+                  )}
+                  {activeComment.moderationStatus !== "hidden" && (
+                    <button
+                      onClick={() => {
+                        if (
+                          confirm(
+                            "¿Ocultar este comentario de la lista? Se podrá restaurar después."
+                          )
+                        ) {
+                          setModeration.mutate({
+                            id: activeComment.id,
+                            status: "hidden",
+                            alsoOnPlatform,
+                          });
+                        }
+                      }}
+                      disabled={setModeration.isPending}
+                      className="rounded-md bg-gray-700 px-2 py-1 text-[11px] text-gray-300 hover:bg-gray-600 disabled:opacity-50"
+                      title="Ocultar de la lista"
+                    >
+                      🔒 Ocultar
+                    </button>
+                  )}
+                </div>
               </div>
+
+              <label className="mt-2 flex cursor-pointer items-center gap-2 text-[11px] text-gray-400">
+                <input
+                  type="checkbox"
+                  checked={alsoOnPlatform}
+                  onChange={(e) => setAlsoOnPlatform(e.target.checked)}
+                  className="h-3 w-3 rounded border-gray-700 bg-gray-800"
+                />
+                <span>
+                  Aplicar también en{" "}
+                  <span className="capitalize">{activeComment.platformType}</span>
+                  {activeComment.platformType === "twitter" && " (hide reply)"}
+                  {activeComment.platformType === "instagram" && " (DELETE)"}
+                  {activeComment.platformType === "reddit" && " — no soportado por la API"}
+                </span>
+              </label>
+
+              {activeComment.platformModerationApplied && (
+                <p className="mt-1 text-[11px] text-emerald-400">
+                  ✓ Acción aplicada también en la plataforma
+                </p>
+              )}
+              {activeComment.platformModerationError && (
+                <p className="mt-1 text-[11px] text-red-400">
+                  ⚠ {activeComment.platformModerationError}
+                </p>
+              )}
             </div>
 
             <p className="mt-3 text-xs text-gray-500">

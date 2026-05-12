@@ -25,6 +25,101 @@ import {
 } from "@/server/services/social-comments-ingest";
 import { publishEvent } from "@/lib/redis-pubsub";
 import { logTeamAction } from "@/server/services/team-audit";
+import { socialAccounts } from "@/server/db/schema";
+import { decrypt } from "@/lib/crypto";
+import {
+  applyTwitterModeration,
+  applyInstagramModeration,
+} from "@/server/services/platform-moderation";
+import { ensureFreshTwitterToken } from "@/server/services/twitter-publisher";
+
+/**
+ * Translate a moderation status into a platform-specific action and apply it.
+ * Returns the new flags to persist (platformApplied, error).
+ */
+async function applyPlatformModeration(args: {
+  ctx: { db: typeof import("@/server/db").db; creatorId: string };
+  platformType: string;
+  externalCommentId: string;
+  status: "visible" | "hidden" | "reported";
+}): Promise<{ applied: boolean; error: string | null }> {
+  const account = await args.ctx.db.query.socialAccounts.findFirst({
+    where: and(
+      eq(socialAccounts.creatorId, args.ctx.creatorId),
+      eq(socialAccounts.platformType, args.platformType as "twitter"),
+      eq(socialAccounts.connectionType, "native"),
+      eq(socialAccounts.isActive, true)
+    ),
+  });
+  if (!account || !account.encryptedOauthAccessToken) {
+    return {
+      applied: false,
+      error: `No OAuth account connected for ${args.platformType}`,
+    };
+  }
+
+  if (args.platformType === "twitter") {
+    try {
+      const refreshed = await ensureFreshTwitterToken({
+        encryptedAccess: account.encryptedOauthAccessToken,
+        encryptedRefresh: account.encryptedOauthRefreshToken,
+        expiresAt: account.oauthExpiresAt,
+      });
+      if (refreshed.refreshed) {
+        await args.ctx.db
+          .update(socialAccounts)
+          .set({
+            encryptedOauthAccessToken: refreshed.newAccessEncrypted,
+            encryptedOauthRefreshToken: refreshed.newRefreshEncrypted,
+            oauthExpiresAt: refreshed.newExpiresAt,
+            updatedAt: new Date(),
+          })
+          .where(eq(socialAccounts.id, account.id));
+      }
+      const action =
+        args.status === "visible" ? "unhide" : "hide";
+      const result = await applyTwitterModeration({
+        accessToken: refreshed.accessToken,
+        externalCommentId: args.externalCommentId,
+        action,
+      });
+      return result.success
+        ? { applied: action === "hide", error: null }
+        : { applied: false, error: result.error };
+    } catch (err) {
+      return { applied: false, error: (err as Error).message };
+    }
+  }
+
+  if (args.platformType === "instagram") {
+    // IG only supports delete (no hide). "visible" cannot be undone via API.
+    if (args.status === "visible") {
+      return {
+        applied: false,
+        error: "Instagram no permite restaurar un comentario borrado.",
+      };
+    }
+    try {
+      const accessToken = decrypt(account.encryptedOauthAccessToken);
+      const result = await applyInstagramModeration({
+        accessToken,
+        externalCommentId: args.externalCommentId,
+        action: "delete",
+      });
+      return result.success
+        ? { applied: true, error: null }
+        : { applied: false, error: result.error };
+    } catch (err) {
+      return { applied: false, error: (err as Error).message };
+    }
+  }
+
+  // Reddit (and others): not supported. Creator-side only.
+  return {
+    applied: false,
+    error: `Mod-actions reales no soportadas para ${args.platformType}`,
+  };
+}
 
 const COMMENT_PLATFORMS = ["instagram", "reddit", "twitter"] as const;
 
@@ -651,6 +746,10 @@ export const socialCommentsRouter = createTRPCRouter({
         id: z.string().uuid(),
         status: z.enum(["visible", "hidden", "reported"]),
         reason: z.string().max(500).optional(),
+        /** If true, also apply the action on the source platform (Twitter hide,
+         * Instagram delete). The result is recorded in platformModerationApplied
+         * / platformModerationError. Reddit ignores this flag. */
+        alsoOnPlatform: z.boolean().default(false),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -673,6 +772,21 @@ export const socialCommentsRouter = createTRPCRouter({
       const willBeHiddenLike =
         input.status === "hidden" || input.status === "reported";
 
+      // Optional: apply the action on the source platform.
+      let platformApplied = existing.platformModerationApplied;
+      let platformError: string | null = existing.platformModerationError;
+
+      if (input.alsoOnPlatform && existing.externalCommentId) {
+        const platformResult = await applyPlatformModeration({
+          ctx,
+          platformType: existing.platformType,
+          externalCommentId: existing.externalCommentId,
+          status: input.status,
+        });
+        platformApplied = platformResult.applied;
+        platformError = platformResult.error;
+      }
+
       const [updated] = await ctx.db
         .update(socialComments)
         .set({
@@ -682,6 +796,8 @@ export const socialCommentsRouter = createTRPCRouter({
             input.status === "visible" ? null : ctx.actingUserId,
           moderationReason:
             input.status === "visible" ? null : input.reason ?? null,
+          platformModerationApplied: platformApplied,
+          platformModerationError: platformError,
         })
         .where(eq(socialComments.id, input.id))
         .returning();

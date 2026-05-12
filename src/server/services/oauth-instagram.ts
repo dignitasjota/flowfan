@@ -24,18 +24,27 @@ export const INSTAGRAM_SCOPES = [
   "pages_read_engagement",
   "instagram_basic",
   "instagram_content_publish",
+  // Required for DELETE /{comment-id} (real platform moderation)
+  "instagram_manage_comments",
 ];
 
 export type InstagramTokens = {
   /** Long-lived user access token (~60 days). */
   accessToken: string;
   expiresInSec: number;
-  /** Resolved Instagram Business Account id (the one we publish to). */
+  /** All Instagram Business Accounts linked through this Facebook user. */
+  accounts: InstagramAccountInfo[];
+};
+
+export type InstagramAccountInfo = {
+  /** Instagram Business Account id (the one we publish to). */
   igUserId: string;
   /** Username @ Instagram. */
   username: string;
   /** Facebook Page id that owns the IG account. */
   pageId: string;
+  /** Facebook Page name (for display in multi-page UI). */
+  pageName: string;
 };
 
 export function getInstagramRedirectUri(): string {
@@ -135,50 +144,57 @@ export async function exchangeInstagramCode(
       "No tienes ninguna página de Facebook vinculada. Conecta tu cuenta IG Business a una página de Facebook primero."
     );
   }
-  // For the MVP we pick the first page. Multi-page selection comes in V2.
-  const page = pagesData.data[0];
 
-  // 4. Get the IG Business Account id linked to that page
-  const igRes = await fetch(
-    `${FB_GRAPH_URL}/${page.id}?fields=instagram_business_account&access_token=${encodeURIComponent(
-      longData.access_token
-    )}`,
-    { signal: AbortSignal.timeout(15_000) }
-  );
-  if (!igRes.ok) {
-    const text = await igRes.text().catch(() => "");
-    throw new Error(
-      `Facebook page lookup failed (${igRes.status}): ${text.slice(0, 200)}`
+  // 4. For each page, resolve its IG Business Account (if any).
+  const accounts: InstagramAccountInfo[] = [];
+  for (const page of pagesData.data) {
+    const igRes = await fetch(
+      `${FB_GRAPH_URL}/${page.id}?fields=instagram_business_account&access_token=${encodeURIComponent(
+        longData.access_token
+      )}`,
+      { signal: AbortSignal.timeout(15_000) }
     );
-  }
-  const igData = (await igRes.json()) as {
-    instagram_business_account?: { id: string };
-  };
-  if (!igData.instagram_business_account?.id) {
-    throw new Error(
-      "La página de Facebook seleccionada no tiene una cuenta de Instagram Business vinculada."
-    );
-  }
-  const igUserId = igData.instagram_business_account.id;
+    if (!igRes.ok) continue;
+    const igData = (await igRes.json()) as {
+      instagram_business_account?: { id: string };
+    };
+    const igUserId = igData.instagram_business_account?.id;
+    if (!igUserId) continue;
 
-  // 5. Get username
-  const igInfoRes = await fetch(
-    `${FB_GRAPH_URL}/${igUserId}?fields=username&access_token=${encodeURIComponent(
-      longData.access_token
-    )}`,
-    { signal: AbortSignal.timeout(15_000) }
-  );
-  let username = "unknown";
-  if (igInfoRes.ok) {
-    const d = (await igInfoRes.json()) as { username?: string };
-    if (d.username) username = d.username;
+    // Resolve username for display
+    let username = "unknown";
+    try {
+      const infoRes = await fetch(
+        `${FB_GRAPH_URL}/${igUserId}?fields=username&access_token=${encodeURIComponent(
+          longData.access_token
+        )}`,
+        { signal: AbortSignal.timeout(10_000) }
+      );
+      if (infoRes.ok) {
+        const d = (await infoRes.json()) as { username?: string };
+        if (d.username) username = d.username;
+      }
+    } catch {
+      // best effort
+    }
+
+    accounts.push({
+      igUserId,
+      username,
+      pageId: page.id,
+      pageName: page.name,
+    });
+  }
+
+  if (accounts.length === 0) {
+    throw new Error(
+      "Ninguna de tus páginas de Facebook tiene una cuenta de Instagram Business vinculada."
+    );
   }
 
   return {
     accessToken: longData.access_token,
     expiresInSec: longData.expires_in,
-    igUserId,
-    username,
-    pageId: page.id,
+    accounts,
   };
 }

@@ -89,17 +89,25 @@ export async function GET(
       });
     } else {
       const tokens = await exchangeInstagramCode(code);
-      await upsertNativeAccount({
-        creatorId: pending.creatorId,
-        platformType: "instagram",
-        accountUsername: tokens.username,
-        externalAccountId: tokens.igUserId,
-        oauthAccessToken: tokens.accessToken,
-        oauthRefreshToken: null,
-        oauthExpiresInSec: tokens.expiresInSec,
-        oauthScopes: [],
-        metadata: { pageId: tokens.pageId, igUserId: tokens.igUserId },
-      });
+      // Multi-page: create / update one socialAccount per IG account.
+      // Creator can disable the ones they don't want from /scheduler → Cuentas.
+      for (const acc of tokens.accounts) {
+        await upsertNativeAccount({
+          creatorId: pending.creatorId,
+          platformType: "instagram",
+          accountUsername: acc.username,
+          externalAccountId: acc.igUserId,
+          oauthAccessToken: tokens.accessToken,
+          oauthRefreshToken: null,
+          oauthExpiresInSec: tokens.expiresInSec,
+          oauthScopes: [],
+          metadata: {
+            pageId: acc.pageId,
+            pageName: acc.pageName,
+            igUserId: acc.igUserId,
+          },
+        });
+      }
     }
   } catch (err) {
     return redirectWithError(request, (err as Error).message);
