@@ -658,7 +658,7 @@ Pull-based ingestion for Reddit (no OAuth callback needed thanks to script-type 
 
 **REST** (`src/app/api/v1/comments/route.ts`):
 - `GET /api/v1/comments` (Pro+) — list with filters `post_id`, `unhandled`, paginated.
-- `POST /api/v1/comments` (Business) — idempotent ingest (auto-creates post by `externalPostId` if missing, dedupes by `externalCommentId`). Same auto-link + analysis + SSE pipeline as tRPC.
+- `POST /api/v1/comments` (Business) — idempotent ingest (auto-creates post by `externalPostId` if missing, dedupes by `externalCommentId`). Same auto-link + analysis + SSE pipeline as tRPC. **Endpoint-specific rate limit**: 30 req/min per API key (stricter than the global per-key limit) via `RATE_LIMITS.commentsIngest`. Returns 429 with `Retry-After` + `X-RateLimit-*` headers when exceeded.
 
 ### Realtime Events
 
@@ -699,12 +699,15 @@ Strategic AI analysis for replying in public threads. Optimized for **brand repu
 
 ### Overview
 
-Schedule public posts to native APIs (Reddit) or to any platform via outgoing webhooks (Twitter, Instagram, future). One account per platform per creator. Reddit uses script-type OAuth password grant; other platforms route through `post.publishing` webhooks (Zapier / Make / custom endpoints).
+Schedule public posts to native APIs (**Reddit, Twitter / X, Instagram**) or to any platform via outgoing webhooks. **Multi-cuenta**: a creator can connect multiple accounts on the same platform; the composer picks one explicitly or falls back to the first active. Reddit uses script-type OAuth password grant; Twitter uses OAuth 2.0 PKCE; Instagram uses Facebook Login + Graph API.
 
 ### Schema
 
-- **`socialAccounts`** — one row per `(creatorId, platformType)`. `connectionType` is `native` (credentials cifrados via AES-256-GCM in `encryptedCredentials`) or `webhook` (no credentials, just a flag). `accountUsername` populated after `verifyRedditCredentials()`.
-- **`scheduledPosts`** — scheduled posts with `targetPlatforms` array, `platformConfigs` JSONB (e.g. `{reddit: {subreddit, kind, url, flairId, nsfw, spoiler}}`), `status` enum (scheduled/processing/posted/partial/failed/cancelled), `attempts`, `lastError`, `externalPostIds` JSONB (`{platform: {id, url}}`), `jobId` (BullMQ job), `recurrenceRule` JSONB (optional), `recurrenceCount` (incremented on each publish of a recurring series).
+- **`socialAccounts`** — rows keyed by `(creatorId, platformType, externalAccountId)` (unique). Multiple rows per `(creator, platform)` are allowed for multi-account scenarios. `connectionType` is `native` (encrypted credentials and/or OAuth tokens) or `webhook` (no credentials, just a flag).
+  - For Reddit native: `encryptedCredentials` holds the AES-256-GCM ciphertext of `{clientId, clientSecret, username, password}`.
+  - For Twitter / Instagram OAuth: `encryptedOauthAccessToken`, `encryptedOauthRefreshToken` (twitter only — IG has no refresh), `oauthExpiresAt`, `oauthScopes[]`, `externalAccountId` (the platform's account id).
+- **`scheduledPosts`** — scheduled posts with `targetPlatforms` array, `platformConfigs` JSONB (e.g. `{reddit: {subreddit, kind, url, flairId}, twitter: {tweet, thread[], accountId?}, instagram: {imageUrl, accountId?}}`), `status` enum (scheduled/processing/posted/partial/failed/cancelled), `attempts`, `lastError`, `externalPostIds` JSONB (`{platform: {id, url}}`), `jobId` (BullMQ job), `recurrenceRule` JSONB (optional), `recurrenceCount`.
+- **`oauthPendingFlows`** — short-lived state for OAuth: `state` (unique CSRF token), `creatorId`, `provider`, `codeVerifier` (PKCE), `expiresAt` (10 min TTL). Consumed by the callback route.
 
 ### Reddit Publisher (`src/server/services/scheduler-publisher.ts`)
 
@@ -719,6 +722,29 @@ Schedule public posts to native APIs (Reddit) or to any platform via outgoing we
 - **OAuth token cache (Redis)**: `getRedditAccessTokenCached(creatorId, creds)` stores tokens with 50-min TTL (Reddit tokens last 60 min — 10-min cushion). Cache miss → fetch + store. Failures fall through to direct fetch silently. `invalidateRedditTokenCache(creatorId)` for forced refresh on 401. Both publisher and `reddit-poller` use the cached version, going from ~289 token fetches/day per account to ~30.
 - Exports `getRedditAccessToken`, `getRedditAccessTokenCached`, `invalidateRedditTokenCache`, `decryptRedditCredentials`, `REDDIT_USER_AGENT`.
 
+### Twitter / X Publisher (OAuth 2.0 PKCE)
+
+- **`oauth-twitter.ts`**: PKCE S256 (`generatePkce`), `buildTwitterAuthorizationUrl`, `exchangeTwitterCode`, `refreshTwitterToken`, `getTwitterMe`. Scopes: `tweet.read tweet.write users.read offline.access` (offline → refresh token).
+- **`twitter-publisher.ts`**: `publishToTwitter({accessToken, tweet, thread[], username})` chains real threads via `POST /2/tweets` with `reply.in_reply_to_tweet_id` linked to the previous tweet id. Each follow-up's id becomes the parent of the next.
+- `ensureFreshTwitterToken({encryptedAccess, encryptedRefresh, expiresAt})` checks if the token expires within 60 s and uses the refresh token if so. The worker persists the new tokens on `socialAccounts` immediately so the next call uses them.
+- Env vars: `TWITTER_CLIENT_ID`, `TWITTER_CLIENT_SECRET` (optional for public clients), `APP_URL`.
+- Redirect URI to register with developer.x.com: `{APP_URL}/api/oauth/twitter/callback`.
+
+### Instagram Publisher (Facebook Login → Graph API)
+
+- **`oauth-instagram.ts`**: full chain `code → short-lived token → long-lived token (~60 days) → resolve Facebook Page → resolve Instagram Business Account id`. Scopes: `pages_show_list pages_read_engagement instagram_basic instagram_content_publish`. **Pre-condition**: creator must have an Instagram Business/Creator account linked to a Facebook Page (clear error messages otherwise).
+- **`instagram-publisher.ts`**: `publishToInstagram({accessToken, igUserId, imageUrl, caption})` — 2-step flow:
+  1. `POST /{ig_user_id}/media` with `image_url` → container `creation_id`.
+  2. `POST /{ig_user_id}/media_publish` with `creation_id` → posted media id.
+- Image URL must be **publicly accessible** (Instagram fetches it server-side, rejects signed URLs that expire quickly). No upload from FanFlow's own storage in MVP (S3/CDN is V2).
+- Env vars: `FB_CLIENT_ID`, `FB_CLIENT_SECRET`, `APP_URL`.
+- Redirect URI to register with developers.facebook.com: `{APP_URL}/api/oauth/instagram/callback`.
+
+### OAuth Routes
+
+- **`GET /api/oauth/[provider]/start`** — Authenticates the session, generates a CSRF `state` + PKCE `code_verifier` (twitter), inserts into `oauth_pending_flows`, redirects to the provider authorization URL.
+- **`GET /api/oauth/[provider]/callback`** — Validates and consumes `state` (no-replay), exchanges `code`, encrypts tokens, **upserts** in `socialAccounts` by `(creatorId, platformType, externalAccountId)`. Same `externalAccountId` → re-auth (update); new → multi-account insert. Errors redirect to `/scheduler?oauth_error=...`.
+
 ### Recurrence (`src/server/services/recurrence.ts`)
 
 Lightweight rule subset (no full RFC5545):
@@ -732,9 +758,12 @@ Lightweight rule subset (no full RFC5545):
 ### Queue and Worker
 
 - `scheduledPostQueue` ("scheduled-post-publish") with delayed jobs (`delay = scheduleAt - now`).
+- For each platform in `targetPlatforms`, the worker resolves the **target account**: if `platformConfigs.{platform}.accountId` is set it picks that specific account; otherwise it falls back to the first active account on that platform. Allows multi-account routing per post.
 - Worker iterates `targetPlatforms`:
-  - **`native`** + `reddit` → calls `publishToReddit`. On success, mirrors the published post into `socialPosts` (`onConflictDoNothing`) so the comment poller can pick up replies without manual setup.
-  - **`webhook`** → dispatches `post.publishing` webhook with full payload.
+  - **`native` + `reddit`** → calls `publishToReddit` with `creatorId` for token caching. On success, mirrors the published post into `socialPosts` (`onConflictDoNothing`) so the comment poller can pick up replies without manual setup.
+  - **`native` + `twitter`** → calls `ensureFreshTwitterToken` (refreshes + persists if expired in <60s), then `publishToTwitter`. Real threads via `reply.in_reply_to_tweet_id` chained.
+  - **`native` + `instagram`** → reads `platformConfigs.instagram.imageUrl` (required, public URL), decrypts access token, calls `publishToInstagram` (media create + publish).
+  - **`webhook`** → dispatches `post.publishing` webhook with full payload (including `platformConfigs.{platform}` so Zapier / Make can drive the actual publish).
 - Aggregates results into `externalPostIds` and computes final status (`posted` / `partial` / `failed`).
 - **Recurrence handling**: after computing the base status, if `recurrenceRule` is set and at least one platform succeeded, the worker calls `computeNextOccurrence`. If a next date exists, it updates `scheduleAt`, increments `recurrenceCount`, enqueues a new delayed job, and keeps the row in `status = "scheduled"` (no separate "active series" row — single record per series).
 - Retries: 3 attempts, exponential 5s backoff. Worker concurrency: 3.
@@ -750,11 +779,12 @@ Lightweight rule subset (no full RFC5545):
 - **Calendar** (`scheduler-calendar.tsx`): month grid 7×6, post chips colored by status, click chip opens detail, click empty day opens composer pre-filled with date. Recurring posts show a `↻` glyph in the chip.
 - **List** — sortable table with status badges and inline detail view; recurring posts show a `↻` purple pill next to the title.
 - **Composer** (`post-composer.tsx`): platform selector (disabled if not connected), title, content, datetime-local picker.
+  - **Multi-account selector**: when a platform has >1 active accounts, a dropdown appears letting the creator pick which account to publish from. Default is "Primera disponible (auto)" → the worker picks the first active. The choice is persisted as `platformConfigs.{platform}.accountId`.
   - **Reddit block**: subreddit input, kind selector (Texto / Enlace / Imagen) with conditional URL field for link/image.
   - **Twitter / X block**: main tweet textarea (270 char counter) + editable thread list with "+ Añadir al hilo" / ✕ delete per row. `platformConfigs.twitter = {tweet, thread[]}` rides intact in the `post.publishing` webhook payload so Zapier / Make can post as a native thread on X.
   - **Per-platform preview** (`post-preview.tsx`): toggle row with one button per selected platform; click renders an approximate preview in the platform's native style — Reddit subreddit card with title + body / link / image, Twitter / X numbered thread with avatar and per-tweet char count, Instagram caption + handle + media placeholder.
   - **Recurrence**: "Repetir publicación" toggle reveals a recurrence form (frequency tabs, day-of-week / day-of-month picker, hour/minute UTC, optional `until` datetime and/or `maxCount` cap).
-- **Accounts** (`accounts-panel.tsx`): per-platform card; Reddit form for native (4-field credentials), button "Vía webhook" for the rest.
+- **Accounts** (`accounts-panel.tsx`): per-platform card; Reddit form for native (4-field credentials), **"Conectar OAuth"** link (Twitter / Instagram) that starts the OAuth flow at `/api/oauth/{provider}/start`, and "Vía webhook" for the rest.
 - Sidebar link "📅 Scheduler" (access: manager+).
 - **`PostComposer`** accepts an optional `initialValues` prop (`{title?, content?, platforms?, redditSubreddit?, twitterTweet?, twitterThread?}`) so other pages (notably Blog-to-Social) can open it pre-filled. Twitter drafts open with the thread editable as separate tweets, not flatten text.
 
@@ -836,6 +866,21 @@ When adding a new mutation, follow the same pattern: import `logTeamAction`, gat
 
 When adding new pure helpers (no DB), prefer this pattern: pure logic in a service file, module-level `vi.mock` for transitive deps, no test fixtures in DB. For routers, extract decisional logic as small predicates and test those — avoids mocks of DB + queue + SSE that are brittle.
 
+### E2E tests with real Postgres (`__tests__/e2e/`)
+
+For DB-level invariants that module mocks cannot exercise (unique indexes, FK cascade, transactional state), the suite ships an **opt-in E2E folder** that runs real SQL against a dedicated test database.
+
+- Skipped automatically via `e2eDescribe` (= `describe.skip` when `TEST_DATABASE_URL` is missing). Default `npm test` stays green without extra setup.
+- Test isolation: each test wraps its work in `withTx(fn)` which throws a `RollbackSentinel` after the callback — drizzle rolls back, the DB stays clean.
+- Setup: see `__tests__/e2e/README.md` (createdb + run migrations against the test URL + `TEST_DATABASE_URL=... npx vitest run __tests__/e2e`).
+- Current coverage (9 tests, 4 files):
+  - `comments-ingest.e2e.test.ts` — `externalCommentId` unique enforcement, linking comment author to existing contact.
+  - `scheduler-create.e2e.test.ts` — multi-account allowed on `(creator, platform)` when `externalAccountId` differs; rejects true duplicates; `platformConfigs.{platform}.accountId` survives the JSONB round-trip.
+  - `moderation-delta.e2e.test.ts` — hiding a pending comment decrements `unhandledCount`; restoring increments back.
+  - `oauth-flow.e2e.test.ts` — `state` uniqueness, `expiresAt` filter for cleanup.
+
+E2E tests do NOT cover external APIs (mocked), BullMQ enqueue (mocked) or HTTP middleware (covered by integration-with-mocks under `__tests__/integration/`).
+
 ## Landing Page & Onboarding
 
 ### Landing (`src/app/page.tsx`)
@@ -908,5 +953,6 @@ Dismissal persists in `localStorage` (`fanflow:welcome-dismissed = "1"`) so it n
 | `contentGapReports` | Content gap analysis reports with aggregated topic/engagement data |
 | `socialPosts` | Public posts the creator owns (Reddit/IG/Twitter), with cached `commentsCount` and `unhandledCount` for inbox sorting |
 | `socialComments` | Public comments threaded by `parentCommentId`, optionally linked to `contacts`, with `isHandled` state and AI suggestions |
-| `socialAccounts` | One row per `(creator, platform)`; native (encrypted credentials) or webhook (Zapier/Make) connection mode |
-| `scheduledPosts` | One-shot publishing jobs with `targetPlatforms` array, status lifecycle, BullMQ `jobId`, and `externalPostIds` map after publishing |
+| `socialAccounts` | Multiple rows per `(creator, platform)` allowed; unique by `(creator, platform, externalAccountId)`. Native (encrypted credentials + OAuth tokens) or webhook connection mode. OAuth columns: `encryptedOauthAccessToken`, `encryptedOauthRefreshToken`, `oauthExpiresAt`, `oauthScopes[]`, `externalAccountId` |
+| `scheduledPosts` | Publishing jobs with `targetPlatforms` array, status lifecycle, BullMQ `jobId`, `externalPostIds` map, optional recurrence rule + count. `platformConfigs` accepts `accountId` per platform for multi-account routing |
+| `oauthPendingFlows` | Short-lived OAuth state (CSRF token + PKCE verifier) with 10-min TTL, consumed by callback route |
