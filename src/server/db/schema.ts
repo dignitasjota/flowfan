@@ -2089,6 +2089,13 @@ export const socialAccounts = pgTable(
       .notNull(),
     accountUsername: varchar("account_username", { length: 255 }),
     encryptedCredentials: text("encrypted_credentials"),
+    // OAuth fields (used by twitter/instagram). All sensitive values are
+    // AES-256-GCM encrypted before storage via lib/crypto.
+    encryptedOauthAccessToken: text("encrypted_oauth_access_token"),
+    encryptedOauthRefreshToken: text("encrypted_oauth_refresh_token"),
+    oauthExpiresAt: timestamp("oauth_expires_at"),
+    oauthScopes: text("oauth_scopes").array().default([]),
+    externalAccountId: varchar("external_account_id", { length: 255 }),
     isActive: boolean("is_active").default(true).notNull(),
     lastVerifiedAt: timestamp("last_verified_at"),
     lastErrorMessage: text("last_error_message"),
@@ -2101,6 +2108,31 @@ export const socialAccounts = pgTable(
       table.creatorId,
       table.platformType
     ),
+  ]
+);
+
+// Short-lived OAuth flow state. Keys store the PKCE verifier (Twitter) and
+// the original creator so the callback can resume safely. Rows expire after
+// 10 minutes and are cleared periodically.
+export const oauthPendingFlows = pgTable(
+  "oauth_pending_flows",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    state: varchar("state", { length: 128 }).notNull().unique(),
+    creatorId: uuid("creator_id")
+      .notNull()
+      .references(() => creators.id, { onDelete: "cascade" }),
+    provider: varchar("provider", { length: 32 }).notNull(),
+    codeVerifier: text("code_verifier"),
+    redirectAfter: varchar("redirect_after", { length: 255 }).default(
+      "/scheduler"
+    ),
+    expiresAt: timestamp("expires_at").notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("oauth_pending_creator_idx").on(table.creatorId),
+    index("oauth_pending_expires_idx").on(table.expiresAt),
   ]
 );
 

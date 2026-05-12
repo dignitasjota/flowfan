@@ -98,6 +98,14 @@ export function AccountsPanel() {
                         Conectar API
                       </button>
                     )}
+                    {(p === "twitter" || p === "instagram") && (
+                      <a
+                        href={`/api/oauth/${p}/start`}
+                        className="rounded-md bg-indigo-600 px-3 py-1 text-xs text-white hover:bg-indigo-500 text-center"
+                      >
+                        Conectar OAuth
+                      </a>
+                    )}
                     <button
                       onClick={() => enableWebhook.mutate({ platformType: p })}
                       className="rounded-md bg-gray-700 px-3 py-1 text-xs text-gray-200 hover:bg-gray-600"

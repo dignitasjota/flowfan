@@ -36,6 +36,13 @@
       "when": 1778241254509,
       "tag": "0004_misty_korvac",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1778598049402,
+      "tag": "0005_colorful_zarda",
+      "breakpoints": true
     }
   ]
 }

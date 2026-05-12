@@ -1202,6 +1202,119 @@ const scheduledPostWorker = new Worker<ScheduledPostJobData>(
             error: errors[platform],
           }).catch(() => {});
         }
+      } else if (platform === "twitter") {
+        if (!account.encryptedOauthAccessToken) {
+          errors[platform] = "Twitter account not connected via OAuth";
+          continue;
+        }
+        const { publishToTwitter, ensureFreshTwitterToken } = await import(
+          "./services/twitter-publisher"
+        );
+        try {
+          const refreshed = await ensureFreshTwitterToken({
+            encryptedAccess: account.encryptedOauthAccessToken,
+            encryptedRefresh: account.encryptedOauthRefreshToken,
+            expiresAt: account.oauthExpiresAt,
+          });
+          if (refreshed.refreshed) {
+            // Persist refreshed tokens
+            const { socialAccounts: saTable } = await import("./db/schema");
+            await db
+              .update(saTable)
+              .set({
+                encryptedOauthAccessToken: refreshed.newAccessEncrypted,
+                encryptedOauthRefreshToken: refreshed.newRefreshEncrypted,
+                oauthExpiresAt: refreshed.newExpiresAt,
+                updatedAt: new Date(),
+              })
+              .where(eq(saTable.id, account.id));
+          }
+
+          const twitterCfg = ((post.platformConfigs as Record<string, unknown>)?.twitter ?? {}) as {
+            tweet?: string;
+            thread?: string[];
+          };
+          const tweetText = twitterCfg.tweet ?? post.content;
+          const thread = twitterCfg.thread ?? [];
+
+          const result = await publishToTwitter({
+            accessToken: refreshed.accessToken,
+            tweet: tweetText.slice(0, 270),
+            thread: thread.map((t) => t.slice(0, 270)),
+            username: account.accountUsername ?? undefined,
+          });
+          if (result.success) {
+            externalIds[platform] = {
+              id: result.externalId,
+              url: result.externalUrl,
+            };
+            successCount++;
+            dispatchWebhookEvent(db, creatorId, "post.published", {
+              scheduledPostId,
+              platform,
+              externalId: result.externalId,
+              externalUrl: result.externalUrl,
+              threadIds: result.threadIds,
+            }).catch(() => {});
+          } else {
+            errors[platform] = result.error;
+            dispatchWebhookEvent(db, creatorId, "post.failed", {
+              scheduledPostId,
+              platform,
+              error: result.error,
+            }).catch(() => {});
+          }
+        } catch (twErr) {
+          errors[platform] = (twErr as Error).message;
+        }
+      } else if (platform === "instagram") {
+        if (!account.encryptedOauthAccessToken || !account.externalAccountId) {
+          errors[platform] = "Instagram account not connected via OAuth";
+          continue;
+        }
+        const { decrypt } = await import("@/lib/crypto");
+        const { publishToInstagram } = await import(
+          "./services/instagram-publisher"
+        );
+        try {
+          const accessToken = decrypt(account.encryptedOauthAccessToken);
+          const igCfg = ((post.platformConfigs as Record<string, unknown>)?.instagram ?? {}) as {
+            imageUrl?: string;
+          };
+          if (!igCfg.imageUrl) {
+            errors[platform] =
+              "Instagram requires an imageUrl in platformConfigs.instagram";
+            continue;
+          }
+          const result = await publishToInstagram({
+            accessToken,
+            igUserId: account.externalAccountId,
+            imageUrl: igCfg.imageUrl,
+            caption: post.content,
+          });
+          if (result.success) {
+            externalIds[platform] = {
+              id: result.externalId,
+              url: result.externalUrl,
+            };
+            successCount++;
+            dispatchWebhookEvent(db, creatorId, "post.published", {
+              scheduledPostId,
+              platform,
+              externalId: result.externalId,
+              externalUrl: result.externalUrl,
+            }).catch(() => {});
+          } else {
+            errors[platform] = result.error;
+            dispatchWebhookEvent(db, creatorId, "post.failed", {
+              scheduledPostId,
+              platform,
+              error: result.error,
+            }).catch(() => {});
+          }
+        } catch (igErr) {
+          errors[platform] = (igErr as Error).message;
+        }
       } else {
         errors[platform] = `Native publisher not implemented for ${platform}`;
       }
