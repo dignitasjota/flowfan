@@ -714,6 +714,17 @@ async function startScheduler() {
       log.error({ err }, "Error polling Twitter comments");
     }
 
+    // Reconcile Twitter filtered stream rules with the tracked posts.
+    // No-op when TWITTER_BEARER_TOKEN is not set.
+    try {
+      const { syncStreamRules } = await import(
+        "@/server/services/twitter-stream-rules"
+      );
+      await syncStreamRules(db);
+    } catch (err) {
+      log.error({ err }, "Error syncing Twitter stream rules");
+    }
+
     // Inactivity followup enrollment every 30 min (every 6th interval of 5 min)
     inactivityFollowupCounter++;
     if (inactivityFollowupCounter >= 6) {
@@ -1276,11 +1287,12 @@ const scheduledPostWorker = new Worker<ScheduledPostJobData>(
 
             // Mirror to socialPosts so the Twitter comment poller monitors
             // this tweet for replies. Unique index dedupes on retries.
+            let mirroredSocialPostId: string | null = null;
             try {
               const { socialPosts: socialPostsTable } = await import(
                 "./db/schema"
               );
-              await db
+              const [mirrored] = await db
                 .insert(socialPostsTable)
                 .values({
                   creatorId,
@@ -1291,12 +1303,37 @@ const scheduledPostWorker = new Worker<ScheduledPostJobData>(
                   content: post.content,
                   publishedAt: new Date(),
                 })
-                .onConflictDoNothing();
+                .onConflictDoNothing()
+                .returning({ id: socialPostsTable.id });
+              mirroredSocialPostId = mirrored?.id ?? null;
             } catch (syncErr) {
               log.warn(
                 { syncErr, scheduledPostId },
                 "Failed to sync tweet to social_posts (non-critical)"
               );
+            }
+
+            // If filtered stream is enabled, register a rule right away so we
+            // start receiving replies in real time (vs waiting for the 5-min
+            // sync tick).
+            if (mirroredSocialPostId && result.externalId) {
+              try {
+                const { addStreamRuleForPost, getBearerToken } = await import(
+                  "./services/twitter-stream-rules"
+                );
+                if (getBearerToken()) {
+                  await addStreamRuleForPost(db, {
+                    creatorId,
+                    postId: mirroredSocialPostId,
+                    externalPostId: result.externalId,
+                  });
+                }
+              } catch (ruleErr) {
+                log.warn(
+                  { ruleErr, scheduledPostId },
+                  "Failed to add Twitter stream rule (non-critical)"
+                );
+              }
             }
 
             dispatchWebhookEvent(db, creatorId, "post.published", {
@@ -1469,6 +1506,19 @@ scheduledPostWorker.on("failed", (job, err) => {
 
 startScheduler();
 startSummaryScheduler();
+
+// Start the Twitter filtered stream worker if a bearer token is configured.
+// Safe no-op otherwise; the polling fallback in startScheduler keeps working.
+(async () => {
+  try {
+    const { startTwitterStreamWorker } = await import(
+      "./services/twitter-stream-worker"
+    );
+    startTwitterStreamWorker(db);
+  } catch (err) {
+    log.error({ err }, "Failed to start Twitter stream worker");
+  }
+})();
 
 // Graceful shutdown
 process.on("SIGTERM", async () => {
