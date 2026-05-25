@@ -10,6 +10,33 @@ vi.mock("@/lib/logger", () => ({
   }),
 }));
 
+// BullMQ queues — if left unmocked, `workflowQueue.add` hangs waiting for Redis
+// streams the ioredis stub does not implement (XADD / BRPOP).
+vi.mock("@/server/queues", () => ({
+  workflowQueue: {
+    add: vi.fn().mockResolvedValue({ id: "job-1" }),
+  },
+}));
+
+// Redis pub/sub — `publishEvent` is fire-and-forget but we mock it to keep
+// the tests deterministic.
+vi.mock("@/lib/redis-pubsub", () => ({
+  publishEvent: vi.fn().mockResolvedValue(undefined),
+}));
+
+// Webhook dispatcher — same reason: don't hit Redis / fetch from a unit test.
+vi.mock("@/server/services/webhook-dispatcher", () => ({
+  dispatchWebhookEvent: vi.fn().mockResolvedValue(undefined),
+}));
+
+// A/B experiment lookups — wrapped in try/catch in the service, but the
+// internal `db.query.experimentAssignments.findFirst` would throw on the
+// minimal mock. Explicit mock keeps things clean.
+vi.mock("@/server/services/ab-experiment", () => ({
+  findContactExperiment: vi.fn().mockResolvedValue(null),
+  recordExperimentMetric: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock("@/server/services/scoring", () => ({
   updateSignals: vi.fn().mockReturnValue({
     messageCount: 5,
@@ -80,6 +107,12 @@ function createMockDb(profile: Record<string, unknown> | null = null, contact: R
           displayName: "Fan User",
           totalConversations: 2,
         }),
+      },
+      // Only consulted when the contact has `platformType` set. The default
+      // contact above does not, so this path is normally skipped. The mock
+      // is here for forward-compatibility if a test populates platformType.
+      platformScoringConfigs: {
+        findFirst: vi.fn().mockResolvedValue(null),
       },
     },
     update: vi.fn().mockReturnValue({ set: updateSet }),
