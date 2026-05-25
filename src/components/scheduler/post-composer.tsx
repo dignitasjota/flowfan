@@ -71,6 +71,7 @@ export function PostComposer({
   const [tweetThread, setTweetThread] = useState<string[]>(
     initialValues?.twitterThread ?? []
   );
+  const [twitterMediaUrls, setTwitterMediaUrls] = useState<string>("");
   const [redditKind, setRedditKind] = useState<RedditKind>("self");
   const [redditUrl, setRedditUrl] = useState("");
   const [recurring, setRecurring] = useState(false);
@@ -166,10 +167,16 @@ export function PostComposer({
         );
         return;
       }
+      const mediaList = twitterMediaUrls
+        .split("\n")
+        .map((u) => u.trim())
+        .filter((u) => u.startsWith("http"))
+        .slice(0, 4);
       platformConfigs.twitter = {
         ...(platformConfigs.twitter ?? {}),
         tweet: mainTweet,
         thread: cleanThread,
+        ...(mediaList.length > 0 ? { mediaUrls: mediaList } : {}),
       };
       // Flatten for content fallback (other platforms / general consumers)
       twitterContentForFlatten = [mainTweet, ...cleanThread].join("\n\n");
@@ -472,6 +479,23 @@ export function PostComposer({
             >
               + Añadir al hilo
             </button>
+
+            <label className="mt-2 block">
+              <span className="mb-1 block text-[11px] text-gray-500">
+                Imágenes (URLs públicas, una por línea — máx 4)
+              </span>
+              <textarea
+                value={twitterMediaUrls}
+                onChange={(e) => setTwitterMediaUrls(e.target.value)}
+                rows={2}
+                placeholder="https://i.imgur.com/foo.jpg"
+                className="w-full rounded-md border border-gray-700 bg-gray-800 px-2 py-1 text-xs text-white placeholder-gray-500 focus:border-indigo-500 focus:outline-none"
+              />
+              <span className="mt-0.5 block text-[10px] text-gray-500">
+                Se adjuntan al tweet principal vía POST /2/media/upload (OAuth
+                2.0, scope media.write). JPG/PNG/WebP/GIF hasta 5MB.
+              </span>
+            </label>
 
             <p className="text-[11px] text-gray-500">
               El payload del webhook <code>post.publishing</code> incluye

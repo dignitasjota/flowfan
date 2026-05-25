@@ -58,11 +58,15 @@ export async function ensureFreshTwitterToken(args: {
 async function postTweet(
   accessToken: string,
   text: string,
-  inReplyToTweetId?: string
+  inReplyToTweetId?: string,
+  mediaIds?: string[]
 ): Promise<{ id: string }> {
   const body: Record<string, unknown> = { text };
   if (inReplyToTweetId) {
     body.reply = { in_reply_to_tweet_id: inReplyToTweetId };
+  }
+  if (mediaIds && mediaIds.length > 0) {
+    body.media = { media_ids: mediaIds.slice(0, 4) }; // Twitter caps at 4 per tweet
   }
 
   const res = await fetch("https://api.twitter.com/2/tweets", {
@@ -94,12 +98,35 @@ export async function publishToTwitter(args: {
   tweet: string;
   thread?: string[];
   username?: string;
+  /** Public image URLs to attach to the main tweet. Up to 4. */
+  mediaUrls?: string[];
 }): Promise<TwitterPublishResult> {
   try {
     const threadIds: string[] = [];
 
-    // Main tweet
-    const first = await postTweet(args.accessToken, args.tweet);
+    // Upload media first (only if requested). Failures bubble up.
+    let mediaIds: string[] | undefined;
+    if (args.mediaUrls && args.mediaUrls.length > 0) {
+      const { uploadTwitterImageFromUrl } = await import(
+        "./twitter-media-upload"
+      );
+      mediaIds = [];
+      for (const url of args.mediaUrls.slice(0, 4)) {
+        const uploaded = await uploadTwitterImageFromUrl({
+          accessToken: args.accessToken,
+          imageUrl: url,
+        });
+        mediaIds.push(uploaded.mediaId);
+      }
+    }
+
+    // Main tweet — attaches media if uploaded
+    const first = await postTweet(
+      args.accessToken,
+      args.tweet,
+      undefined,
+      mediaIds
+    );
     threadIds.push(first.id);
 
     // Follow-up tweets, each reply-chained to the previous

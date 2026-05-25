@@ -70,6 +70,24 @@ export function AccountsPanel() {
                         Último error: {account.lastErrorMessage}
                       </div>
                     )}
+                    {account.missingScopes && account.missingScopes.length > 0 && (
+                      <div className="mt-1 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-amber-300">
+                        <div className="font-medium">⚠️ Permisos incompletos</div>
+                        <ul className="mt-0.5 list-disc pl-4 text-[11px] text-amber-200">
+                          {account.missingScopes.map((s) => (
+                            <li key={s.scope}>
+                              <code className="text-[10px]">{s.scope}</code> — {s.label}
+                            </li>
+                          ))}
+                        </ul>
+                        <a
+                          href={`/api/oauth/${p}/start`}
+                          className="mt-1 inline-block text-[11px] font-medium text-amber-200 underline hover:text-amber-100"
+                        >
+                          Reconectar para actualizar permisos →
+                        </a>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="mt-1 text-xs text-gray-500">No conectada</div>

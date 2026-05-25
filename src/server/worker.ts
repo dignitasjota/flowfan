@@ -1268,15 +1268,21 @@ const scheduledPostWorker = new Worker<ScheduledPostJobData>(
           const twitterCfg = ((post.platformConfigs as Record<string, unknown>)?.twitter ?? {}) as {
             tweet?: string;
             thread?: string[];
+            mediaUrls?: string[];
           };
           const tweetText = twitterCfg.tweet ?? post.content;
           const thread = twitterCfg.thread ?? [];
+          // Twitter accepts up to 4 images per tweet; rest are ignored.
+          const tweetMediaUrls = (twitterCfg.mediaUrls ?? post.mediaUrls ?? [])
+            .filter((u): u is string => typeof u === "string" && u.length > 0)
+            .slice(0, 4);
 
           const result = await publishToTwitter({
             accessToken: refreshed.accessToken,
             tweet: tweetText.slice(0, 270),
             thread: thread.map((t) => t.slice(0, 270)),
             username: account.accountUsername ?? undefined,
+            mediaUrls: tweetMediaUrls.length > 0 ? tweetMediaUrls : undefined,
           });
           if (result.success) {
             externalIds[platform] = {

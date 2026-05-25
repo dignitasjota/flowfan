@@ -20,6 +20,8 @@ export const TWITTER_SCOPES = [
   "tweet.write",
   "users.read",
   "offline.access",
+  // Required for POST /2/media/upload (attaching images to tweets)
+  "media.write",
 ];
 
 export type TwitterTokens = {

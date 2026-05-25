@@ -38,10 +38,13 @@ const RECURRENCE_RULE_SCHEMA = z
 export const schedulerRouter = createTRPCRouter({
   // ---- Social Accounts ----
   listAccounts: protectedProcedure.query(async ({ ctx }) => {
+    const { getMissingScopes } = await import(
+      "@/server/services/scope-detection"
+    );
     const rows = await ctx.db.query.socialAccounts.findMany({
       where: eq(socialAccounts.creatorId, ctx.creatorId),
     });
-    // Strip encryptedCredentials from response
+    // Strip encryptedCredentials from response, add computed missingScopes
     return rows.map((r) => ({
       id: r.id,
       platformType: r.platformType,
@@ -51,6 +54,12 @@ export const schedulerRouter = createTRPCRouter({
       lastVerifiedAt: r.lastVerifiedAt,
       lastErrorMessage: r.lastErrorMessage,
       hasCredentials: !!r.encryptedCredentials,
+      oauthScopes: r.oauthScopes ?? [],
+      missingScopes: getMissingScopes(
+        r.platformType,
+        r.oauthScopes,
+        r.connectionType
+      ),
       createdAt: r.createdAt,
     }));
   }),
