@@ -1372,17 +1372,19 @@ const scheduledPostWorker = new Worker<ScheduledPostJobData>(
         try {
           const accessToken = decrypt(account.encryptedOauthAccessToken);
           const igCfg = ((post.platformConfigs as Record<string, unknown>)?.instagram ?? {}) as {
-            imageUrl?: string;
+            mediaUrl?: string;
+            imageUrl?: string; // back-compat con posts antiguos
           };
-          if (!igCfg.imageUrl) {
+          const mediaUrl = igCfg.mediaUrl ?? igCfg.imageUrl;
+          if (!mediaUrl) {
             errors[platform] =
-              "Instagram requires an imageUrl in platformConfigs.instagram";
+              "Instagram requires a mediaUrl in platformConfigs.instagram";
             continue;
           }
           const result = await publishToInstagram({
             accessToken,
             igUserId: account.externalAccountId,
-            imageUrl: igCfg.imageUrl,
+            mediaUrl,
             caption: post.content,
           });
           if (result.success) {

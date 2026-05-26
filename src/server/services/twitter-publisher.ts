@@ -1,5 +1,6 @@
 import { decrypt, encrypt } from "@/lib/crypto";
 import { refreshTwitterToken } from "./oauth-twitter";
+import { isVideoUrl } from "@/lib/media";
 
 export type TwitterPublishResult =
   | { success: true; externalId: string; externalUrl: string; threadIds: string[] }
@@ -105,16 +106,30 @@ export async function publishToTwitter(args: {
     const threadIds: string[] = [];
 
     // Upload media first (only if requested). Failures bubble up.
+    // X allows either 1 video OR up to 4 images on the same tweet, never
+    // both. If both are passed we keep the video and drop the rest with a
+    // clear error — silent dropping would mask the user's intent.
     let mediaIds: string[] | undefined;
     if (args.mediaUrls && args.mediaUrls.length > 0) {
-      const { uploadTwitterImageFromUrl } = await import(
+      const { uploadTwitterMediaFromUrl } = await import(
         "./twitter-media-upload"
       );
+      const videos = args.mediaUrls.filter((u) => isVideoUrl(u));
+      const images = args.mediaUrls.filter((u) => !isVideoUrl(u));
+      if (videos.length > 0 && images.length > 0) {
+        throw new Error(
+          "X no permite mezclar vídeo e imágenes en el mismo tweet — usa uno u otro."
+        );
+      }
+      if (videos.length > 1) {
+        throw new Error("X solo permite 1 vídeo por tweet.");
+      }
+      const urls = videos.length > 0 ? videos : images.slice(0, 4);
       mediaIds = [];
-      for (const url of args.mediaUrls.slice(0, 4)) {
-        const uploaded = await uploadTwitterImageFromUrl({
+      for (const url of urls) {
+        const uploaded = await uploadTwitterMediaFromUrl({
           accessToken: args.accessToken,
-          imageUrl: url,
+          mediaUrl: url,
         });
         mediaIds.push(uploaded.mediaId);
       }

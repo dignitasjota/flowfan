@@ -769,7 +769,8 @@ Schedule public posts to native APIs (**Reddit, Twitter / X, Instagram**) or to 
 ### Twitter / X Publisher (OAuth 2.0 PKCE)
 
 - **`oauth-twitter.ts`**: PKCE S256 (`generatePkce`), `buildTwitterAuthorizationUrl`, `exchangeTwitterCode`, `refreshTwitterToken`, `getTwitterMe`. Scopes: `tweet.read tweet.write users.read offline.access` (offline → refresh token).
-- **`twitter-publisher.ts`**: `publishToTwitter({accessToken, tweet, thread[], username})` chains real threads via `POST /2/tweets` with `reply.in_reply_to_tweet_id` linked to the previous tweet id. Each follow-up's id becomes the parent of the next.
+- **`twitter-publisher.ts`**: `publishToTwitter({accessToken, tweet, thread[], username, mediaUrls?})` chains real threads via `POST /2/tweets` with `reply.in_reply_to_tweet_id` linked to the previous tweet id. Each follow-up's id becomes the parent of the next. `mediaUrls` attach to the main tweet only — X allows either **1 video** OR **up to 4 images**, never both (the publisher throws a clear error if mixed).
+- **`twitter-media-upload.ts`**: `uploadTwitterMediaFromUrl({accessToken, mediaUrl})` auto-routes by extension. Images → single-part multipart POST (≤5 MB). Videos → chunked flow `INIT → APPEND (4 MB chunks) → FINALIZE → STATUS poll` until `processing_info.state === "succeeded"` (Twitter transcodes async; referencing a still-processing media_id breaks the tweet). Polling honors `check_after_secs` hints, capped at 5 min total. `uploadTwitterImageFromUrl` kept as a thin alias for legacy callers.
 - `ensureFreshTwitterToken({encryptedAccess, encryptedRefresh, expiresAt})` checks if the token expires within 60 s and uses the refresh token if so. The worker persists the new tokens on `socialAccounts` immediately so the next call uses them.
 - Env vars: `TWITTER_CLIENT_ID`, `TWITTER_CLIENT_SECRET` (optional for public clients), `APP_URL`.
 - Redirect URI to register with developer.x.com: `{APP_URL}/api/oauth/twitter/callback`.
@@ -778,10 +779,10 @@ Schedule public posts to native APIs (**Reddit, Twitter / X, Instagram**) or to 
 
 - **`oauth-instagram.ts`**: full chain `code → short-lived token → long-lived token (~60 days) → enumerate Facebook Pages → resolve Instagram Business Account id per page`. Scopes: `pages_show_list pages_read_engagement instagram_basic instagram_content_publish instagram_manage_comments`. **Pre-condition**: creator must have an Instagram Business/Creator account linked to a Facebook Page (clear error messages otherwise).
 - **Multi-page selection**: `exchangeInstagramCode` returns `accounts[]` with one entry per FB Page that has an IG Business account linked. The OAuth callback creates / updates one `socialAccount` per IG account (multi-account schema already supports it). The creator disables the ones they don't want from `/scheduler → Cuentas`.
-- **`instagram-publisher.ts`**: `publishToInstagram({accessToken, igUserId, imageUrl, caption})` — 2-step flow:
-  1. `POST /{ig_user_id}/media` with `image_url` → container `creation_id`.
-  2. `POST /{ig_user_id}/media_publish` with `creation_id` → posted media id.
-- Image URL must be **publicly accessible** (Instagram fetches it server-side, rejects signed URLs that expire quickly). When R2 is configured (see "Media Storage (R2)"), uploads from the composer's `MediaUploader` land in R2 and the resulting `publicUrl` is fed directly into `platformConfigs.instagram.imageUrl`.
+- **`instagram-publisher.ts`**: `publishToInstagram({accessToken, igUserId, mediaUrl, caption})` auto-routes by URL extension. Images use the 2-step synchronous flow; videos use the Reels async flow with polling:
+  - **Image flow**: `POST /{ig_user_id}/media?image_url=…` → creation_id → `POST /{ig_user_id}/media_publish`. Returns `https://www.instagram.com/p/{id}/`.
+  - **Reel flow**: `POST /{ig_user_id}/media?media_type=REELS&video_url=…` → creation_id → poll `GET /{creation_id}?fields=status_code` until `FINISHED` (or surface `ERROR`/`EXPIRED`/timeout) → `POST /{ig_user_id}/media_publish`. Returns `https://www.instagram.com/reel/{id}/`. Polling caps at 5 min with 5s interval — IG ingestion typically completes in under a minute, anything longer is usually stuck.
+- The `platformConfigs.instagram` JSONB uses `mediaUrl` (with `imageUrl` accepted as legacy fallback). Media URL must be **publicly accessible** (Instagram fetches it server-side, rejects signed URLs that expire quickly). When R2 is configured (see "Media Storage (R2)"), uploads from the composer's `MediaUploader` land in R2 and the resulting `publicUrl` is fed directly into `platformConfigs.instagram.mediaUrl`.
 - Env vars: `FB_CLIENT_ID`, `FB_CLIENT_SECRET`, `APP_URL`.
 - Redirect URI to register with developers.facebook.com: `{APP_URL}/api/oauth/instagram/callback`.
 

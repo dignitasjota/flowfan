@@ -184,16 +184,16 @@ export function PostComposer({
     }
 
     if (selected.has("instagram")) {
-      const imageUrl = instagramImageUrls[0];
-      if (!imageUrl) {
+      const mediaUrl = instagramImageUrls[0];
+      if (!mediaUrl) {
         setErrorMsg(
-          "Instagram requiere una imagen. Súbela o pega una URL pública."
+          "Instagram requiere una imagen o vídeo. Súbelo o pega una URL pública."
         );
         return;
       }
       platformConfigs.instagram = {
         ...(platformConfigs.instagram ?? {}),
-        imageUrl,
+        mediaUrl,
       };
     }
 
@@ -509,17 +509,19 @@ export function PostComposer({
 
             <div className="mt-2">
               <span className="mb-1 block text-[11px] text-gray-500">
-                Imágenes (máx 4) — se adjuntan al tweet principal
+                Imágenes (máx 4) o 1 vídeo — se adjunta al tweet principal
               </span>
               <MediaUploader
                 value={twitterMediaUrls}
                 onChange={setTwitterMediaUrls}
                 max={4}
-                hint="Pega URL pública o sube imagen"
+                kinds={["image", "video"]}
+                hint="Pega URL pública o sube imagen / vídeo"
               />
               <span className="mt-0.5 block text-[10px] text-gray-500">
-                Subida vía POST /2/media/upload (OAuth 2.0, scope media.write).
-                JPG/PNG/WebP/GIF.
+                Subida vía /2/media/upload (OAuth 2.0, scope media.write).
+                Vídeo: chunked + polling de procesamiento. X no permite
+                mezclar vídeo e imagen en el mismo tweet.
               </span>
             </div>
 
@@ -535,20 +537,21 @@ export function PostComposer({
           <div className="mb-3 space-y-2 rounded-md border border-gray-800 bg-gray-950/40 p-3">
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium text-gray-300">
-                📷 Imagen de Instagram
+                📷 Imagen o vídeo (Reel) de Instagram
               </span>
             </div>
             <MediaUploader
               value={instagramImageUrls}
               onChange={setInstagramImageUrls}
               max={1}
-              hint="Pega URL pública o sube imagen"
+              kinds={["image", "video"]}
+              hint="Pega URL pública o sube imagen / vídeo"
             />
             <p className="text-[11px] text-gray-500">
-              Instagram fetchea la imagen desde el servidor — la URL debe ser
+              Instagram fetchea el archivo desde el servidor — la URL debe ser
               pública. La subida vía R2 cumple este requisito automáticamente.
-              El caption se toma del campo &quot;Contenido&quot; (máx 2200
-              caracteres).
+              Si subes vídeo se publica como Reel (3-90s, MP4). El caption se
+              toma del campo &quot;Contenido&quot; (máx 2200 caracteres).
             </p>
           </div>
         )}
