@@ -1164,8 +1164,9 @@ const scheduledPostWorker = new Worker<ScheduledPostJobData>(
             flairId?: string;
             nsfw?: boolean;
             spoiler?: boolean;
-            kind?: "self" | "link" | "image";
+            kind?: "self" | "link" | "image" | "video";
             url?: string;
+            posterUrl?: string;
           };
         if (!cfg.subreddit) {
           errors[platform] = "Missing subreddit in platform config";
@@ -1183,6 +1184,7 @@ const scheduledPostWorker = new Worker<ScheduledPostJobData>(
             subreddit: cfg.subreddit,
             kind: cfg.kind ?? "self",
             url: cfg.url,
+            posterUrl: cfg.posterUrl,
             flairId: cfg.flairId,
             nsfw: cfg.nsfw,
             spoiler: cfg.spoiler,

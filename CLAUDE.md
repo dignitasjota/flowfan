@@ -756,11 +756,17 @@ Schedule public posts to native APIs (**Reddit, Twitter / X, Instagram**) or to 
 ### Reddit Publisher (`src/server/services/scheduler-publisher.ts`)
 
 - `verifyRedditCredentials(creds)` — auth handshake + `/api/v1/me` check, returns `{ok, username}`.
-- `publishToReddit(encryptedCreds, post, creatorId?)` — decrypts, OAuth password grant (cached when `creatorId` passed), `POST /api/submit`. Supports three kinds:
+- `publishToReddit(encryptedCreds, post, creatorId?)` — decrypts, OAuth password grant (cached when `creatorId` passed), `POST /api/submit`. Supports four kinds:
   - `kind: "self"` (default) — text post; sends `text` field with the content.
   - `kind: "link"` — link to an external URL; requires `url`. Sends `resubmit=true`.
   - `kind: "image"` — image post via public URL; requires `url`. Reddit accepts external public URLs (i.imgur, redd.it, S3...) directly without the `media/asset.json` upload flow. The URL must be publicly accessible or Reddit rejects the submission.
+  - `kind: "video"` — native video; requires `url` (R2/CDN source) and `posterUrl` (public JPG/PNG thumbnail). Reddit only accepts videos hosted on its own CDN, so the publisher re-uploads through `reddit-video-upload.ts` first (see below).
   - Returns `{success, externalId, externalUrl, error}`. On 401, invalidates the cached token automatically.
+- **`reddit-video-upload.ts`**: `uploadRedditVideoFromUrl({accessToken, videoUrl, userAgent?})` runs the asset-lease + S3 multipart dance:
+  1. `POST /api/v1/media/asset.json?filepath=...&mimetype=...` → lease `{args: {action, fields[]}, asset: {asset_id}}`.
+  2. Fetch source bytes (R2 / CDN), then multipart POST to `lease.args.action` with all lease fields (key first) + the file last — S3 enforces field order.
+  3. Returns the final CDN URL `${action}/${key}` for use on `/api/submit?kind=video`.
+  - 5-min timeout on the S3 upload (videos can be large). All errors bubble up with HTTP status context.
 - Title trimmed to 300 chars; supports `flair_id`, `nsfw`, `spoiler` flags.
 - User-Agent: `FanFlow/1.0 (by /u/fanflow)`.
 - **OAuth token cache (Redis)**: `getRedditAccessTokenCached(creatorId, creds)` stores tokens with 50-min TTL (Reddit tokens last 60 min — 10-min cushion). Cache miss → fetch + store. Failures fall through to direct fetch silently. `invalidateRedditTokenCache(creatorId)` for forced refresh on 401. Both publisher and `reddit-poller` use the cached version, going from ~289 token fetches/day per account to ~30.

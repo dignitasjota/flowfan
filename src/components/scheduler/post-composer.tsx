@@ -48,7 +48,7 @@ function formatDateTimeLocal(d: Date): string {
   )}:${pad(d.getMinutes())}`;
 }
 
-type RedditKind = "self" | "link" | "image";
+type RedditKind = "self" | "link" | "image" | "video";
 type Frequency = "daily" | "weekly" | "monthly";
 
 export function PostComposer({
@@ -76,6 +76,8 @@ export function PostComposer({
   const [redditKind, setRedditKind] = useState<RedditKind>("self");
   const [redditUrl, setRedditUrl] = useState("");
   const [redditImageUrls, setRedditImageUrls] = useState<string[]>([]);
+  const [redditVideoUrls, setRedditVideoUrls] = useState<string[]>([]);
+  const [redditPosterUrls, setRedditPosterUrls] = useState<string[]>([]);
   const [instagramImageUrls, setInstagramImageUrls] = useState<string[]>([]);
   const [recurring, setRecurring] = useState(false);
   const [recFrequency, setRecFrequency] = useState<Frequency>("weekly");
@@ -138,12 +140,31 @@ export function PostComposer({
         return;
       }
       const redditMediaUrl =
-        redditKind === "image" ? redditImageUrls[0] : redditUrl.trim();
-      if ((redditKind === "link" || redditKind === "image") && !redditMediaUrl) {
+        redditKind === "image"
+          ? redditImageUrls[0]
+          : redditKind === "video"
+          ? redditVideoUrls[0]
+          : redditUrl.trim();
+      if (
+        (redditKind === "link" ||
+          redditKind === "image" ||
+          redditKind === "video") &&
+        !redditMediaUrl
+      ) {
         setErrorMsg(
           redditKind === "link"
             ? "Pega la URL del enlace."
-            : "Sube una imagen o pega una URL pública."
+            : redditKind === "image"
+            ? "Sube una imagen o pega una URL pública."
+            : "Sube un vídeo o pega una URL pública."
+        );
+        return;
+      }
+      const redditPosterUrl =
+        redditKind === "video" ? redditPosterUrls[0] : undefined;
+      if (redditKind === "video" && !redditPosterUrl) {
+        setErrorMsg(
+          "Reddit necesita una imagen de portada (poster) para el vídeo."
         );
         return;
       }
@@ -152,6 +173,7 @@ export function PostComposer({
         subreddit: subreddit.trim(),
         kind: redditKind,
         ...(redditKind !== "self" ? { url: redditMediaUrl } : {}),
+        ...(redditPosterUrl ? { posterUrl: redditPosterUrl } : {}),
       };
     }
 
@@ -379,7 +401,7 @@ export function PostComposer({
                 Tipo de post
               </span>
               <div className="flex gap-1">
-                {(["self", "link", "image"] as const).map((k) => (
+                {(["self", "link", "image", "video"] as const).map((k) => (
                   <button
                     key={k}
                     type="button"
@@ -395,7 +417,9 @@ export function PostComposer({
                       ? "Texto"
                       : k === "link"
                       ? "Enlace"
-                      : "Imagen"}
+                      : k === "image"
+                      ? "Imagen"
+                      : "Vídeo"}
                   </button>
                 ))}
               </div>
@@ -429,6 +453,39 @@ export function PostComposer({
                 <span className="mt-1 block text-xs text-gray-500">
                   Reddit requiere una URL pública (R2/CDN). Subir aquí la deja
                   accesible automáticamente.
+                </span>
+              </div>
+            )}
+
+            {redditKind === "video" && (
+              <div className="space-y-2">
+                <div>
+                  <span className="mb-1 block text-xs font-medium text-gray-400">
+                    Vídeo
+                  </span>
+                  <MediaUploader
+                    value={redditVideoUrls}
+                    onChange={setRedditVideoUrls}
+                    max={1}
+                    kinds={["video"]}
+                    hint="Pega URL pública o sube vídeo"
+                  />
+                </div>
+                <div>
+                  <span className="mb-1 block text-xs font-medium text-gray-400">
+                    Portada (poster)
+                  </span>
+                  <MediaUploader
+                    value={redditPosterUrls}
+                    onChange={setRedditPosterUrls}
+                    max={1}
+                    hint="JPG/PNG público o sube imagen"
+                  />
+                </div>
+                <span className="mt-1 block text-xs text-gray-500">
+                  Reddit re-hostea el vídeo en su CDN automáticamente (asset
+                  lease + S3). La portada se exige por la API y se muestra como
+                  thumbnail en el feed.
                 </span>
               </div>
             )}
@@ -593,7 +650,13 @@ export function PostComposer({
                 content={content}
                 redditSubreddit={subreddit}
                 redditKind={redditKind}
-                redditUrl={redditUrl}
+                redditUrl={
+                  redditKind === "image"
+                    ? redditImageUrls[0]
+                    : redditKind === "video"
+                    ? redditVideoUrls[0]
+                    : redditUrl
+                }
                 twitterTweet={tweetMain}
                 twitterThread={tweetThread}
               />

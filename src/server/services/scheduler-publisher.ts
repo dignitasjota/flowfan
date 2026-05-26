@@ -128,7 +128,7 @@ export async function getRedditAccessToken(
   return data.access_token;
 }
 
-export type RedditPostKind = "self" | "link" | "image";
+export type RedditPostKind = "self" | "link" | "image" | "video";
 
 export async function publishToReddit(
   encryptedCredentials: string,
@@ -137,8 +137,10 @@ export async function publishToReddit(
     content: string;
     subreddit: string;
     kind?: RedditPostKind;
-    /** Required for kind=link or kind=image. For images Reddit accepts a public URL directly. */
+    /** Required for kind=link or kind=image. For images Reddit accepts a public URL directly. For kind=video this is the source video URL (R2/CDN) that we'll re-upload to Reddit's own hosting. */
     url?: string;
+    /** Public JPG/PNG URL used as the video thumbnail. Required for kind=video. */
+    posterUrl?: string;
     flairId?: string;
     nsfw?: boolean;
     spoiler?: boolean;
@@ -166,11 +168,35 @@ export async function publishToReddit(
 
   const kind: RedditPostKind = post.kind ?? "self";
 
-  if ((kind === "link" || kind === "image") && !post.url) {
+  if ((kind === "link" || kind === "image" || kind === "video") && !post.url) {
     return {
       success: false,
       error: `Reddit ${kind} post requires a url`,
     };
+  }
+  if (kind === "video" && !post.posterUrl) {
+    return {
+      success: false,
+      error: "Reddit video post requires a posterUrl (public JPG/PNG thumbnail)",
+    };
+  }
+
+  // For kind=video, Reddit only accepts videos hosted on its own CDN. Upload
+  // the source first (R2 → Reddit asset lease → S3 multipart) and use the
+  // resulting media URL on /api/submit.
+  let videoMediaUrl: string | undefined;
+  if (kind === "video") {
+    try {
+      const { uploadRedditVideoFromUrl } = await import("./reddit-video-upload");
+      const uploaded = await uploadRedditVideoFromUrl({
+        accessToken: token,
+        videoUrl: post.url!,
+        userAgent: creds.userAgent,
+      });
+      videoMediaUrl = uploaded.mediaUrl;
+    } catch (err) {
+      return { success: false, error: (err as Error).message };
+    }
   }
 
   const body = new URLSearchParams({
@@ -183,6 +209,10 @@ export async function publishToReddit(
   });
   if (kind === "self") {
     body.append("text", post.content);
+  } else if (kind === "video") {
+    body.append("url", videoMediaUrl!);
+    body.append("video_poster_url", post.posterUrl!);
+    body.append("resubmit", "true");
   } else {
     body.append("url", post.url!);
     body.append("resubmit", "true");

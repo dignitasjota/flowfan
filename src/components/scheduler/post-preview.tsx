@@ -9,7 +9,7 @@ type Props = {
   title?: string;
   content?: string;
   redditSubreddit?: string;
-  redditKind?: "self" | "link" | "image";
+  redditKind?: "self" | "link" | "image" | "video";
   redditUrl?: string;
   twitterTweet?: string;
   twitterThread?: string[];
@@ -81,7 +81,7 @@ function RedditPreview({
   subreddit: string;
   title: string;
   content?: string;
-  kind: "self" | "link" | "image";
+  kind: "self" | "link" | "image" | "video";
   url?: string;
   author: string;
 }) {
@@ -119,6 +119,18 @@ function RedditPreview({
             onError={(e) => {
               (e.target as HTMLImageElement).style.display = "none";
             }}
+          />
+        </div>
+      )}
+      {kind === "video" && url && (
+        <div className="mt-2 overflow-hidden rounded-md bg-gray-900">
+          <video
+            src={url}
+            className="max-h-72 w-full object-contain"
+            controls
+            muted
+            playsInline
+            preload="metadata"
           />
         </div>
       )}
