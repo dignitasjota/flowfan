@@ -472,6 +472,7 @@ export function PostComposer({
                     max={1}
                     kinds={["video"]}
                     hint="Pega URL pública o sube vídeo"
+                    videoConstraints={{ maxSec: 900, label: "Reddit" }}
                   />
                 </div>
                 <div>
@@ -577,6 +578,7 @@ export function PostComposer({
                 max={4}
                 kinds={["image", "video"]}
                 hint="Pega URL pública o sube imagen / vídeo"
+                videoConstraints={{ maxSec: 140, label: "X / Twitter" }}
               />
               <span className="mt-0.5 block text-[10px] text-gray-500">
                 Subida vía /2/media/upload (OAuth 2.0, scope media.write).
@@ -609,6 +611,7 @@ export function PostComposer({
               max={10}
               kinds={["image", "video"]}
               hint="Pega URL pública o sube imagen / vídeo"
+              videoConstraints={{ minSec: 3, maxSec: 90, label: "Reels" }}
             />
             <p className="text-[11px] text-gray-500">
               1 elemento = post único (foto) o Reel (vídeo 3-90s).

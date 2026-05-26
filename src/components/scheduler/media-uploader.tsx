@@ -1,10 +1,17 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
-import { isVideoUrl } from "@/lib/media";
+import { isVideoUrl, getVideoDuration } from "@/lib/media";
 
 type MediaKind = "image" | "video";
+
+type VideoConstraints = {
+  minSec?: number;
+  maxSec?: number;
+  /** Etiqueta destino para los warnings (ej. "Reels"). */
+  label?: string;
+};
 
 type Props = {
   /** Existing URLs (uploaded or pasted). Pipes back changes to the parent. */
@@ -16,6 +23,8 @@ type Props = {
   hint?: string;
   /** Media kinds accepted. Defaults to image-only — pass `["image","video"]` to allow MP4/MOV/WebM. */
   kinds?: MediaKind[];
+  /** Cuando se setea, los vídeos se sondean tras subir/pegar y se avisa si la duración cae fuera del rango. No bloquea el envío — la plataforma destino dará el reject final. */
+  videoConstraints?: VideoConstraints;
 };
 
 const ACCEPT_BY_KIND: Record<MediaKind, string> = {
@@ -29,6 +38,7 @@ export function MediaUploader({
   max = 4,
   hint,
   kinds = ["image"],
+  videoConstraints,
 }: Props) {
   const accept = kinds.map((k) => ACCEPT_BY_KIND[k]).join(",");
   const allowsVideo = kinds.includes("video");
@@ -52,6 +62,43 @@ export function MediaUploader({
   const [dragOver, setDragOver] = useState(false);
   const [pasteUrl, setPasteUrl] = useState("");
   const inputRef = useRef<HTMLInputElement | null>(null);
+  // Per-URL duration probe results. `null` = pendiente; `number` = segundos.
+  const [durations, setDurations] = useState<Record<string, number | null>>({});
+
+  useEffect(() => {
+    if (!videoConstraints) return;
+    const pending = value.filter(
+      (u) => isVideoUrl(u) && !(u in durations)
+    );
+    if (pending.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      for (const url of pending) {
+        const dur = await getVideoDuration(url);
+        if (cancelled) return;
+        setDurations((prev) => ({ ...prev, [url]: dur }));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [value, videoConstraints, durations]);
+
+  function durationWarning(url: string): string | null {
+    if (!videoConstraints || !isVideoUrl(url)) return null;
+    const dur = durations[url];
+    if (dur === undefined) return null; // todavía sondeando
+    if (dur === null) return null; // no pudimos leerlo — sin aviso
+    const { minSec, maxSec, label } = videoConstraints;
+    const target = label ?? "esta plataforma";
+    if (minSec != null && dur < minSec) {
+      return `${dur.toFixed(1)}s — ${target} exige mínimo ${minSec}s`;
+    }
+    if (maxSec != null && dur > maxSec) {
+      return `${dur.toFixed(1)}s — ${target} acepta hasta ${maxSec}s`;
+    }
+    return null;
+  }
 
   async function uploadFile(file: File) {
     if (value.length >= max) {
@@ -188,41 +235,53 @@ export function MediaUploader({
 
       {/* Uploaded thumbnails */}
       {value.length > 0 && (
-        <div className="grid grid-cols-4 gap-2">
-          {value.map((url, i) => (
-            <div
-              key={i}
-              className="group relative aspect-square overflow-hidden rounded-md border border-gray-700 bg-gray-900"
-            >
-              {isVideoUrl(url) ? (
-                <video
-                  src={url}
-                  className="h-full w-full object-cover"
-                  muted
-                  playsInline
-                  preload="metadata"
-                />
-              ) : (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={url}
-                  alt="upload preview"
-                  className="h-full w-full object-cover"
-                  onError={(e) => {
-                    (e.target as HTMLImageElement).style.opacity = "0.3";
-                  }}
-                />
-              )}
-              <button
-                type="button"
-                onClick={() => removeAt(i)}
-                className="absolute right-1 top-1 rounded-full bg-black/70 px-1.5 py-0.5 text-[10px] text-white opacity-0 transition group-hover:opacity-100"
-                title="Eliminar"
-              >
-                ✕
-              </button>
-            </div>
-          ))}
+        <div className="space-y-1">
+          <div className="grid grid-cols-4 gap-2">
+            {value.map((url, i) => {
+              const warning = durationWarning(url);
+              return (
+                <div key={i} className="space-y-1">
+                  <div className="group relative aspect-square overflow-hidden rounded-md border border-gray-700 bg-gray-900">
+                    {isVideoUrl(url) ? (
+                      <video
+                        src={url}
+                        className="h-full w-full object-cover"
+                        muted
+                        playsInline
+                        preload="metadata"
+                      />
+                    ) : (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={url}
+                        alt="upload preview"
+                        className="h-full w-full object-cover"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).style.opacity = "0.3";
+                        }}
+                      />
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => removeAt(i)}
+                      className="absolute right-1 top-1 rounded-full bg-black/70 px-1.5 py-0.5 text-[10px] text-white opacity-0 transition group-hover:opacity-100"
+                      title="Eliminar"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  {warning && (
+                    <div
+                      className="rounded-sm border border-amber-500/30 bg-amber-500/10 px-1 py-0.5 text-[10px] leading-tight text-amber-300"
+                      title="La plataforma destino rechazará el envío"
+                    >
+                      ⚠ {warning}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 

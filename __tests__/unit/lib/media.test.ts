@@ -1,5 +1,15 @@
 import { describe, it, expect } from "vitest";
-import { isVideoUrl } from "@/lib/media";
+import { isVideoUrl, getVideoDuration } from "@/lib/media";
+
+describe("getVideoDuration", () => {
+  it("returns null in non-browser environments (no document)", async () => {
+    // El test runner de unit no provee `document`; el helper defiende ese
+    // path retornando null en lugar de intentar crear un <video>.
+    expect(typeof document).toBe("undefined");
+    const result = await getVideoDuration("https://cdn/clip.mp4");
+    expect(result).toBeNull();
+  });
+});
 
 describe("isVideoUrl", () => {
   it("detects common video extensions", () => {
