@@ -862,7 +862,8 @@ Thin wrapper over `@aws-sdk/client-s3` pointed at R2's S3-compatible endpoint (s
 1. Auth check, MIME validation (`image/jpeg|png|gif|webp`, `video/mp4|quicktime|webm`), 50MB size cap.
 2. Plan limits (`checkMediaFileLimit` + `checkMediaStorageLimit`).
 3. `sharp` optimization for images (resize to 2048px max dim + format-specific quality).
-4. **R2 upload** — when `isR2Configured()`. Applies to all media types (images, GIFs, videos); only images run through sharp first, videos travel as the original buffer. Persists `r2Key` and `publicUrl` on the `mediaItems` row.
+4. **R2 upload** — when `isR2Configured()`. Applies to all media types (images, GIFs, videos); only images run through sharp first, videos travel as the original buffer. Persists `r2Key` on the `mediaItems` row. `publicUrl` is persisted UNLESS the upload set `isPrivate=true` (form field), in which case the row keeps `publicUrl=null` and `isPrivate=true` so no consumer accidentally uses a stable URL — `/api/media/[id]` signs at request time instead.
+   - **Magic-byte check**: before optimizing or uploading, `bufferMatchesMime(buffer, file.type)` in `@/lib/file-magic` validates that the first bytes match the declared MIME. Closes the "PDF disguised as image" path — the client-sent `Content-Type` header is not trusted on its own.
 5. **Always writes a local copy** at `uploads/{creatorId}/{fileId}.{ext}` — kept until the legacy `storagePath` consumers (thumbnail generation, FS-only items) are migrated.
 6. Thumbnail (200×200 WebP) generated locally only — not uploaded to R2 (internal to Media Vault, never exposed to external platforms).
 
@@ -870,7 +871,8 @@ Thin wrapper over `@aws-sdk/client-s3` pointed at R2's S3-compatible endpoint (s
 
 - Auth check first.
 - `?thumb=1` → reads thumbnail from FS local (thumbnails aren't in R2).
-- Item has `publicUrl` → `302 redirect` to R2 CDN. Offloads bytes from the VPS and benefits from R2's 1-year `immutable` cache.
+- **`isPrivate=true` item with `r2Key`** → `getSignedUrlForKey({key, expiresInSec: 3600})` from `r2-storage`, then `302 redirect` to the presigned URL. The URL expires in 1h — not indexable nor cacheable long-term. If signing fails or R2 isn't configured, falls through to FS.
+- **Public item with `publicUrl`** → `302 redirect` to the R2 CDN (1-year `immutable` cache).
 - Otherwise → falls back to `readFile` from FS (legacy items uploaded before R2 was configured).
 
 ### Deletion (`src/server/api/routers/media.ts`)
@@ -901,10 +903,17 @@ Both `delete` and `bulkDelete` mutations:
 
 `scripts/backfill-media-to-r2.ts` (run via `npm run backfill:media-r2`) walks `mediaItems WHERE r2_key IS NULL`, reads the local file, uploads to R2 and persists `r2Key` + `publicUrl`. Idempotent and resumable. Flags: `--dry-run`, `--limit N`, `--include-archived`. Tolerates missing local files (skips + logs). Used after enabling R2 on a previously FS-only deployment.
 
+### Private media (opt-in)
+
+`mediaItems.isPrivate` (default `false`) toggles per-item privacy. Set the form field `isPrivate=1` on `/api/media/upload` to enable. Effects:
+- Upload to R2 happens as usual but `publicUrl` is stored as `NULL` in the DB so no consumer (composer, tRPC list, etc.) ever shows it.
+- `/api/media/[id]` calls `getSignedUrlForKey({key, expiresInSec: 3600})` and redirects to the resulting signed URL each request. Default 1h expiry — long enough for browser sessions and platform fetchers (Reddit/IG/X typically download in seconds), short enough to die before being cached publicly.
+- Falls back to FS gracefully when R2 isn't configured or the presigner throws.
+
 ### Limitations / future work
 
 - **No automatic cleanup** of orphaned R2 objects if a `mediaItems` row is deleted via raw SQL bypassing the tRPC router. The router-driven path (`delete` / `bulkDelete`) does call `deleteObject` — but manual DB edits would leak.
-- **Public URL is enumerable** (12 random hex bytes per path). Same trust model as the rest of the publishing pipeline (Reddit / IG / X already need it). For private media a signed-URL flow would be a future change.
+- **Public URL is enumerable** (12 random hex bytes per path) for non-private items. Same trust model as the rest of the publishing pipeline. For media that needs stronger privacy, mark with `isPrivate=true` so the URL is signed and short-lived.
 
 ## Blog-to-Social (AI repurposing)
 
@@ -1084,4 +1093,4 @@ Dismissal persists in `localStorage` (`fanflow:welcome-dismissed = "1"`) so it n
 | `socialAccounts` | Multiple rows per `(creator, platform)` allowed; unique by `(creator, platform, externalAccountId)`. Native (encrypted credentials + OAuth tokens) or webhook connection mode. OAuth columns: `encryptedOauthAccessToken`, `encryptedOauthRefreshToken`, `oauthExpiresAt`, `oauthScopes[]`, `externalAccountId` |
 | `scheduledPosts` | Publishing jobs with `targetPlatforms` array, status lifecycle, BullMQ `jobId`, `externalPostIds` map, optional recurrence rule + count. `platformConfigs` accepts `accountId` per platform for multi-account routing |
 | `oauthPendingFlows` | Short-lived OAuth state (CSRF token + PKCE verifier) with 10-min TTL, consumed by callback route |
-| `mediaItems` | Per-creator media library (images/videos/gifs). `storagePath` is the local FS path; `r2Key` + `publicUrl` populated when uploaded to Cloudflare R2 (images/gifs only). Powers the Media Vault + composer uploader |
+| `mediaItems` | Per-creator media library (images/videos/gifs). `storagePath` is the local FS path; `r2Key` + `publicUrl` populated when uploaded to Cloudflare R2 (all media types). `isPrivate` toggles signed-URL serving (publicUrl stored as NULL). Powers the Media Vault + composer uploader |

@@ -1,4 +1,10 @@
-import { S3Client, PutObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
+import {
+  S3Client,
+  PutObjectCommand,
+  DeleteObjectCommand,
+  GetObjectCommand,
+} from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { randomBytes } from "crypto";
 
 /**
@@ -125,4 +131,23 @@ export async function deleteObject(key: string): Promise<void> {
 /** Convenience: derive the public URL from a key without uploading. */
 export function publicUrlFor(key: string): string {
   return `${getPublicBase()}/${key}`;
+}
+
+/**
+ * Genera una URL pre-firmada (GET) válida durante `expiresInSec` segundos.
+ * Usado para media marcado como `isPrivate=true` — la URL es accesible sin
+ * auth de R2 pero caduca, así que no es indexable ni cacheable a largo
+ * plazo. Default 1h: balance entre uso interno (sesión del browser) y
+ * fetchers de plataforma (suelen completar en segundos).
+ */
+export async function getSignedUrlForKey(args: {
+  key: string;
+  expiresInSec?: number;
+}): Promise<string> {
+  const bucket = getBucket();
+  return getSignedUrl(
+    getClient(),
+    new GetObjectCommand({ Bucket: bucket, Key: args.key }),
+    { expiresIn: args.expiresInSec ?? 3600 }
+  );
 }

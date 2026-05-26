@@ -604,6 +604,9 @@ export const mediaItems = pgTable(
       onDelete: "set null",
     }),
     isArchived: boolean("is_archived").default(false).notNull(),
+    /** Cuando true, /api/media/[id] firma URL temporal R2 en vez de redirigir
+     *  al publicUrl. El item NO se expone como URL pública estable. */
+    isPrivate: boolean("is_private").default(false).notNull(),
     sendCount: integer("send_count").default(0).notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),

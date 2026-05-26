@@ -43,6 +43,10 @@ export async function POST(request: Request) {
     const file = formData.get("file") as File | null;
     const categoryId = formData.get("categoryId") as string | null;
     const tagsRaw = formData.get("tags") as string | null;
+    // Opcional: cuando "1", el item se sube a R2 pero `publicUrl` se devuelve
+    // como null al cliente y /api/media/[id] firmará URL al vuelo en cada
+    // request. Para media que no debe quedar como URL pública adivinable.
+    const isPrivate = formData.get("isPrivate") === "1";
 
     if (!file) {
       return NextResponse.json({ error: "No se proporcionó archivo" }, { status: 400 });
@@ -183,7 +187,9 @@ export async function POST(request: Request) {
       ? tagsRaw.split(",").map((t) => t.trim()).filter(Boolean)
       : [];
 
-    // Insertar en DB
+    // Insertar en DB. Si isPrivate, NO persistimos `publicUrl` en DB para que
+    // ningún consumer la use por accidente; sólo queda r2Key, y el serving
+    // route firma URL al vuelo.
     const [mediaItem] = await db
       .insert(mediaItems)
       .values({
@@ -195,7 +201,8 @@ export async function POST(request: Request) {
         fileSize: optimizedSize,
         storagePath,
         r2Key,
-        publicUrl,
+        publicUrl: isPrivate ? null : publicUrl,
+        isPrivate,
         thumbnailPath,
         width,
         height,

@@ -20,12 +20,23 @@ vi.mock("@aws-sdk/client-s3", () => {
     readonly type = "Delete";
     constructor(public input: Record<string, unknown>) {}
   }
+  class GetObjectCommand {
+    readonly type = "Get";
+    constructor(public input: Record<string, unknown>) {}
+  }
   class S3Client {
     constructor(public config: Record<string, unknown>) {}
     send = sendSpy;
   }
-  return { S3Client, PutObjectCommand, DeleteObjectCommand };
+  return { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand };
 });
+
+vi.mock("@aws-sdk/s3-request-presigner", () => ({
+  getSignedUrl: vi.fn(
+    async (_client, command: { input: { Bucket: string; Key: string } }, opts: { expiresIn: number }) =>
+      `https://signed.example/${command.input.Bucket}/${command.input.Key}?exp=${opts.expiresIn}`
+  ),
+}));
 
 type R2Module = typeof import("@/server/services/r2-storage");
 
@@ -225,6 +236,25 @@ describe("r2-storage", () => {
       expect(cmd.type).toBe("Delete");
       expect(cmd.input.Bucket).toBe(FULL_ENV.R2_BUCKET);
       expect(cmd.input.Key).toBe("creators/c1/foo.jpg");
+    });
+  });
+
+  describe("getSignedUrlForKey", () => {
+    it("delegates to s3-request-presigner with bucket+key and a 1h default", async () => {
+      const mod = await loadR2(FULL_ENV);
+      const url = await mod.getSignedUrlForKey({ key: "creators/c1/x.png" });
+      expect(url).toBe(
+        `https://signed.example/${FULL_ENV.R2_BUCKET}/creators/c1/x.png?exp=3600`
+      );
+    });
+
+    it("honors a custom expiresInSec", async () => {
+      const mod = await loadR2(FULL_ENV);
+      const url = await mod.getSignedUrlForKey({
+        key: "k",
+        expiresInSec: 60,
+      });
+      expect(url).toContain("exp=60");
     });
   });
 
