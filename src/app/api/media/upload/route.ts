@@ -14,6 +14,7 @@ import {
   isR2Configured,
   uploadBuffer as uploadToR2,
 } from "@/server/services/r2-storage";
+import { bufferMatchesMime } from "@/lib/file-magic";
 
 const log = createChildLogger("media-upload");
 
@@ -81,6 +82,19 @@ export async function POST(request: Request) {
     // Escribir archivo (con optimización para imágenes)
     let buffer: Buffer = Buffer.from(await file.arrayBuffer());
     let optimizedSize = file.size;
+
+    // Verifica magic bytes: el header Content-Type lo manda el cliente y
+    // podría no corresponder con el contenido real. Bloqueamos antes de
+    // gastar CPU en sharp o subir a R2.
+    if (!bufferMatchesMime(buffer, file.type)) {
+      return NextResponse.json(
+        {
+          error:
+            "El contenido del archivo no coincide con su tipo declarado.",
+        },
+        { status: 400 }
+      );
+    }
 
     if (mimeInfo.mediaType === "image" && mimeInfo.ext !== "gif") {
       try {

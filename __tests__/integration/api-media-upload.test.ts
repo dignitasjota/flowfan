@@ -95,6 +95,15 @@ function makeFile(
   return new File([bytes], filename, { type });
 }
 
+// Magic-bytes válidos para cada formato — el upload route ahora valida
+// contenido vs MIME declarado, así que ya no podemos pasar bytes random.
+const JPEG_BYTES = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
+const MP4_BYTES = new Uint8Array([
+  0x00, 0x00, 0x00, 0x18,
+  0x66, 0x74, 0x79, 0x70, // "ftyp"
+  0x6d, 0x70, 0x34, 0x32,
+]);
+
 describe("POST /api/media/upload", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -116,6 +125,17 @@ describe("POST /api/media/upload", () => {
     expect(res.status).toBe(400);
     const body = await res.json();
     expect(body.error).toMatch(/archivo/i);
+  });
+
+  it("returns 400 when content magic bytes don't match the declared MIME", async () => {
+    // PDF disfrazado de JPEG — Content-Type lo manda el cliente, no es de fiar
+    const pdfBytes = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d]); // "%PDF-"
+    const form = new FormData();
+    form.set("file", makeFile(pdfBytes, "lookslike.jpg", "image/jpeg"));
+    const res = await POST(makeRequest(form));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/no coincide/i);
   });
 
   it("returns 400 when MIME type is not allowed", async () => {
@@ -167,7 +187,7 @@ describe("POST /api/media/upload", () => {
     const form = new FormData();
     form.set(
       "file",
-      makeFile(new Uint8Array([1, 2, 3, 4]), "photo.jpg", "image/jpeg")
+      makeFile(JPEG_BYTES, "photo.jpg", "image/jpeg")
     );
     const res = await POST(makeRequest(form));
     expect(res.status).toBe(200);
@@ -188,7 +208,7 @@ describe("POST /api/media/upload", () => {
     const form = new FormData();
     form.set(
       "file",
-      makeFile(new Uint8Array([1, 2, 3, 4]), "photo.jpg", "image/jpeg")
+      makeFile(JPEG_BYTES, "photo.jpg", "image/jpeg")
     );
     const res = await POST(makeRequest(form));
     expect(res.status).toBe(200);
@@ -213,7 +233,7 @@ describe("POST /api/media/upload", () => {
     const form = new FormData();
     form.set(
       "file",
-      makeFile(new Uint8Array([1, 2, 3, 4]), "clip.mp4", "video/mp4")
+      makeFile(MP4_BYTES, "clip.mp4", "video/mp4")
     );
     const res = await POST(makeRequest(form));
     expect(res.status).toBe(200);
@@ -235,7 +255,7 @@ describe("POST /api/media/upload", () => {
     const form = new FormData();
     form.set(
       "file",
-      makeFile(new Uint8Array([1, 2, 3, 4]), "photo.jpg", "image/jpeg")
+      makeFile(JPEG_BYTES, "photo.jpg", "image/jpeg")
     );
     const res = await POST(makeRequest(form));
     expect(res.status).toBe(200);
