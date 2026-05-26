@@ -12,6 +12,7 @@
     "db:push": "drizzle-kit push --config drizzle.config.ts",
     "db:studio": "drizzle-kit studio --config drizzle.config.ts",
     "worker": "tsx src/server/worker.ts",
+    "backfill:media-r2": "tsx --env-file=.env scripts/backfill-media-to-r2.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"
