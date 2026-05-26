@@ -2,6 +2,9 @@
 
 import { useRef, useState } from "react";
 import { cn } from "@/lib/utils";
+import { isVideoUrl } from "@/lib/media";
+
+type MediaKind = "image" | "video";
 
 type Props = {
   /** Existing URLs (uploaded or pasted). Pipes back changes to the parent. */
@@ -11,16 +14,39 @@ type Props = {
   max?: number;
   /** Tooltip / placeholder hint for the paste-URL input. */
   hint?: string;
+  /** Media kinds accepted. Defaults to image-only — pass `["image","video"]` to allow MP4/MOV/WebM. */
+  kinds?: MediaKind[];
 };
 
-const ACCEPTED = "image/jpeg,image/png,image/webp,image/gif";
+const ACCEPT_BY_KIND: Record<MediaKind, string> = {
+  image: "image/jpeg,image/png,image/webp,image/gif",
+  video: "video/mp4,video/quicktime,video/webm",
+};
 
 export function MediaUploader({
   value,
   onChange,
   max = 4,
-  hint = "Pega URL o sube una imagen",
+  hint,
+  kinds = ["image"],
 }: Props) {
+  const accept = kinds.map((k) => ACCEPT_BY_KIND[k]).join(",");
+  const allowsVideo = kinds.includes("video");
+  const allowsImage = kinds.includes("image");
+  const resolvedHint =
+    hint ??
+    (allowsVideo && allowsImage
+      ? "Pega URL o sube imagen / vídeo"
+      : allowsVideo
+      ? "Pega URL o sube un vídeo"
+      : "Pega URL o sube una imagen");
+  const formatList =
+    allowsVideo && allowsImage
+      ? "JPG/PNG/WebP/GIF/MP4/MOV/WebM"
+      : allowsVideo
+      ? "MP4/MOV/WebM"
+      : "JPG/PNG/WebP/GIF";
+  const uploadLabel = allowsVideo && !allowsImage ? "Subir vídeo" : "Subir";
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -29,7 +55,7 @@ export function MediaUploader({
 
   async function uploadFile(file: File) {
     if (value.length >= max) {
-      setError(`Máx ${max} ${max === 1 ? "imagen" : "imágenes"}`);
+      setError(`Máx ${max} ${max === 1 ? "archivo" : "archivos"}`);
       return;
     }
     setError(null);
@@ -84,7 +110,7 @@ export function MediaUploader({
       return;
     }
     if (value.length >= max) {
-      setError(`Máx ${max} ${max === 1 ? "imagen" : "imágenes"}`);
+      setError(`Máx ${max} ${max === 1 ? "archivo" : "archivos"}`);
       return;
     }
     onChange([...value, trimmed]);
@@ -117,7 +143,7 @@ export function MediaUploader({
         <input
           ref={inputRef}
           type="file"
-          accept={ACCEPTED}
+          accept={accept}
           onChange={onPick}
           disabled={uploading || value.length >= max}
           className="hidden"
@@ -128,10 +154,10 @@ export function MediaUploader({
           disabled={uploading || value.length >= max}
           className="rounded-md bg-indigo-600 px-3 py-1 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
         >
-          {uploading ? "Subiendo..." : "📎 Subir imagen"}
+          {uploading ? "Subiendo..." : `📎 ${uploadLabel}`}
         </button>
         <span className="ml-2 text-[11px] text-gray-500">
-          o arrastra aquí (JPG/PNG/WebP/GIF, máx 8MB)
+          o arrastra aquí ({formatList}, máx 50MB)
         </span>
       </div>
 
@@ -141,7 +167,7 @@ export function MediaUploader({
           type="url"
           value={pasteUrl}
           onChange={(e) => setPasteUrl(e.target.value)}
-          placeholder={hint}
+          placeholder={resolvedHint}
           onKeyDown={(e) => {
             if (e.key === "Enter") {
               e.preventDefault();
@@ -168,15 +194,25 @@ export function MediaUploader({
               key={i}
               className="group relative aspect-square overflow-hidden rounded-md border border-gray-700 bg-gray-900"
             >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={url}
-                alt="upload preview"
-                className="h-full w-full object-cover"
-                onError={(e) => {
-                  (e.target as HTMLImageElement).style.opacity = "0.3";
-                }}
-              />
+              {isVideoUrl(url) ? (
+                <video
+                  src={url}
+                  className="h-full w-full object-cover"
+                  muted
+                  playsInline
+                  preload="metadata"
+                />
+              ) : (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={url}
+                  alt="upload preview"
+                  className="h-full w-full object-cover"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).style.opacity = "0.3";
+                  }}
+                />
+              )}
               <button
                 type="button"
                 onClick={() => removeAt(i)}
