@@ -57,6 +57,13 @@
       "when": 1778599675539,
       "tag": "0007_little_miracleman",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1779795467600,
+      "tag": "0008_dear_chat",
+      "breakpoints": true
     }
   ]
 }

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/lib/trpc";
 import { PostPreview } from "@/components/scheduler/post-preview";
+import { MediaUploader } from "@/components/scheduler/media-uploader";
 
 type ConnectedAccount = {
   id?: string;
@@ -71,9 +72,11 @@ export function PostComposer({
   const [tweetThread, setTweetThread] = useState<string[]>(
     initialValues?.twitterThread ?? []
   );
-  const [twitterMediaUrls, setTwitterMediaUrls] = useState<string>("");
+  const [twitterMediaUrls, setTwitterMediaUrls] = useState<string[]>([]);
   const [redditKind, setRedditKind] = useState<RedditKind>("self");
   const [redditUrl, setRedditUrl] = useState("");
+  const [redditImageUrls, setRedditImageUrls] = useState<string[]>([]);
+  const [instagramImageUrls, setInstagramImageUrls] = useState<string[]>([]);
   const [recurring, setRecurring] = useState(false);
   const [recFrequency, setRecFrequency] = useState<Frequency>("weekly");
   const [recDayOfWeek, setRecDayOfWeek] = useState(1);
@@ -134,11 +137,13 @@ export function PostComposer({
         setErrorMsg("Especifica el subreddit destino.");
         return;
       }
-      if ((redditKind === "link" || redditKind === "image") && !redditUrl.trim()) {
+      const redditMediaUrl =
+        redditKind === "image" ? redditImageUrls[0] : redditUrl.trim();
+      if ((redditKind === "link" || redditKind === "image") && !redditMediaUrl) {
         setErrorMsg(
           redditKind === "link"
             ? "Pega la URL del enlace."
-            : "Pega la URL pública de la imagen."
+            : "Sube una imagen o pega una URL pública."
         );
         return;
       }
@@ -146,7 +151,7 @@ export function PostComposer({
         ...(platformConfigs.reddit ?? {}),
         subreddit: subreddit.trim(),
         kind: redditKind,
-        ...(redditKind !== "self" ? { url: redditUrl.trim() } : {}),
+        ...(redditKind !== "self" ? { url: redditMediaUrl } : {}),
       };
     }
 
@@ -167,11 +172,7 @@ export function PostComposer({
         );
         return;
       }
-      const mediaList = twitterMediaUrls
-        .split("\n")
-        .map((u) => u.trim())
-        .filter((u) => u.startsWith("http"))
-        .slice(0, 4);
+      const mediaList = twitterMediaUrls.slice(0, 4);
       platformConfigs.twitter = {
         ...(platformConfigs.twitter ?? {}),
         tweet: mainTweet,
@@ -180,6 +181,20 @@ export function PostComposer({
       };
       // Flatten for content fallback (other platforms / general consumers)
       twitterContentForFlatten = [mainTweet, ...cleanThread].join("\n\n");
+    }
+
+    if (selected.has("instagram")) {
+      const imageUrl = instagramImageUrls[0];
+      if (!imageUrl) {
+        setErrorMsg(
+          "Instagram requiere una imagen. Súbela o pega una URL pública."
+        );
+        return;
+      }
+      platformConfigs.instagram = {
+        ...(platformConfigs.instagram ?? {}),
+        imageUrl,
+      };
     }
 
     let recurrenceRule:
@@ -386,10 +401,10 @@ export function PostComposer({
               </div>
             </div>
 
-            {(redditKind === "link" || redditKind === "image") && (
+            {redditKind === "link" && (
               <label className="block">
                 <span className="mb-1 block text-xs font-medium text-gray-400">
-                  {redditKind === "link" ? "URL del enlace" : "URL de la imagen pública"}
+                  URL del enlace
                 </span>
                 <input
                   value={redditUrl}
@@ -397,13 +412,25 @@ export function PostComposer({
                   placeholder="https://..."
                   className="w-full rounded-md border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white placeholder-gray-500 focus:border-indigo-500 focus:outline-none"
                 />
-                {redditKind === "image" && (
-                  <span className="mt-1 block text-xs text-gray-500">
-                    La URL debe ser pública (i.imgur, redd.it, S3...). Reddit la
-                    rechaza si no es accesible.
-                  </span>
-                )}
               </label>
+            )}
+
+            {redditKind === "image" && (
+              <div>
+                <span className="mb-1 block text-xs font-medium text-gray-400">
+                  Imagen
+                </span>
+                <MediaUploader
+                  value={redditImageUrls}
+                  onChange={setRedditImageUrls}
+                  max={1}
+                  hint="Pega URL pública o sube imagen"
+                />
+                <span className="mt-1 block text-xs text-gray-500">
+                  Reddit requiere una URL pública (R2/CDN). Subir aquí la deja
+                  accesible automáticamente.
+                </span>
+              </div>
             )}
           </div>
         )}
@@ -480,27 +507,48 @@ export function PostComposer({
               + Añadir al hilo
             </button>
 
-            <label className="mt-2 block">
+            <div className="mt-2">
               <span className="mb-1 block text-[11px] text-gray-500">
-                Imágenes (URLs públicas, una por línea — máx 4)
+                Imágenes (máx 4) — se adjuntan al tweet principal
               </span>
-              <textarea
+              <MediaUploader
                 value={twitterMediaUrls}
-                onChange={(e) => setTwitterMediaUrls(e.target.value)}
-                rows={2}
-                placeholder="https://i.imgur.com/foo.jpg"
-                className="w-full rounded-md border border-gray-700 bg-gray-800 px-2 py-1 text-xs text-white placeholder-gray-500 focus:border-indigo-500 focus:outline-none"
+                onChange={setTwitterMediaUrls}
+                max={4}
+                hint="Pega URL pública o sube imagen"
               />
               <span className="mt-0.5 block text-[10px] text-gray-500">
-                Se adjuntan al tweet principal vía POST /2/media/upload (OAuth
-                2.0, scope media.write). JPG/PNG/WebP/GIF hasta 5MB.
+                Subida vía POST /2/media/upload (OAuth 2.0, scope media.write).
+                JPG/PNG/WebP/GIF.
               </span>
-            </label>
+            </div>
 
             <p className="text-[11px] text-gray-500">
               El payload del webhook <code>post.publishing</code> incluye
               <code> tweet </code>y<code> thread[] </code>para que Zapier /
               Make publiquen como hilo nativo en X.
+            </p>
+          </div>
+        )}
+
+        {selected.has("instagram") && (
+          <div className="mb-3 space-y-2 rounded-md border border-gray-800 bg-gray-950/40 p-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-gray-300">
+                📷 Imagen de Instagram
+              </span>
+            </div>
+            <MediaUploader
+              value={instagramImageUrls}
+              onChange={setInstagramImageUrls}
+              max={1}
+              hint="Pega URL pública o sube imagen"
+            />
+            <p className="text-[11px] text-gray-500">
+              Instagram fetchea la imagen desde el servidor — la URL debe ser
+              pública. La subida vía R2 cumple este requisito automáticamente.
+              El caption se toma del campo &quot;Contenido&quot; (máx 2200
+              caracteres).
             </p>
           </div>
         )}

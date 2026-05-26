@@ -781,7 +781,7 @@ Schedule public posts to native APIs (**Reddit, Twitter / X, Instagram**) or to 
 - **`instagram-publisher.ts`**: `publishToInstagram({accessToken, igUserId, imageUrl, caption})` — 2-step flow:
   1. `POST /{ig_user_id}/media` with `image_url` → container `creation_id`.
   2. `POST /{ig_user_id}/media_publish` with `creation_id` → posted media id.
-- Image URL must be **publicly accessible** (Instagram fetches it server-side, rejects signed URLs that expire quickly). No upload from FanFlow's own storage in MVP (S3/CDN is V2).
+- Image URL must be **publicly accessible** (Instagram fetches it server-side, rejects signed URLs that expire quickly). When R2 is configured (see "Media Storage (R2)"), uploads from the composer's `MediaUploader` land in R2 and the resulting `publicUrl` is fed directly into `platformConfigs.instagram.imageUrl`.
 - Env vars: `FB_CLIENT_ID`, `FB_CLIENT_SECRET`, `APP_URL`.
 - Redirect URI to register with developers.facebook.com: `{APP_URL}/api/oauth/instagram/callback`.
 
@@ -832,6 +832,60 @@ Lightweight rule subset (no full RFC5545):
 - **Accounts** (`accounts-panel.tsx`): per-platform card; Reddit form for native (4-field credentials), **"Conectar OAuth"** link (Twitter / Instagram) that starts the OAuth flow at `/api/oauth/{provider}/start`, and "Vía webhook" for the rest.
 - Sidebar link "📅 Scheduler" (access: manager+).
 - **`PostComposer`** accepts an optional `initialValues` prop (`{title?, content?, platforms?, redditSubreddit?, twitterTweet?, twitterThread?}`) so other pages (notably Blog-to-Social) can open it pre-filled. Twitter drafts open with the thread editable as separate tweets, not flatten text.
+
+## Media Storage (R2)
+
+### Overview
+
+Cloudflare R2 (S3-compatible) is the production storage backend for media that needs a **public URL** consumable by external platforms (Reddit accepts external image URLs in `/api/submit`, Instagram fetches the image server-side via `image_url`, Twitter pulls bytes for `/2/media/upload`). When R2 isn't configured, uploads fall back to the local filesystem under `uploads/{creatorId}/...` and the platform publishers fail with "URL not public" — so R2 is **required for native publishing of images** in any non-dev environment.
+
+### Service (`src/server/services/r2-storage.ts`)
+
+Thin wrapper over `@aws-sdk/client-s3` pointed at R2's S3-compatible endpoint (same code works against AWS S3, MinIO or DO Spaces by swapping the endpoint).
+
+- `isR2Configured()` — all 5 env vars present (`R2_ENDPOINT`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_PUBLIC_URL`).
+- `buildR2Key({creatorId, originalName, mimeType})` — namespaced key `creators/{creatorId}/{YYYY-MM-DD}/{12 random hex}.{ext}`. Stable, collision-free, easy to sweep per tenant.
+- `uploadBuffer({key, body, mimeType, immutable})` — `PutObjectCommand` with `Cache-Control: public, max-age=31536000, immutable` when `immutable=true` (recommended for hashed-name media).
+- `deleteObject(key)` — `DeleteObjectCommand`.
+- `publicUrlFor(key)` — derive URL without uploading (for backfill / migration scripts).
+
+### Upload Pipeline (`src/app/api/media/upload/route.ts`)
+
+1. Auth check, MIME validation (`image/jpeg|png|gif|webp`, `video/mp4|quicktime|webm`), 50MB size cap.
+2. Plan limits (`checkMediaFileLimit` + `checkMediaStorageLimit`).
+3. `sharp` optimization for images (resize to 2048px max dim + format-specific quality).
+4. **R2 upload** — only when `isR2Configured()` AND `mediaType !== "video"`. Persists `r2Key` and `publicUrl` on the `mediaItems` row.
+5. **Always writes a local copy** at `uploads/{creatorId}/{fileId}.{ext}` — kept until the legacy `storagePath` consumers (thumbnail generation, FS-only items) are migrated.
+6. Thumbnail (200×200 WebP) generated locally only — not uploaded to R2 (internal to Media Vault, never exposed to external platforms).
+
+### Serving (`src/app/api/media/[id]/route.ts`)
+
+- Auth check first.
+- `?thumb=1` → reads thumbnail from FS local (thumbnails aren't in R2).
+- Item has `publicUrl` → `302 redirect` to R2 CDN. Offloads bytes from the VPS and benefits from R2's 1-year `immutable` cache.
+- Otherwise → falls back to `readFile` from FS (legacy items uploaded before R2 was configured).
+
+### Deletion (`src/server/api/routers/media.ts`)
+
+Both `delete` and `bulkDelete` mutations:
+1. Delete the row from `mediaItems`.
+2. `unlink` the local file + thumbnail (silent on failure).
+3. If `item.r2Key` and `isR2Configured()` → `deleteObject(item.r2Key)`, wrapped in try/catch with `log.warn` on failure (orphan in R2 is recoverable; orphan DB row pointing to deleted media is worse, so DB delete happens first).
+
+### Composer Integration (`src/components/scheduler/media-uploader.tsx`)
+
+`<MediaUploader>` is the shared file picker / paste-URL component used in `PostComposer`:
+- **Reddit `kind=image`** → max=1, writes the public URL into `platformConfigs.reddit.url`.
+- **Twitter** → max=4, writes into `platformConfigs.twitter.mediaUrls[]` (attached to the main tweet via `/2/media/upload`).
+- **Instagram** → max=1, writes into `platformConfigs.instagram.imageUrl` (the IG publisher requires this and submit() blocks send if missing).
+
+Drag-and-drop or click-to-upload posts to `/api/media/upload` and pipes the response's `publicUrl` back to the parent. Falls back to the legacy `/api/media/{id}` path when only `storagePath` is returned (FS-only deployments).
+
+### Limitations / future work
+
+- **Videos still bypass R2** (`upload/route.ts` excludes `mediaType === "video"`). When IG Reels / X video are wired up natively, lift this restriction.
+- **No backfill** for legacy `mediaItems` without `r2Key`/`publicUrl` — they keep working via the FS fallback but won't survive a VPS migration. A one-off sync script can iterate `WHERE r2_key IS NULL` and upload + update.
+- **Public URL is enumerable** (12 random hex bytes per path). Same trust model as the rest of the publishing pipeline (Reddit / IG / X already need it). For private media a signed-URL flow would be a future change.
 
 ## Blog-to-Social (AI repurposing)
 
@@ -1001,3 +1055,4 @@ Dismissal persists in `localStorage` (`fanflow:welcome-dismissed = "1"`) so it n
 | `socialAccounts` | Multiple rows per `(creator, platform)` allowed; unique by `(creator, platform, externalAccountId)`. Native (encrypted credentials + OAuth tokens) or webhook connection mode. OAuth columns: `encryptedOauthAccessToken`, `encryptedOauthRefreshToken`, `oauthExpiresAt`, `oauthScopes[]`, `externalAccountId` |
 | `scheduledPosts` | Publishing jobs with `targetPlatforms` array, status lifecycle, BullMQ `jobId`, `externalPostIds` map, optional recurrence rule + count. `platformConfigs` accepts `accountId` per platform for multi-account routing |
 | `oauthPendingFlows` | Short-lived OAuth state (CSRF token + PKCE verifier) with 10-min TTL, consumed by callback route |
+| `mediaItems` | Per-creator media library (images/videos/gifs). `storagePath` is the local FS path; `r2Key` + `publicUrl` populated when uploaded to Cloudflare R2 (images/gifs only). Powers the Media Vault + composer uploader |

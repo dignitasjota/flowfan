@@ -590,6 +590,11 @@ export const mediaItems = pgTable(
     mediaType: mediaTypeEnum("media_type").notNull(),
     fileSize: integer("file_size").notNull(), // bytes
     storagePath: text("storage_path").notNull(),
+    /** Object key in the R2 / S3 bucket when uploaded to remote storage. */
+    r2Key: text("r2_key"),
+    /** Public CDN URL for items in R2. Passed as `image_url` to Reddit /
+     * Instagram / Twitter publishers (the platforms fetch the image server-side). */
+    publicUrl: text("public_url"),
     thumbnailPath: text("thumbnail_path"),
     width: integer("width"),
     height: integer("height"),

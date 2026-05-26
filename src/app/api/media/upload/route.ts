@@ -9,6 +9,11 @@ import { randomUUID } from "crypto";
 import { writeFile, mkdir } from "fs/promises";
 import { join } from "path";
 import sharp from "sharp";
+import {
+  buildR2Key,
+  isR2Configured,
+  uploadBuffer as uploadToR2,
+} from "@/server/services/r2-storage";
 
 const log = createChildLogger("media-upload");
 
@@ -104,6 +109,35 @@ export async function POST(request: Request) {
       }
     }
 
+    // Upload destination: R2 when configured (preferred for cross-platform
+    // publishing since the URL is public), otherwise local filesystem fallback.
+    let r2Key: string | null = null;
+    let publicUrl: string | null = null;
+
+    if (isR2Configured() && mimeInfo.mediaType !== "video") {
+      // R2 path — used for images / gifs that need a public URL accessible
+      // by Reddit / Instagram / Twitter server-side fetchers.
+      try {
+        const key = buildR2Key({
+          creatorId,
+          originalName: file.name,
+          mimeType: file.type,
+        });
+        const uploaded = await uploadToR2({
+          key,
+          body: buffer,
+          mimeType: file.type,
+          immutable: true,
+        });
+        r2Key = uploaded.key;
+        publicUrl = uploaded.publicUrl;
+      } catch (uploadErr) {
+        log.warn({ err: uploadErr }, "R2 upload failed, falling back to local FS");
+      }
+    }
+
+    // Always keep a local copy for the Media Vault until we migrate the
+    // legacy storagePath consumers (thumbnail serving, etc).
     await writeFile(filePath, buffer);
 
     // Generar thumbnail + obtener dimensiones
@@ -145,6 +179,8 @@ export async function POST(request: Request) {
         mediaType: mimeInfo.mediaType,
         fileSize: optimizedSize,
         storagePath,
+        r2Key,
+        publicUrl,
         thumbnailPath,
         width,
         height,

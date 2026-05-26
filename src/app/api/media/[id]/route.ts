@@ -33,6 +33,13 @@ export async function GET(
     return NextResponse.json({ error: "No encontrado" }, { status: 404 });
   }
 
+  // Thumbnails siguen en el FS local; no se suben a R2 (uso interno del Media
+  // Vault, no se exponen a plataformas externas). Para el original con
+  // publicUrl, redirigimos al CDN — descarga el VPS y aprovecha el cache R2.
+  if (!thumb && item.publicUrl) {
+    return NextResponse.redirect(item.publicUrl, 302);
+  }
+
   const filePath = thumb && item.thumbnailPath
     ? join(UPLOADS_DIR, item.thumbnailPath)
     : join(UPLOADS_DIR, item.storagePath);

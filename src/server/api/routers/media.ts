@@ -8,10 +8,13 @@ import {
   contacts,
 } from "@/server/db/schema";
 import { checkMediaFileLimit } from "@/server/services/usage-limits";
+import { deleteObject, isR2Configured } from "@/server/services/r2-storage";
+import { createChildLogger } from "@/lib/logger";
 import { unlink } from "fs/promises";
 import { join } from "path";
 
 const UPLOADS_DIR = join(process.cwd(), "uploads");
+const log = createChildLogger("media-router");
 
 export const mediaRouter = createTRPCRouter({
   // Listar media con filtros
@@ -143,6 +146,20 @@ export const mediaRouter = createTRPCRouter({
         }
       } catch {
         // Si falla borrar archivo, no es crítico (queda huérfano)
+      }
+
+      // Borrar el objeto en R2 si el item se subió allí. Defensivo: si R2 ya
+      // no está configurado o falla la llamada, registramos y seguimos — la
+      // fila ya se eliminó de DB.
+      if (item.r2Key && isR2Configured()) {
+        try {
+          await deleteObject(item.r2Key);
+        } catch (err) {
+          log.warn(
+            { err, r2Key: item.r2Key, mediaItemId: item.id },
+            "Failed to delete R2 object on media delete"
+          );
+        }
       }
 
       return { success: true };
@@ -344,6 +361,7 @@ export const mediaRouter = createTRPCRouter({
         );
 
       // Intentar borrar archivos del filesystem (no crítico)
+      const r2Enabled = isR2Configured();
       for (const item of toDelete) {
         try {
           await unlink(join(UPLOADS_DIR, item.storagePath));
@@ -352,6 +370,17 @@ export const mediaRouter = createTRPCRouter({
           }
         } catch {
           // Si falla borrar archivo, no es crítico
+        }
+
+        if (item.r2Key && r2Enabled) {
+          try {
+            await deleteObject(item.r2Key);
+          } catch (err) {
+            log.warn(
+              { err, r2Key: item.r2Key, mediaItemId: item.id },
+              "Failed to delete R2 object on bulk delete"
+            );
+          }
         }
       }
 
