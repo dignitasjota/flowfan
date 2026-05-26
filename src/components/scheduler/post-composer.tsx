@@ -48,7 +48,7 @@ function formatDateTimeLocal(d: Date): string {
   )}:${pad(d.getMinutes())}`;
 }
 
-type RedditKind = "self" | "link" | "image" | "video";
+type RedditKind = "self" | "link" | "image" | "video" | "videogif";
 type Frequency = "daily" | "weekly" | "monthly";
 
 export function PostComposer({
@@ -139,16 +139,18 @@ export function PostComposer({
         setErrorMsg("Especifica el subreddit destino.");
         return;
       }
+      const isVideoKind =
+        redditKind === "video" || redditKind === "videogif";
       const redditMediaUrl =
         redditKind === "image"
           ? redditImageUrls[0]
-          : redditKind === "video"
+          : isVideoKind
           ? redditVideoUrls[0]
           : redditUrl.trim();
       if (
         (redditKind === "link" ||
           redditKind === "image" ||
-          redditKind === "video") &&
+          isVideoKind) &&
         !redditMediaUrl
       ) {
         setErrorMsg(
@@ -160,9 +162,8 @@ export function PostComposer({
         );
         return;
       }
-      const redditPosterUrl =
-        redditKind === "video" ? redditPosterUrls[0] : undefined;
-      if (redditKind === "video" && !redditPosterUrl) {
+      const redditPosterUrl = isVideoKind ? redditPosterUrls[0] : undefined;
+      if (isVideoKind && !redditPosterUrl) {
         setErrorMsg(
           "Reddit necesita una imagen de portada (poster) para el vídeo."
         );
@@ -404,7 +405,7 @@ export function PostComposer({
                 Tipo de post
               </span>
               <div className="flex gap-1">
-                {(["self", "link", "image", "video"] as const).map((k) => (
+                {(["self", "link", "image", "video", "videogif"] as const).map((k) => (
                   <button
                     key={k}
                     type="button"
@@ -422,7 +423,9 @@ export function PostComposer({
                       ? "Enlace"
                       : k === "image"
                       ? "Imagen"
-                      : "Vídeo"}
+                      : k === "video"
+                      ? "Vídeo"
+                      : "GIF"}
                   </button>
                 ))}
               </div>
@@ -460,11 +463,11 @@ export function PostComposer({
               </div>
             )}
 
-            {redditKind === "video" && (
+            {(redditKind === "video" || redditKind === "videogif") && (
               <div className="space-y-2">
                 <div>
                   <span className="mb-1 block text-xs font-medium text-gray-400">
-                    Vídeo
+                    {redditKind === "videogif" ? "Vídeo (GIF loop)" : "Vídeo"}
                   </span>
                   <MediaUploader
                     value={redditVideoUrls}
@@ -472,7 +475,11 @@ export function PostComposer({
                     max={1}
                     kinds={["video"]}
                     hint="Pega URL pública o sube vídeo"
-                    videoConstraints={{ maxSec: 900, label: "Reddit" }}
+                    videoConstraints={
+                      redditKind === "videogif"
+                        ? { maxSec: 60, label: "Reddit GIF" }
+                        : { maxSec: 900, label: "Reddit" }
+                    }
                   />
                 </div>
                 <div>
@@ -487,9 +494,9 @@ export function PostComposer({
                   />
                 </div>
                 <span className="mt-1 block text-xs text-gray-500">
-                  Reddit re-hostea el vídeo en su CDN automáticamente (asset
-                  lease + S3). La portada se exige por la API y se muestra como
-                  thumbnail en el feed.
+                  {redditKind === "videogif"
+                    ? "Modo GIF: Reddit reproduce el clip en loop sin audio. Ideal para clips ≤60s. La portada se exige por la API."
+                    : "Reddit re-hostea el vídeo en su CDN automáticamente (asset lease + S3). La portada se exige por la API."}
                 </span>
               </div>
             )}
@@ -659,11 +666,11 @@ export function PostComposer({
                 title={title}
                 content={content}
                 redditSubreddit={subreddit}
-                redditKind={redditKind}
+                redditKind={redditKind === "videogif" ? "video" : redditKind}
                 redditUrl={
                   redditKind === "image"
                     ? redditImageUrls[0]
-                    : redditKind === "video"
+                    : redditKind === "video" || redditKind === "videogif"
                     ? redditVideoUrls[0]
                     : redditUrl
                 }

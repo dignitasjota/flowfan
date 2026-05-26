@@ -128,7 +128,12 @@ export async function getRedditAccessToken(
   return data.access_token;
 }
 
-export type RedditPostKind = "self" | "link" | "image" | "video";
+export type RedditPostKind =
+  | "self"
+  | "link"
+  | "image"
+  | "video"
+  | "videogif";
 
 export async function publishToReddit(
   encryptedCredentials: string,
@@ -167,25 +172,31 @@ export async function publishToReddit(
   }
 
   const kind: RedditPostKind = post.kind ?? "self";
+  const isVideoKind = kind === "video" || kind === "videogif";
 
-  if ((kind === "link" || kind === "image" || kind === "video") && !post.url) {
+  if (
+    (kind === "link" || kind === "image" || isVideoKind) &&
+    !post.url
+  ) {
     return {
       success: false,
       error: `Reddit ${kind} post requires a url`,
     };
   }
-  if (kind === "video" && !post.posterUrl) {
+  if (isVideoKind && !post.posterUrl) {
     return {
       success: false,
-      error: "Reddit video post requires a posterUrl (public JPG/PNG thumbnail)",
+      error: `Reddit ${kind} post requires a posterUrl (public JPG/PNG thumbnail)`,
     };
   }
 
-  // For kind=video, Reddit only accepts videos hosted on its own CDN. Upload
-  // the source first (R2 → Reddit asset lease → S3 multipart) and use the
-  // resulting media URL on /api/submit.
+  // For video / videogif, Reddit only accepts videos hosted on its own CDN.
+  // Upload the source first (R2 → Reddit asset lease → S3 multipart) and use
+  // the resulting media URL on /api/submit. The flow is identical for both
+  // kinds — Reddit infers playback behavior (loop muted vs full player) from
+  // the kind on submit.
   let videoMediaUrl: string | undefined;
-  if (kind === "video") {
+  if (isVideoKind) {
     try {
       const { uploadRedditVideoFromUrl } = await import("./reddit-video-upload");
       const uploaded = await uploadRedditVideoFromUrl({
@@ -209,7 +220,7 @@ export async function publishToReddit(
   });
   if (kind === "self") {
     body.append("text", post.content);
-  } else if (kind === "video") {
+  } else if (isVideoKind) {
     body.append("url", videoMediaUrl!);
     body.append("video_poster_url", post.posterUrl!);
     body.append("resubmit", "true");

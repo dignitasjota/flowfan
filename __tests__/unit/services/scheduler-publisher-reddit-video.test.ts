@@ -154,6 +154,50 @@ describe("publishToReddit kind=video", () => {
     expect(submitCalls).toHaveLength(0);
   });
 
+  it("kind=videogif uses the same upload helper + submits with kind=videogif", async () => {
+    const submitBodies: string[] = [];
+    const fetchMock = vi.fn().mockImplementation(async (url: string, init?: { body?: string }) => {
+      if (url.endsWith("/access_token")) return jsonRes({ access_token: "tok" });
+      if (url.endsWith("/api/submit")) {
+        if (init?.body) submitBodies.push(init.body);
+        return jsonRes({
+          json: { data: { id: "g", name: "t3_g", url: "https://reddit.com/r/foo/g" } },
+        });
+      }
+      throw new Error("unexpected");
+    });
+    global.fetch = fetchMock as typeof global.fetch;
+
+    const result = await publishToReddit("encrypted-creds", {
+      title: "loop",
+      content: "",
+      subreddit: "videos",
+      kind: "videogif",
+      url: "https://cdn.r2/clip.mp4",
+      posterUrl: "https://cdn.r2/poster.jpg",
+    });
+    expect(result.success).toBe(true);
+    expect(mockUpload).toHaveBeenCalledTimes(1);
+    expect(submitBodies[0]).toContain("kind=videogif");
+    expect(submitBodies[0]).toContain("video_poster_url=https%3A%2F%2Fcdn.r2%2Fposter.jpg");
+  });
+
+  it("kind=videogif without posterUrl is rejected (same as kind=video)", async () => {
+    global.fetch = vi
+      .fn()
+      .mockResolvedValue(jsonRes({ access_token: "tok" })) as typeof global.fetch;
+    const result = await publishToReddit("encrypted-creds", {
+      title: "x",
+      content: "",
+      subreddit: "videos",
+      kind: "videogif",
+      url: "https://cdn.r2/clip.mp4",
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/posterUrl/);
+    expect(mockUpload).not.toHaveBeenCalled();
+  });
+
   it("surfaces Reddit submit-level errors (json.errors[])", async () => {
     const fetchMock = vi.fn().mockImplementation(async (url: string) => {
       if (url.endsWith("/access_token")) return jsonRes({ access_token: "tok" });

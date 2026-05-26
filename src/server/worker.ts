@@ -1164,7 +1164,7 @@ const scheduledPostWorker = new Worker<ScheduledPostJobData>(
             flairId?: string;
             nsfw?: boolean;
             spoiler?: boolean;
-            kind?: "self" | "link" | "image" | "video";
+            kind?: "self" | "link" | "image" | "video" | "videogif";
             url?: string;
             posterUrl?: string;
           };
