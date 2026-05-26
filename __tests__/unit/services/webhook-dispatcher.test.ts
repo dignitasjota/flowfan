@@ -1,4 +1,15 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+
+// El módulo `webhook-dispatcher` importa `@/server/queues`, que instancia
+// múltiples `new Queue()` de BullMQ al cargarse y deja conexiones Redis
+// vivas que vitest no puede cerrar limpiamente (provocaba "Closing rpc
+// while 'onUserConsoleLog' was pending" en el teardown del worker).
+// Como aquí solo testeamos `generateWebhookSignature` (función pura), el
+// stub del queue evita el side-effect de import.
+vi.mock("@/server/queues", () => ({
+  webhookDeliveryQueue: { add: vi.fn() },
+}));
+
 import { generateWebhookSignature } from "@/server/services/webhook-dispatcher";
 import { createHmac } from "crypto";
 

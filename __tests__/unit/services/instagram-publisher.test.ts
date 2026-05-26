@@ -187,6 +187,121 @@ describe("publishToInstagram", () => {
     expect(statusIdxsBeforeParent.some((i) => i < parentIdx)).toBe(true);
   });
 
+  it("carousel: fails fast when a child container returns non-2xx (no parent created)", async () => {
+    const calls: { url: string; body: string }[] = [];
+    const fetchMock = vi.fn().mockImplementation(async (url: string, init?: { body?: BodyInit }) => {
+      const body = String(init?.body ?? "");
+      calls.push({ url, body });
+      if (url.endsWith("/ig-user/media")) {
+        const childIdx = calls.filter(
+          (c) =>
+            c.url.endsWith("/ig-user/media") &&
+            c.body.includes("is_carousel_item=true")
+        ).length;
+        if (childIdx === 2) {
+          // second child fails outright
+          return new Response("bad asset", { status: 400 });
+        }
+        return makeJsonResponse({ id: `child-${childIdx}` });
+      }
+      throw new Error(`unexpected url=${url}`);
+    });
+    global.fetch = fetchMock as typeof global.fetch;
+
+    const result = await publishToInstagram({
+      accessToken: "tok",
+      igUserId: "ig-user",
+      mediaUrls: ["https://cdn/a.jpg", "https://cdn/b.jpg", "https://cdn/c.jpg"],
+      caption: "x",
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error).toMatch(/IG media create failed \(400\)/);
+    // No parent, no publish should have been attempted
+    expect(calls.find((c) => c.body.includes("media_type=CAROUSEL"))).toBeUndefined();
+    expect(calls.find((c) => c.url.includes("/media_publish"))).toBeUndefined();
+  });
+
+  it("carousel: surfaces ERROR on a video child status before creating parent", async () => {
+    const calls: { url: string; body: string }[] = [];
+    const fetchMock = vi.fn().mockImplementation(async (url: string, init?: { body?: BodyInit }) => {
+      const body = String(init?.body ?? "");
+      calls.push({ url, body });
+      if (url.includes("status_code")) {
+        return makeJsonResponse({ status_code: "ERROR", status: "FORMAT_BAD" });
+      }
+      if (url.endsWith("/ig-user/media")) {
+        if (body.includes("media_type=CAROUSEL")) {
+          return makeJsonResponse({ id: "should-not-happen" });
+        }
+        const childIdx = calls.filter(
+          (c) =>
+            c.url.endsWith("/ig-user/media") &&
+            c.body.includes("is_carousel_item=true")
+        ).length;
+        return makeJsonResponse({ id: `child-v-${childIdx}` });
+      }
+      throw new Error("unexpected");
+    });
+    global.fetch = fetchMock as typeof global.fetch;
+
+    const promise = publishToInstagram({
+      accessToken: "tok",
+      igUserId: "ig-user",
+      mediaUrls: ["https://cdn/a.mp4", "https://cdn/b.jpg"],
+      caption: "mixed",
+    });
+    await vi.advanceTimersByTimeAsync(10_000);
+    const result = await promise;
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error).toMatch(/ERROR/);
+    // Parent must not have been created if a child errored out
+    expect(calls.find((c) => c.body.includes("media_type=CAROUSEL"))).toBeUndefined();
+  });
+
+  it("carousel: ERROR on the parent's own status aborts before publish", async () => {
+    const calls: { url: string; body: string }[] = [];
+    const fetchMock = vi.fn().mockImplementation(async (url: string, init?: { body?: BodyInit }) => {
+      const body = String(init?.body ?? "");
+      calls.push({ url, body });
+      if (url.includes("/media_publish")) {
+        return makeJsonResponse({ id: "should-not-happen" });
+      }
+      if (url.includes("status_code")) {
+        // Asume que el caller distingue child vs parent por el id en la URL,
+        // pero el publisher actual polingea ambos contra el mismo endpoint;
+        // simulamos que TODOS los status devuelven ERROR para forzar el
+        // abort en el primer polling tras crear los children.
+        return makeJsonResponse({ status_code: "ERROR", status: "PARENT_BAD" });
+      }
+      if (url.endsWith("/ig-user/media")) {
+        if (body.includes("media_type=CAROUSEL")) {
+          return makeJsonResponse({ id: "parent-99" });
+        }
+        const childIdx = calls.filter(
+          (c) =>
+            c.url.endsWith("/ig-user/media") &&
+            c.body.includes("is_carousel_item=true")
+        ).length;
+        // All children imagen — para que no se polingue antes del parent
+        return makeJsonResponse({ id: `child-i-${childIdx}` });
+      }
+      throw new Error("unexpected");
+    });
+    global.fetch = fetchMock as typeof global.fetch;
+
+    const promise = publishToInstagram({
+      accessToken: "tok",
+      igUserId: "ig-user",
+      mediaUrls: ["https://cdn/a.jpg", "https://cdn/b.jpg"],
+      caption: "imgs",
+    });
+    await vi.advanceTimersByTimeAsync(10_000);
+    const result = await promise;
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error).toMatch(/PARENT_BAD|ERROR/);
+    expect(calls.find((c) => c.url.includes("/media_publish"))).toBeUndefined();
+  });
+
   it("rejects more than 10 items", async () => {
     const result = await publishToInstagram({
       accessToken: "tok",
