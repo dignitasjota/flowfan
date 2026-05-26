@@ -882,12 +882,20 @@ Both `delete` and `bulkDelete` mutations:
 
 ### Composer Integration (`src/components/scheduler/media-uploader.tsx`)
 
-`<MediaUploader>` is the shared file picker / paste-URL component used in `PostComposer`:
-- **Reddit `kind=image`** → max=1, writes the public URL into `platformConfigs.reddit.url`.
-- **Twitter** → max=4, writes into `platformConfigs.twitter.mediaUrls[]` (attached to the main tweet via `/2/media/upload`).
-- **Instagram** → max=1, writes into `platformConfigs.instagram.imageUrl` (the IG publisher requires this and submit() blocks send if missing).
+`<MediaUploader>` is the shared file picker / paste-URL component used in `PostComposer`. Drag-and-drop or click-to-upload posts to `/api/media/upload` and pipes the response's `publicUrl` back to the parent. Falls back to `/api/media/{id}` when only `storagePath` is returned (FS-only deployments).
 
-Drag-and-drop or click-to-upload posts to `/api/media/upload` and pipes the response's `publicUrl` back to the parent. Falls back to the legacy `/api/media/{id}` path when only `storagePath` is returned (FS-only deployments).
+**Props:**
+- `value: string[]`, `onChange(urls)`, `max` (default 4).
+- `kinds?: ("image" | "video")[]` (default `["image"]`) — toggles the `<input accept>` string and the preview element (`<img>` vs `<video muted playsInline preload="metadata">`).
+- `videoConstraints?: { minSec?, maxSec?, label? }` — when set, every video added is probed via `getVideoDuration(url)` from `@/lib/media`. If `video.duration` falls outside the range, an amber chip appears below the thumbnail ("12.3s — Reels acepta hasta 90s"). **Advisory only — does not block submit; the platform gives the final reject.** The helper creates a hidden `<video>`, listens for `loadedmetadata`, 15s timeout, returns `null` defensively in SSR / on CORS failure.
+
+**Wiring in `PostComposer`:**
+- **Reddit `kind=image`** → `max=1, kinds=["image"]` → `platformConfigs.reddit.url`.
+- **Reddit `kind=video`** → two uploaders: video (`max=1, kinds=["video"], videoConstraints={maxSec: 900, label: "Reddit"}`) + poster image (`max=1`) → `platformConfigs.reddit.{url, posterUrl}`.
+- **Twitter** → `max=4, kinds=["image","video"], videoConstraints={maxSec: 140, label: "X / Twitter"}` → `platformConfigs.twitter.mediaUrls[]`. The publisher enforces the X rule of 1 video XOR ≤4 images.
+- **Instagram** → `max=10, kinds=["image","video"], videoConstraints={minSec: 3, maxSec: 90, label: "Reels"}` → `platformConfigs.instagram.mediaUrls[]`. 1 item → photo/Reel; 2-10 → carousel.
+
+`isVideoUrl(url)` in `@/lib/media` is the shared URL-extension heuristic (`.mp4|.mov|.m4v|.webm` + optional query/fragment); used by both the uploader preview and the publishers to route image vs video paths.
 
 ### Backfill
 
@@ -973,8 +981,18 @@ When adding a new mutation, follow the same pattern: import `logTeamAction`, gat
 - **`audience-insights.test.ts`** — `computeAudienceInsights` with mocked DB shape: empty data, conversion rate calculation, revenue merge, weighted average global totals, top topics scoped per platform (no cross-platform leak), platform ordering by contact count.
 - **`scheduler.test.ts` (router logic)** — schedule date validation with 30s clock-skew window, missing-account detection, cancellable status transitions, BullMQ delay computation, post-publish recurrence advancement (rule + ≥1 success), final status computation.
 - **`social-comments.test.ts` (router logic)** — unhandled count delta on `markHandled`, post counter delta on creator reply, authoring strategy priority (`platformUserId` → `username` → create new), AI suggest variant tags differing for public vs private surfaces.
+- **`r2-storage.test.ts`** — `isR2Configured`, `buildR2Key` (extension priority, namespacing, uniqueness), `uploadBuffer` (PutObjectCommand shape, `immutable` vs default cache-control, trailing-slash strip on `R2_PUBLIC_URL`, throws when unconfigured), `deleteObject`, `publicUrlFor`. Uses `vi.mock("@aws-sdk/client-s3")` + `vi.resetModules()` + dynamic import to reset the cached client between cases with different env.
+- **`api-media-serve.test.ts`** — `GET /api/media/[id]` happy/error paths: 401 / 404, 302 redirect to `publicUrl`, `thumb=1` never redirects (thumbnails live in FS), FS fallback for legacy items, 404 on `readFile` error.
+- **`api-media-upload.test.ts`** — `POST /api/media/upload`: 401, 400 on missing file / disallowed MIME / >50MB (stubs `request.formData()` to dodge the `Object.defineProperty(file, "size")` round-trip), R2 happy path persists `r2Key + publicUrl`, FS-only path when R2 off, videos DO go to R2 when configured, graceful FS fallback when `uploadBuffer` throws.
+- **`media.test.ts` (`@/lib/media`)** — `isVideoUrl` (extensions, case, queries/fragments, mid-path false positives), `getVideoDuration` returns `null` in SSR (no `document`).
+- **`instagram-publisher.test.ts`** — 11 cases covering: single image (no polling), single Reel (polling until `FINISHED`), carousel 3 images (caption only on parent, `children=` URL-encoded with commas), carousel mixed (video children polled before parent), child container 400 (fail-fast, no parent or publish), child video `ERROR` status (abort before parent), parent `ERROR` status (abort before publish), >10 items rejected, empty list rejected, container `ERROR` propagated, `/media` non-2xx surfaced.
+- **`twitter-media-upload.test.ts`** — image single-part (≤5 MB), video chunked end-to-end (INIT + 3 APPEND chunks for a 10 MB buffer + FINALIZE + STATUS polling until `succeeded`), video `processing_info.state = failed` throws, image >5 MB throws size error.
+- **`reddit-video-upload.test.ts`** — happy path 3-fetch (source → asset lease → S3 multipart), FormData field order (`key` first, `file` last — S3 requires it), malformed lease throws, S3 non-2xx surfaced with status, `.mov` → `video/quicktime` MIME detection.
+- **`scheduler-publisher-reddit-video.test.ts`** — `publishToReddit({kind: "video"})` E2E: happy path uses Reddit-hosted URL (not the R2 source) in `/api/submit` plus `video_poster_url`, missing `posterUrl` / `url` short-circuits before the upload helper, upload failure surfaces as `PublishResult.error` (no submit attempted), Reddit-level `json.errors[]` surfaced.
 
 When adding new pure helpers (no DB), prefer this pattern: pure logic in a service file, module-level `vi.mock` for transitive deps, no test fixtures in DB. For routers, extract decisional logic as small predicates and test those — avoids mocks of DB + queue + SSE that are brittle.
+
+**Note on transitive imports**: a test that only needs a tiny pure helper from a module can still drag a chain that opens Redis / BullMQ / queue clients (`webhook-dispatcher.test.ts` was doing this via `@/server/queues`). The result was a `EnvironmentTeardownError: Closing rpc while "onUserConsoleLog" was pending` at the end of the run. Mock the heavy import at the test (`vi.mock("@/server/queues", () => ({…}))`) when the symbol under test doesn't need it.
 
 ### E2E tests with real Postgres (`__tests__/e2e/`)
 
