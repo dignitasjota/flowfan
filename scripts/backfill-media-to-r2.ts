@@ -1,7 +1,7 @@
 /**
  * Backfill mediaItems sin r2Key/publicUrl subiéndolos a Cloudflare R2.
  *
- * Para cada mediaItem cuyo `r2_key IS NULL` y no sea vídeo:
+ * Para cada mediaItem cuyo `r2_key IS NULL`:
  *   1. Lee el fichero desde `uploads/{storagePath}`.
  *   2. Calcula una nueva key R2 namespaced por creator.
  *   3. Sube el buffer con cache-control immutable.
@@ -23,7 +23,7 @@
 // Variables de entorno cargadas vía `tsx --env-file=.env` (ver script en package.json).
 import { readFile } from "fs/promises";
 import { join } from "path";
-import { and, eq, isNull, ne } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/server/db";
 import { mediaItems } from "@/server/db/schema";
 import {
@@ -76,9 +76,7 @@ async function main() {
     } | archived: ${flags.includeArchived ? "incluidos" : "excluidos"}`
   );
 
-  // Vídeos quedan fuera por diseño (ver upload/route.ts). Si en el futuro
-  // sube vídeos a R2, basta con quitar este filtro.
-  const conditions = [isNull(mediaItems.r2Key), ne(mediaItems.mediaType, "video")];
+  const conditions = [isNull(mediaItems.r2Key)];
   if (!flags.includeArchived) {
     conditions.push(eq(mediaItems.isArchived, false));
   }

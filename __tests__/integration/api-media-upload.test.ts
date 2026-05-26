@@ -199,8 +199,14 @@ describe("POST /api/media/upload", () => {
     expect(inserted.publicUrl).toBeNull();
   });
 
-  it("does not upload videos to R2 even when configured", async () => {
+  it("uploads videos to R2 when configured (no sharp optimization on the way)", async () => {
     mockIsR2.mockReturnValue(true);
+    mockUploadR2.mockResolvedValue({
+      key: "creators/c1/2026-01-01/abc.mp4",
+      publicUrl: "https://cdn.fanflow.app/creators/c1/2026-01-01/abc.mp4",
+      size: 4,
+      mimeType: "video/mp4",
+    });
     const insertChain = buildInsertChain();
     mockInsert.mockReturnValue(insertChain as never);
 
@@ -211,7 +217,13 @@ describe("POST /api/media/upload", () => {
     );
     const res = await POST(makeRequest(form));
     expect(res.status).toBe(200);
-    expect(mockUploadR2).not.toHaveBeenCalled();
+    expect(mockUploadR2).toHaveBeenCalledTimes(1);
+    const inserted = (insertChain.values as ReturnType<typeof vi.fn>).mock
+      .calls[0][0] as Record<string, unknown>;
+    expect(inserted.r2Key).toBe("creators/c1/2026-01-01/abc.mp4");
+    expect(inserted.publicUrl).toBe(
+      "https://cdn.fanflow.app/creators/c1/2026-01-01/abc.mp4"
+    );
   });
 
   it("falls back to FS when R2 upload throws", async () => {

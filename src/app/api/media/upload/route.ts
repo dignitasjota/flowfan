@@ -114,9 +114,10 @@ export async function POST(request: Request) {
     let r2Key: string | null = null;
     let publicUrl: string | null = null;
 
-    if (isR2Configured() && mimeInfo.mediaType !== "video") {
-      // R2 path — used for images / gifs that need a public URL accessible
-      // by Reddit / Instagram / Twitter server-side fetchers.
+    if (isR2Configured()) {
+      // R2 path — images, gifs and videos need a public URL accessible by
+      // Reddit / Instagram / Twitter server-side fetchers. Videos travel as
+      // the original buffer (sharp optimization only runs on raster images).
       try {
         const key = buildR2Key({
           creatorId,

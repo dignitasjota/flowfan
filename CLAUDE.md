@@ -854,7 +854,7 @@ Thin wrapper over `@aws-sdk/client-s3` pointed at R2's S3-compatible endpoint (s
 1. Auth check, MIME validation (`image/jpeg|png|gif|webp`, `video/mp4|quicktime|webm`), 50MB size cap.
 2. Plan limits (`checkMediaFileLimit` + `checkMediaStorageLimit`).
 3. `sharp` optimization for images (resize to 2048px max dim + format-specific quality).
-4. **R2 upload** — only when `isR2Configured()` AND `mediaType !== "video"`. Persists `r2Key` and `publicUrl` on the `mediaItems` row.
+4. **R2 upload** — when `isR2Configured()`. Applies to all media types (images, GIFs, videos); only images run through sharp first, videos travel as the original buffer. Persists `r2Key` and `publicUrl` on the `mediaItems` row.
 5. **Always writes a local copy** at `uploads/{creatorId}/{fileId}.{ext}` — kept until the legacy `storagePath` consumers (thumbnail generation, FS-only items) are migrated.
 6. Thumbnail (200×200 WebP) generated locally only — not uploaded to R2 (internal to Media Vault, never exposed to external platforms).
 
@@ -881,10 +881,13 @@ Both `delete` and `bulkDelete` mutations:
 
 Drag-and-drop or click-to-upload posts to `/api/media/upload` and pipes the response's `publicUrl` back to the parent. Falls back to the legacy `/api/media/{id}` path when only `storagePath` is returned (FS-only deployments).
 
+### Backfill
+
+`scripts/backfill-media-to-r2.ts` (run via `npm run backfill:media-r2`) walks `mediaItems WHERE r2_key IS NULL`, reads the local file, uploads to R2 and persists `r2Key` + `publicUrl`. Idempotent and resumable. Flags: `--dry-run`, `--limit N`, `--include-archived`. Tolerates missing local files (skips + logs). Used after enabling R2 on a previously FS-only deployment.
+
 ### Limitations / future work
 
-- **Videos still bypass R2** (`upload/route.ts` excludes `mediaType === "video"`). When IG Reels / X video are wired up natively, lift this restriction.
-- **No backfill** for legacy `mediaItems` without `r2Key`/`publicUrl` — they keep working via the FS fallback but won't survive a VPS migration. A one-off sync script can iterate `WHERE r2_key IS NULL` and upload + update.
+- **No automatic cleanup** of orphaned R2 objects if a `mediaItems` row is deleted via raw SQL bypassing the tRPC router. The router-driven path (`delete` / `bulkDelete`) does call `deleteObject` — but manual DB edits would leak.
 - **Public URL is enumerable** (12 random hex bytes per path). Same trust model as the rest of the publishing pipeline (Reddit / IG / X already need it). For private media a signed-URL flow would be a future change.
 
 ## Blog-to-Social (AI repurposing)
