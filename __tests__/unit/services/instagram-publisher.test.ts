@@ -29,7 +29,7 @@ describe("publishToInstagram", () => {
     const result = await publishToInstagram({
       accessToken: "tok",
       igUserId: "ig-user",
-      mediaUrl: "https://cdn/photo.jpg",
+      mediaUrls: ["https://cdn/photo.jpg"],
       caption: "hi",
     });
 
@@ -54,7 +54,6 @@ describe("publishToInstagram", () => {
       if (url.endsWith("/ig-user/media")) {
         return makeJsonResponse({ id: "container-7" });
       }
-      // STATUS endpoint: returns IN_PROGRESS once, then FINISHED
       const inProgress = calls.filter((u) => u.includes("status_code")).length;
       return makeJsonResponse({
         status_code: inProgress <= 1 ? "IN_PROGRESS" : "FINISHED",
@@ -65,10 +64,9 @@ describe("publishToInstagram", () => {
     const promise = publishToInstagram({
       accessToken: "tok",
       igUserId: "ig-user",
-      mediaUrl: "https://cdn/clip.mp4",
+      mediaUrls: ["https://cdn/clip.mp4"],
       caption: "hi",
     });
-    // Avanza el timer del polling (5s entre intentos)
     await vi.advanceTimersByTimeAsync(20_000);
     const result = await promise;
 
@@ -77,11 +75,137 @@ describe("publishToInstagram", () => {
       externalId: "reel-99",
       externalUrl: "https://www.instagram.com/reel/reel-99/",
     });
-    // create + ≥1 status poll + publish
     expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(3);
     const createBody = String(fetchMock.mock.calls[0][1].body);
     expect(createBody).toContain("media_type=REELS");
     expect(createBody).toContain("video_url=https");
+  });
+
+  it("publishes a carousel of 3 images: 3 children + parent + publish", async () => {
+    const requests: { url: string; body: string }[] = [];
+    const fetchMock = vi.fn().mockImplementation(async (url: string, init?: { body?: BodyInit }) => {
+      const body = String(init?.body ?? "");
+      requests.push({ url, body });
+
+      if (url.includes("/media_publish")) {
+        return makeJsonResponse({ id: "carousel-post-1" });
+      }
+      if (url.includes("status_code")) {
+        return makeJsonResponse({ status_code: "FINISHED" });
+      }
+      if (url.endsWith("/ig-user/media")) {
+        if (body.includes("media_type=CAROUSEL")) {
+          return makeJsonResponse({ id: "parent-1" });
+        }
+        const idx = requests.filter(
+          (r) => r.url.endsWith("/ig-user/media") && r.body.includes("is_carousel_item=true")
+        ).length;
+        return makeJsonResponse({ id: `child-${idx}` });
+      }
+      throw new Error(`unexpected url=${url}`);
+    });
+    global.fetch = fetchMock as typeof global.fetch;
+
+    const promise = publishToInstagram({
+      accessToken: "tok",
+      igUserId: "ig-user",
+      mediaUrls: [
+        "https://cdn/a.jpg",
+        "https://cdn/b.jpg",
+        "https://cdn/c.jpg",
+      ],
+      caption: "carousel",
+    });
+    await vi.advanceTimersByTimeAsync(20_000);
+    const result = await promise;
+
+    expect(result).toEqual({
+      success: true,
+      externalId: "carousel-post-1",
+      externalUrl: "https://www.instagram.com/p/carousel-post-1/",
+    });
+
+    // 3 children + 1 parent + status poll + publish
+    const childCalls = requests.filter(
+      (r) => r.url.endsWith("/ig-user/media") && r.body.includes("is_carousel_item=true")
+    );
+    expect(childCalls).toHaveLength(3);
+    // Caption should ONLY appear on the carousel parent, not on children
+    expect(childCalls.every((c) => !c.body.includes("caption="))).toBe(true);
+    const parentCall = requests.find((r) => r.body.includes("media_type=CAROUSEL"));
+    expect(parentCall).toBeDefined();
+    expect(parentCall!.body).toContain("caption=carousel");
+    expect(parentCall!.body).toContain("children=child-1%2Cchild-2%2Cchild-3");
+  });
+
+  it("carousel with video children: polls each child before creating the parent", async () => {
+    const calls: { url: string; body: string }[] = [];
+    let videoChildStatusChecks = 0;
+    const fetchMock = vi.fn().mockImplementation(async (url: string, init?: { body?: BodyInit }) => {
+      const body = String(init?.body ?? "");
+      calls.push({ url, body });
+      if (url.includes("/media_publish")) {
+        return makeJsonResponse({ id: "carousel-2" });
+      }
+      if (url.includes("status_code")) {
+        // child videos report IN_PROGRESS once, then FINISHED
+        videoChildStatusChecks++;
+        return makeJsonResponse({
+          status_code: videoChildStatusChecks <= 1 ? "IN_PROGRESS" : "FINISHED",
+        });
+      }
+      if (url.endsWith("/ig-user/media")) {
+        if (body.includes("media_type=CAROUSEL")) {
+          return makeJsonResponse({ id: "parent-2" });
+        }
+        const childIdx = calls.filter(
+          (c) =>
+            c.url.endsWith("/ig-user/media") &&
+            c.body.includes("is_carousel_item=true")
+        ).length;
+        return makeJsonResponse({ id: `child-v-${childIdx}` });
+      }
+      throw new Error("unexpected");
+    });
+    global.fetch = fetchMock as typeof global.fetch;
+
+    const promise = publishToInstagram({
+      accessToken: "tok",
+      igUserId: "ig-user",
+      mediaUrls: ["https://cdn/a.mp4", "https://cdn/b.jpg"],
+      caption: "mixed",
+    });
+    await vi.advanceTimersByTimeAsync(30_000);
+    const result = await promise;
+    expect(result.success).toBe(true);
+    // status polls fired for the child(ren) before the parent creation
+    const parentIdx = calls.findIndex((c) => c.body.includes("media_type=CAROUSEL"));
+    const statusIdxsBeforeParent = calls
+      .map((c, i) => ({ c, i }))
+      .filter(({ c }) => c.url.includes("status_code"))
+      .map(({ i }) => i);
+    expect(statusIdxsBeforeParent.some((i) => i < parentIdx)).toBe(true);
+  });
+
+  it("rejects more than 10 items", async () => {
+    const result = await publishToInstagram({
+      accessToken: "tok",
+      igUserId: "ig-user",
+      mediaUrls: Array.from({ length: 11 }, (_, i) => `https://cdn/${i}.jpg`),
+      caption: "x",
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error).toMatch(/10/);
+  });
+
+  it("rejects empty mediaUrls", async () => {
+    const result = await publishToInstagram({
+      accessToken: "tok",
+      igUserId: "ig-user",
+      mediaUrls: [],
+      caption: "x",
+    });
+    expect(result.success).toBe(false);
   });
 
   it("returns error when the IG container reports ERROR status", async () => {
@@ -96,7 +220,7 @@ describe("publishToInstagram", () => {
     const promise = publishToInstagram({
       accessToken: "tok",
       igUserId: "ig-user",
-      mediaUrl: "https://cdn/clip.mp4",
+      mediaUrls: ["https://cdn/clip.mp4"],
       caption: "hi",
     });
     await vi.advanceTimersByTimeAsync(10_000);
@@ -117,7 +241,7 @@ describe("publishToInstagram", () => {
     const result = await publishToInstagram({
       accessToken: "tok",
       igUserId: "ig-user",
-      mediaUrl: "https://cdn/photo.jpg",
+      mediaUrls: ["https://cdn/photo.jpg"],
       caption: "hi",
     });
 

@@ -1374,19 +1374,28 @@ const scheduledPostWorker = new Worker<ScheduledPostJobData>(
         try {
           const accessToken = decrypt(account.encryptedOauthAccessToken);
           const igCfg = ((post.platformConfigs as Record<string, unknown>)?.instagram ?? {}) as {
-            mediaUrl?: string;
-            imageUrl?: string; // back-compat con posts antiguos
+            mediaUrls?: string[];
+            mediaUrl?: string; // single-item back-compat
+            imageUrl?: string; // legacy field name
           };
-          const mediaUrl = igCfg.mediaUrl ?? igCfg.imageUrl;
-          if (!mediaUrl) {
+          // Normaliza a array (1-10): mediaUrls wins; mediaUrl/imageUrl como
+          // fallback de back-compat para posts encolados antes del carrusel.
+          const urls = igCfg.mediaUrls?.length
+            ? igCfg.mediaUrls
+            : igCfg.mediaUrl
+            ? [igCfg.mediaUrl]
+            : igCfg.imageUrl
+            ? [igCfg.imageUrl]
+            : [];
+          if (urls.length === 0) {
             errors[platform] =
-              "Instagram requires a mediaUrl in platformConfigs.instagram";
+              "Instagram requires mediaUrls in platformConfigs.instagram";
             continue;
           }
           const result = await publishToInstagram({
             accessToken,
             igUserId: account.externalAccountId,
-            mediaUrl,
+            mediaUrls: urls,
             caption: post.content,
           });
           if (result.success) {

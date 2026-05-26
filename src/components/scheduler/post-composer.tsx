@@ -206,16 +206,19 @@ export function PostComposer({
     }
 
     if (selected.has("instagram")) {
-      const mediaUrl = instagramImageUrls[0];
-      if (!mediaUrl) {
+      if (instagramImageUrls.length === 0) {
         setErrorMsg(
           "Instagram requiere una imagen o vídeo. Súbelo o pega una URL pública."
         );
         return;
       }
+      if (instagramImageUrls.length > 10) {
+        setErrorMsg("Instagram carrusel admite máximo 10 elementos.");
+        return;
+      }
       platformConfigs.instagram = {
         ...(platformConfigs.instagram ?? {}),
-        mediaUrl,
+        mediaUrls: instagramImageUrls,
       };
     }
 
@@ -594,21 +597,25 @@ export function PostComposer({
           <div className="mb-3 space-y-2 rounded-md border border-gray-800 bg-gray-950/40 p-3">
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium text-gray-300">
-                📷 Imagen o vídeo (Reel) de Instagram
+                📷 Instagram — imagen, vídeo (Reel) o carrusel
+              </span>
+              <span className="text-[11px] text-gray-500">
+                {instagramImageUrls.length}/10
               </span>
             </div>
             <MediaUploader
               value={instagramImageUrls}
               onChange={setInstagramImageUrls}
-              max={1}
+              max={10}
               kinds={["image", "video"]}
               hint="Pega URL pública o sube imagen / vídeo"
             />
             <p className="text-[11px] text-gray-500">
-              Instagram fetchea el archivo desde el servidor — la URL debe ser
-              pública. La subida vía R2 cumple este requisito automáticamente.
-              Si subes vídeo se publica como Reel (3-90s, MP4). El caption se
-              toma del campo &quot;Contenido&quot; (máx 2200 caracteres).
+              1 elemento = post único (foto) o Reel (vídeo 3-90s).
+              2-10 elementos = carrusel (imágenes y/o vídeos mezclados). Todas
+              las URLs deben ser públicas — R2 lo cumple automáticamente. El
+              caption se toma del campo &quot;Contenido&quot; (máx 2200
+              caracteres).
             </p>
           </div>
         )}

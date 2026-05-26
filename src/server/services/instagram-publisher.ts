@@ -6,19 +6,18 @@ export type InstagramPublishResult =
   | { success: false; error: string };
 
 /**
- * Container-status polling for Reels.
+ * Container-status polling for async media (Reels + carousel parents).
  *
- * IG ingests the video asynchronously: the `/media` endpoint returns a
- * creation_id immediately but `status_code` walks IN_PROGRESS → FINISHED
- * (or ERROR / EXPIRED) over tens of seconds. We must wait for FINISHED
- * before calling `/media_publish`, otherwise the publish fails with
- * "Media is not ready".
+ * IG ingests video/carousel asynchronously: `/media` returns a creation_id
+ * immediately but `status_code` walks IN_PROGRESS → FINISHED (or ERROR /
+ * EXPIRED) over tens of seconds. We must wait for FINISHED before calling
+ * `/media_publish`, otherwise the publish fails with "Media is not ready".
  *
  * Cap: 5-min total wait with 5s polling. Beyond that we surface a
  * timeout error — most legit reels finish under a minute, anything longer
  * is usually stuck and worth surfacing rather than blocking forever.
  */
-async function waitForReelContainer(args: {
+async function waitForContainer(args: {
   accessToken: string;
   creationId: string;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
@@ -62,106 +61,202 @@ async function waitForReelContainer(args: {
 }
 
 /**
- * Publishes a single-asset post to Instagram via Graph API.
+ * Creates a single (non-carousel) media container.
  *
- * `mediaUrl` may be an image (JPG/PNG) or a video (MP4 for Reels). The
- * publisher detects the kind by URL extension and routes accordingly:
+ * For carousel children we use `is_carousel_item=true` instead of attaching
+ * the caption (the caption lives on the parent container only).
+ */
+async function createMediaContainer(args: {
+  accessToken: string;
+  igUserId: string;
+  mediaUrl: string;
+  caption?: string;
+  asCarouselChild?: boolean;
+}): Promise<{ ok: true; creationId: string; isVideo: boolean } | { ok: false; error: string }> {
+  const isVideo = isVideoUrl(args.mediaUrl);
+  const body: Record<string, string> = {
+    access_token: args.accessToken,
+  };
+  if (isVideo) {
+    body.media_type = "REELS";
+    body.video_url = args.mediaUrl;
+  } else {
+    body.image_url = args.mediaUrl;
+  }
+  if (args.asCarouselChild) {
+    body.is_carousel_item = "true";
+  } else if (args.caption) {
+    body.caption = args.caption.slice(0, 2200);
+  }
+
+  const res = await fetch(`${FB_GRAPH_URL}/${args.igUserId}/media`, {
+    method: "POST",
+    body: new URLSearchParams(body),
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    return {
+      ok: false,
+      error: `IG media create failed (${res.status}): ${text.slice(0, 300)}`,
+    };
+  }
+  const data = (await res.json()) as { id?: string };
+  if (!data.id) return { ok: false, error: "IG media create returned no id" };
+  return { ok: true, creationId: data.id, isVideo };
+}
+
+async function publishContainer(args: {
+  accessToken: string;
+  igUserId: string;
+  creationId: string;
+}): Promise<{ ok: true; mediaId: string } | { ok: false; error: string }> {
+  const res = await fetch(`${FB_GRAPH_URL}/${args.igUserId}/media_publish`, {
+    method: "POST",
+    body: new URLSearchParams({
+      creation_id: args.creationId,
+      access_token: args.accessToken,
+    }),
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    return {
+      ok: false,
+      error: `IG media_publish failed (${res.status}): ${text.slice(0, 300)}`,
+    };
+  }
+  const data = (await res.json()) as { id?: string };
+  if (!data.id) return { ok: false, error: "IG media_publish returned no id" };
+  return { ok: true, mediaId: data.id };
+}
+
+/**
+ * Publishes a post to Instagram via Graph API. Accepts a single image, a
+ * single Reel, or a carousel (mixed images + videos, 2-10 items).
  *
- * IMAGE flow (2 calls, synchronous on Meta's side):
- *   1. POST /{ig_user_id}/media?image_url=...   → creation_id
- *   2. POST /{ig_user_id}/media_publish         → media id
+ * SINGLE IMAGE flow (2 calls, synchronous):
+ *   /media?image_url=… → /media_publish
  *
- * VIDEO flow (3 calls + polling — Reels):
- *   1. POST /{ig_user_id}/media?media_type=REELS&video_url=...  → creation_id
- *   2. Poll GET /{creation_id}?fields=status_code until FINISHED
- *   3. POST /{ig_user_id}/media_publish                          → media id
+ * SINGLE REEL flow (3 calls + polling):
+ *   /media?media_type=REELS&video_url=… → poll status → /media_publish
  *
- * The mediaUrl MUST be publicly accessible — IG fetches it server-side and
+ * CAROUSEL flow (N+2 calls, parent polled before publish):
+ *   N × /media?is_carousel_item=true (image_url OR REELS+video_url)
+ *   → /media?media_type=CAROUSEL&children=id1,id2,… → poll → /media_publish
+ *
+ * All URLs must be publicly accessible — IG fetches them server-side and
  * rejects signed URLs that expire quickly.
  */
 export async function publishToInstagram(args: {
   accessToken: string;
   igUserId: string;
-  /** Public URL of image OR video (Reels). */
-  mediaUrl: string;
+  /** Public URLs (1-10). 1 → single post or Reel. 2-10 → carousel. */
+  mediaUrls: string[];
   caption: string;
 }): Promise<InstagramPublishResult> {
   try {
-    const isVideo = isVideoUrl(args.mediaUrl);
-
-    // 1. Create the media container
-    const createBody: Record<string, string> = {
-      caption: args.caption.slice(0, 2200),
-      access_token: args.accessToken,
-    };
-    if (isVideo) {
-      createBody.media_type = "REELS";
-      createBody.video_url = args.mediaUrl;
-    } else {
-      createBody.image_url = args.mediaUrl;
+    const urls = args.mediaUrls.filter(Boolean);
+    if (urls.length === 0) {
+      return { success: false, error: "Instagram requires at least one mediaUrl" };
     }
-    const createRes = await fetch(
-      `${FB_GRAPH_URL}/${args.igUserId}/media`,
-      {
-        method: "POST",
-        body: new URLSearchParams(createBody),
-        signal: AbortSignal.timeout(30_000),
-      }
-    );
-    if (!createRes.ok) {
-      const text = await createRes.text().catch(() => "");
-      return {
-        success: false,
-        error: `IG media create failed (${createRes.status}): ${text.slice(0, 300)}`,
-      };
-    }
-    const createData = (await createRes.json()) as { id?: string };
-    const creationId = createData.id;
-    if (!creationId) {
-      return { success: false, error: "IG media create returned no id" };
+    if (urls.length > 10) {
+      return { success: false, error: "Instagram carousel allows up to 10 items" };
     }
 
-    // 2. (Video only) Wait for the container to finish ingestion
-    if (isVideo) {
-      const waited = await waitForReelContainer({
+    const isCarousel = urls.length > 1;
+
+    // Single-item: container directly; carousel: build children then parent
+    let containerId: string;
+    let isVideoSingle = false;
+
+    if (!isCarousel) {
+      const created = await createMediaContainer({
         accessToken: args.accessToken,
-        creationId,
+        igUserId: args.igUserId,
+        mediaUrl: urls[0],
+        caption: args.caption,
       });
-      if (!waited.ok) {
-        return { success: false, error: waited.error };
-      }
-    }
+      if (!created.ok) return { success: false, error: created.error };
+      containerId = created.creationId;
+      isVideoSingle = created.isVideo;
 
-    // 3. Publish the container
-    const publishParams = new URLSearchParams({
-      creation_id: creationId,
-      access_token: args.accessToken,
-    });
-    const publishRes = await fetch(
-      `${FB_GRAPH_URL}/${args.igUserId}/media_publish`,
-      {
+      // Reels: wait for ingestion
+      if (created.isVideo) {
+        const waited = await waitForContainer({
+          accessToken: args.accessToken,
+          creationId: containerId,
+        });
+        if (!waited.ok) return { success: false, error: waited.error };
+      }
+    } else {
+      const childIds: string[] = [];
+      let anyVideo = false;
+      for (const url of urls) {
+        const child = await createMediaContainer({
+          accessToken: args.accessToken,
+          igUserId: args.igUserId,
+          mediaUrl: url,
+          asCarouselChild: true,
+        });
+        if (!child.ok) return { success: false, error: child.error };
+        childIds.push(child.creationId);
+        if (child.isVideo) anyVideo = true;
+      }
+      // Video children must finish ingesting before the parent is created
+      if (anyVideo) {
+        for (const id of childIds) {
+          const waited = await waitForContainer({
+            accessToken: args.accessToken,
+            creationId: id,
+          });
+          if (!waited.ok) return { success: false, error: waited.error };
+        }
+      }
+
+      const parentRes = await fetch(`${FB_GRAPH_URL}/${args.igUserId}/media`, {
         method: "POST",
-        body: publishParams,
+        body: new URLSearchParams({
+          media_type: "CAROUSEL",
+          children: childIds.join(","),
+          caption: args.caption.slice(0, 2200),
+          access_token: args.accessToken,
+        }),
         signal: AbortSignal.timeout(30_000),
+      });
+      if (!parentRes.ok) {
+        const text = await parentRes.text().catch(() => "");
+        return {
+          success: false,
+          error: `IG carousel parent create failed (${parentRes.status}): ${text.slice(0, 300)}`,
+        };
       }
-    );
-    if (!publishRes.ok) {
-      const text = await publishRes.text().catch(() => "");
-      return {
-        success: false,
-        error: `IG media_publish failed (${publishRes.status}): ${text.slice(0, 300)}`,
-      };
-    }
-    const publishData = (await publishRes.json()) as { id?: string };
-    const mediaId = publishData.id;
-    if (!mediaId) {
-      return { success: false, error: "IG media_publish returned no id" };
+      const parentData = (await parentRes.json()) as { id?: string };
+      if (!parentData.id) {
+        return { success: false, error: "IG carousel parent: no id in response" };
+      }
+      containerId = parentData.id;
+      // Parent also goes through async finalization once children are ready
+      const waited = await waitForContainer({
+        accessToken: args.accessToken,
+        creationId: containerId,
+      });
+      if (!waited.ok) return { success: false, error: waited.error };
     }
 
+    const published = await publishContainer({
+      accessToken: args.accessToken,
+      igUserId: args.igUserId,
+      creationId: containerId,
+    });
+    if (!published.ok) return { success: false, error: published.error };
+
+    // URL slug: /reel/ for single Reels, /p/ for image / carousel
+    const slug = !isCarousel && isVideoSingle ? "reel" : "p";
     return {
       success: true,
-      externalId: mediaId,
-      externalUrl: `https://www.instagram.com/${isVideo ? "reel" : "p"}/${mediaId}/`,
+      externalId: published.mediaId,
+      externalUrl: `https://www.instagram.com/${slug}/${published.mediaId}/`,
     };
   } catch (err) {
     return { success: false, error: (err as Error).message };
