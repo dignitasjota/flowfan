@@ -1,5 +1,6 @@
 import { FB_GRAPH_URL } from "./oauth-instagram";
 import { isVideoUrl } from "@/lib/media";
+import { fetchWithRetry } from "./poll-retry";
 
 export type InstagramPublishResult =
   | { success: true; externalId: string; externalUrl: string }
@@ -30,10 +31,20 @@ async function waitForContainer(args: {
       fields: "status_code,status",
       access_token: args.accessToken,
     });
-    const res = await fetch(
-      `${FB_GRAPH_URL}/${args.creationId}?${params.toString()}`,
-      { signal: AbortSignal.timeout(15_000) }
-    );
+    // fetchWithRetry absorbe 5xx + errores de red transitorios. 4xx pasan
+    // tal cual y se surface al caller (auth, container no existe, etc).
+    let res: Response;
+    try {
+      res = await fetchWithRetry(
+        `${FB_GRAPH_URL}/${args.creationId}?${params.toString()}`,
+        { signal: AbortSignal.timeout(15_000) }
+      );
+    } catch (err) {
+      return {
+        ok: false,
+        error: `IG container status network error: ${(err as Error).message}`,
+      };
+    }
     if (!res.ok) {
       const text = await res.text().catch(() => "");
       return {

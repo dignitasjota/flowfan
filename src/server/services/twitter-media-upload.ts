@@ -14,6 +14,7 @@
  */
 
 import { isVideoUrl } from "@/lib/media";
+import { fetchWithRetry } from "./poll-retry";
 
 const TWITTER_MEDIA_URL = "https://upload.twitter.com/2/media/upload";
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
@@ -243,10 +244,16 @@ async function uploadVideoChunked(args: {
     const wait = Math.max(1, processing.check_after_secs ?? 5);
     await new Promise((r) => setTimeout(r, wait * 1000));
     const statusUrl = `${TWITTER_MEDIA_URL}?command=STATUS&media_id=${encodeURIComponent(mediaId)}`;
-    const statusRes = await fetch(statusUrl, {
-      headers: { Authorization: `Bearer ${args.accessToken}` },
-      signal: AbortSignal.timeout(20_000),
-    });
+    // fetchWithRetry para STATUS: este endpoint puede devolver 5xx
+    // ocasionales durante la transcodificación del vídeo. Reintentar es
+    // más útil que dejar morir el job entero.
+    const statusRes = await fetchWithRetry(
+      statusUrl,
+      {
+        headers: { Authorization: `Bearer ${args.accessToken}` },
+        signal: AbortSignal.timeout(20_000),
+      }
+    );
     if (!statusRes.ok) {
       const text = await statusRes.text().catch(() => "");
       throw new Error(`Twitter STATUS failed (${statusRes.status}): ${text.slice(0, 200)}`);
