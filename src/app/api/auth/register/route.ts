@@ -87,17 +87,20 @@ export async function POST(req: Request) {
 
   const passwordHash = await hash(password, 12);
   const verificationToken = randomBytes(32).toString("hex");
+  // Token válido 24h (SEC-8)
+  const verificationExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
   await db.insert(creators).values({
     name,
     email,
     passwordHash,
     emailVerificationToken: verificationToken,
+    emailVerificationExpiresAt: verificationExpiresAt,
   });
 
-  // Send verification email
+  // Send verification email. No logueamos la URL ni el token (SEC-1).
   const verifyUrl = `${process.env.NEXTAUTH_URL}/api/auth/verify-email?token=${verificationToken}`;
-  log.info({ email, verifyUrl }, "Email verification URL generated");
+  log.info({ email }, "Email verification enqueued");
 
   try {
     const { emailQueue } = await import("@/server/queues");

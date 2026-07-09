@@ -1,11 +1,16 @@
 import { z } from "zod";
+import { randomBytes } from "crypto";
 import { eq } from "drizzle-orm";
 import { compare } from "bcryptjs";
 import { TRPCError } from "@trpc/server";
 import { createTRPCRouter, protectedProcedure } from "../trpc";
 import { creators } from "@/server/db/schema";
 import { getStripe } from "@/lib/stripe";
+import { rateLimit, RATE_LIMITS } from "@/lib/rate-limit";
+import { createChildLogger } from "@/lib/logger";
 import { SUPPORTED_LANGUAGES, isValidLanguageCode } from "@/server/services/language-utils";
+
+const log = createChildLogger("account-router");
 
 export const accountRouter = createTRPCRouter({
   /** Get current account info */
@@ -87,6 +92,73 @@ export const accountRouter = createTRPCRouter({
         .where(eq(creators.id, ctx.creatorId));
       return { success: true };
     }),
+
+  /** Estado de verificación de email de la cuenta del usuario logueado */
+  getVerificationStatus: protectedProcedure.query(async ({ ctx }) => {
+    const creator = await ctx.db.query.creators.findFirst({
+      where: eq(creators.id, ctx.actingUserId),
+      columns: { email: true, emailVerified: true },
+    });
+    return {
+      email: creator?.email ?? null,
+      emailVerified: creator?.emailVerified ?? false,
+    };
+  }),
+
+  /** Reenviar el email de verificación (regenera token con nueva expiración) */
+  resendVerification: protectedProcedure.mutation(async ({ ctx }) => {
+    const rl = await rateLimit(
+      `resend-verification:${ctx.actingUserId}`,
+      RATE_LIMITS.resendVerification
+    );
+    if (!rl.success) {
+      throw new TRPCError({
+        code: "TOO_MANY_REQUESTS",
+        message: "Has pedido demasiados reenvíos. Inténtalo de nuevo en unos minutos.",
+      });
+    }
+
+    const creator = await ctx.db.query.creators.findFirst({
+      where: eq(creators.id, ctx.actingUserId),
+      columns: { id: true, email: true, emailVerified: true },
+    });
+    if (!creator) {
+      throw new TRPCError({ code: "NOT_FOUND", message: "Cuenta no encontrada" });
+    }
+    if (creator.emailVerified) {
+      return { success: true, alreadyVerified: true };
+    }
+
+    const token = randomBytes(32).toString("hex");
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    await ctx.db
+      .update(creators)
+      .set({
+        emailVerificationToken: token,
+        emailVerificationExpiresAt: expiresAt,
+        updatedAt: new Date(),
+      })
+      .where(eq(creators.id, creator.id));
+
+    const verifyUrl = `${process.env.NEXTAUTH_URL}/api/auth/verify-email?token=${token}`;
+    try {
+      const { emailQueue } = await import("@/server/queues");
+      await emailQueue.add("verification", {
+        type: "verification" as const,
+        to: creator.email,
+        data: { verifyUrl },
+      });
+    } catch (err) {
+      log.warn({ err }, "Failed to enqueue verification email");
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: "No se pudo reenviar el email. Inténtalo más tarde.",
+      });
+    }
+
+    log.info({ creatorId: creator.id }, "Verification email resent");
+    return { success: true, alreadyVerified: false };
+  }),
 
   /** Delete account and all associated data (cascading deletes handle the rest) */
   deleteAccount: protectedProcedure

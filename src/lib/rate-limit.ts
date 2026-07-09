@@ -92,4 +92,6 @@ export const RATE_LIMITS = {
   api: { limit: 100, windowSeconds: 60 },
   /** Comment ingest endpoint: 30 req/min per API key (stricter than global) */
   commentsIngest: { limit: 30, windowSeconds: 60 },
+  /** Resend verification email: 3 per 10 min per user */
+  resendVerification: { limit: 3, windowSeconds: 600 },
 } as const;

@@ -29,11 +29,22 @@ export async function GET(req: Request) {
     );
   }
 
+  // Token expirado (SEC-8): pedir al usuario que reenvíe desde el aviso.
+  if (
+    creator.emailVerificationExpiresAt &&
+    creator.emailVerificationExpiresAt.getTime() < Date.now()
+  ) {
+    return NextResponse.redirect(
+      new URL("/login?error=token-expired", process.env.NEXTAUTH_URL!)
+    );
+  }
+
   await db
     .update(creators)
     .set({
       emailVerified: true,
       emailVerificationToken: null,
+      emailVerificationExpiresAt: null,
       updatedAt: new Date(),
     })
     .where(eq(creators.id, creator.id));

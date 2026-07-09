@@ -532,6 +532,17 @@ UI: Settings → Cuenta tab, "Notificaciones por email" section with 3 toggles.
 - Register (`/api/auth/register`) → enqueues verification email
 - Forgot password (`/api/auth/forgot-password`) → enqueues password reset email
 
+### Email Verification (obligatoria)
+
+Verificar el email es **obligatorio** para acceder al dashboard.
+
+- **Token con expiración:** `creators.emailVerificationToken` + `emailVerificationExpiresAt` (24h). Generado en el registro y en cada reenvío.
+- **`/api/auth/verify-email`** valida el token, comprueba que no esté expirado (redirige a `/login?error=token-expired` si lo está), marca `emailVerified = true` y limpia token + expiry.
+- **Gate en el dashboard** (`src/app/(dashboard)/layout.tsx`): si `!emailVerified`, renderiza `<EmailVerificationGate>` (`src/components/auth/email-verification-gate.tsx`) en vez del dashboard — pantalla de bloqueo con reenvío, "recargar" y cerrar sesión.
+- **Reenvío:** `account.resendVerification` (tRPC) — regenera token+expiry y reencola el email. Rate limit `resendVerification` (3/10 min por usuario). `account.getVerificationStatus` expone `{email, emailVerified}`.
+- **Grandfathering:** las cuentas previas a la feature quedarían bloqueadas (default `email_verified = false`). Ejecutar `npm run grandfather:email-verified` (idempotente, soporta `--dry-run` y `--before=YYYY-MM-DD`) tras el `db:push`.
+- Nota: el registro ya no loguea la URL/token de verificación (SEC-1).
+
 ## Revenue Tracking
 
 - **Table:** `fanTransactions` — per-contact transaction records

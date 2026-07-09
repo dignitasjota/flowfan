@@ -147,6 +147,7 @@ export const creators = pgTable("creators", {
   avatarUrl: text("avatar_url"),
   emailVerified: boolean("email_verified").default(false).notNull(),
   emailVerificationToken: varchar("email_verification_token", { length: 255 }),
+  emailVerificationExpiresAt: timestamp("email_verification_expires_at"),
   subscriptionPlan: subscriptionPlanEnum("subscription_plan")
     .default("free")
     .notNull(),

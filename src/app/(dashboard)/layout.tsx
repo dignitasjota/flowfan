@@ -7,6 +7,7 @@ import { creators } from "@/server/db/schema";
 import { Sidebar } from "@/components/layout/sidebar";
 import { UpgradeModalProvider } from "@/components/billing/upgrade-modal";
 import { PastDueBanner } from "./past-due-banner";
+import { EmailVerificationGate } from "@/components/auth/email-verification-gate";
 
 export default async function DashboardLayout({
   children,
@@ -24,8 +25,15 @@ export default async function DashboardLayout({
     columns: {
       onboardingCompleted: true,
       subscriptionStatus: true,
+      emailVerified: true,
+      email: true,
     },
   });
+
+  // Gate de verificación de email: bloquea el dashboard hasta verificar.
+  if (creator && !creator.emailVerified) {
+    return <EmailVerificationGate email={creator.email} />;
+  }
 
   const isPastDue = creator?.subscriptionStatus === "past_due";
 
