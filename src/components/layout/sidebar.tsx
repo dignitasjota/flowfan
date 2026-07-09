@@ -25,6 +25,7 @@ const navigation = [
   { name: "Automatizaciones", href: "/workflows", icon: "⚡", access: "manager" as const },
   { name: "Secuencias", href: "/sequences", icon: "🔄", access: "manager" as const },
   { name: "Content Gaps", href: "/content-gaps", icon: "🔍", access: "manager" as const },
+  { name: "A/B Mensajes", href: "/experiments", icon: "🧪", access: "manager" as const },
   { name: "Insights", href: "/insights", icon: "📈", access: "manager" as const },
   { name: "Blog → Social", href: "/blog-to-social", icon: "✨", access: "manager" as const },
   { name: "Programados", href: "/scheduled", icon: "⏰", access: "all" as const },

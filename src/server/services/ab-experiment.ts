@@ -5,6 +5,7 @@ import {
   experimentAssignments,
   experimentMetrics,
 } from "@/server/db/schema";
+import { twoProportionConfidence } from "./ab-stats";
 import type { ConversationMode } from "./conversation-mode-resolver";
 
 type DB = Parameters<typeof eq>[0] extends infer T ? any : any;
@@ -212,42 +213,10 @@ export async function calculateExperimentResults(
 }
 
 function calculateConfidence(a: VariantMetrics, b: VariantMetrics): number {
-  const nA = a.totalContacts;
-  const nB = b.totalContacts;
-
-  if (nA < 10 || nB < 10) return 0;
-
-  const pA = a.conversionRate;
-  const pB = b.conversionRate;
-  const pooled = (pA * nA + pB * nB) / (nA + nB);
-
-  if (pooled === 0 || pooled === 1) return 0;
-
-  const se = Math.sqrt(pooled * (1 - pooled) * (1 / nA + 1 / nB));
-  if (se === 0) return 0;
-
-  const z = Math.abs(pA - pB) / se;
-
-  // Approximate two-tailed p-value → confidence
-  // Using normal distribution approximation
-  const p = 2 * (1 - normalCDF(z));
-  return Math.max(0, Math.min(1, 1 - p));
-}
-
-function normalCDF(z: number): number {
-  // Approximation of the normal CDF
-  const a1 = 0.254829592;
-  const a2 = -0.284496736;
-  const a3 = 1.421413741;
-  const a4 = -1.453152027;
-  const a5 = 1.061405429;
-  const p = 0.3275911;
-
-  const sign = z < 0 ? -1 : 1;
-  const x = Math.abs(z) / Math.sqrt(2);
-  const t = 1.0 / (1.0 + p * x);
-  const y =
-    1.0 - ((((a5 * t + a4) * t + a3) * t + a2) * t + a1) * t * Math.exp(-x * x);
-
-  return 0.5 * (1.0 + sign * y);
+  return twoProportionConfidence(
+    a.totalContacts,
+    a.conversionRate,
+    b.totalContacts,
+    b.conversionRate
+  );
 }

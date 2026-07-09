@@ -9,6 +9,7 @@ const log = createChildLogger("messages-router");
 import { messages, conversations, contacts } from "@/server/db/schema";
 import { analysisQueue, telegramOutgoingQueue } from "@/server/queues";
 import { logTeamAction } from "@/server/services/team-audit";
+import { markExperimentReplyForContact } from "@/server/services/message-experiment";
 
 export const messagesRouter = createTRPCRouter({
   list: protectedProcedure
@@ -79,6 +80,11 @@ export const messagesRouter = createTRPCRouter({
         .update(contacts)
         .set({ lastInteractionAt: new Date() })
         .where(eq(contacts.id, conversation.contactId));
+
+      // A/B de mensajes: el fan respondió → marca el send abierto como replied.
+      markExperimentReplyForContact(ctx.db, ctx.creatorId, conversation.contactId).catch(
+        () => {}
+      );
 
       // Publish real-time event
       if (message) {

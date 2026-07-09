@@ -8,6 +8,7 @@ import { createChildLogger } from "@/lib/logger";
 import { publishEvent } from "@/lib/redis-pubsub";
 import { dispatchWebhookEvent } from "./webhook-dispatcher";
 import { findContactExperiment, recordExperimentMetric } from "./ab-experiment";
+import { markExperimentConversionForContact } from "./message-experiment";
 
 const log = createChildLogger("profile-updater");
 
@@ -251,6 +252,15 @@ export async function updateContactProfile(
         }
       } catch {
         // Non-critical: don't break profile update
+      }
+
+      // A/B de mensajes: al avanzar de funnel, marca la conversión del send.
+      if (scores.funnelStage !== prevFunnel && resolvedCreatorId) {
+        try {
+          await markExperimentConversionForContact(db, resolvedCreatorId, contactId);
+        } catch {
+          // Non-critical
+        }
       }
 
       // Dispatch workflow event for significant sentiment change

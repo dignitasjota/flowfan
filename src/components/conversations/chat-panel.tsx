@@ -133,6 +133,33 @@ export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact
   const { handleError } = useTrpcErrorHandler();
   const { success: toastSuccess } = useToast();
 
+  // A/B de mensajes: experimentos activos para esta plataforma.
+  const runningExperiments = trpc.messageExperiments.listRunning.useQuery({
+    platformType: conversation.platformType,
+  });
+  const pickExperimentVariant = trpc.messageExperiments.pickForSend.useMutation();
+
+  function interpolateVars(content: string): string {
+    const displayName =
+      conversation.contact.displayName ?? conversation.contact.username;
+    return content
+      .split("{{displayName}}").join(displayName)
+      .split("{{username}}").join(conversation.contact.username);
+  }
+
+  async function handlePickExperiment(experimentId: string) {
+    if (!experimentId) return;
+    try {
+      const res = await pickExperimentVariant.mutateAsync({
+        experimentId,
+        contactId: conversation.contactId,
+      });
+      setCreatorMessageInput(interpolateVars(res.content));
+    } catch (err) {
+      handleError(err);
+    }
+  }
+
   useEffect(() => {
     if (highlightMessageId) {
       const el = document.getElementById(`msg-${highlightMessageId}`);
@@ -627,9 +654,30 @@ export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact
               </div>
 
               <div>
-                <label className="mb-1 block text-[11px] font-medium uppercase tracking-wider text-gray-500">
-                  Tu respuesta
-                </label>
+                <div className="mb-1 flex items-center justify-between">
+                  <label className="block text-[11px] font-medium uppercase tracking-wider text-gray-500">
+                    Tu respuesta
+                  </label>
+                  {runningExperiments.data && runningExperiments.data.length > 0 && (
+                    <select
+                      value=""
+                      onChange={(e) => {
+                        handlePickExperiment(e.target.value);
+                        e.target.value = "";
+                      }}
+                      disabled={pickExperimentVariant.isPending}
+                      title="Insertar una variante de un experimento A/B activo"
+                      className="rounded border border-gray-700 bg-gray-800 px-2 py-1 text-[11px] text-gray-300"
+                    >
+                      <option value="">🧪 A/B…</option>
+                      {runningExperiments.data.map((exp) => (
+                        <option key={exp.id} value={exp.id}>
+                          {exp.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
                 <div className="relative flex gap-2">
                   <div className="relative flex-1">
                     <textarea

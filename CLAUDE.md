@@ -178,6 +178,21 @@ Test different conversation mode configurations against each other with statisti
 - Experiment list with status badges (draft/running/completed), lifecycle buttons (start/stop/declare winner/apply winner)
 - Results panel: per-variant metrics (contacts, replies, conversions), statistical confidence percentage, suggested winner
 
+### A/B Testing de Mensajes/Templates (`src/server/services/message-experiment.ts`)
+
+Distinto del A/B de conversation modes: aquí se prueban variantes de **contenido de mensaje** (2-5 variantes con `{key, label, content}`) y se mide reply rate + conversión por variante.
+
+**Cómo funciona:**
+1. El creador crea un experimento con N variantes de contenido (página `/experiments`, acceso manager). Estados: `draft → running → completed`.
+2. Al responder en el chat, un selector "🧪 A/B" lista los experimentos `running` de esa plataforma. Al elegir uno, `messageExperiments.pickForSend` elige una variante **aleatoria uniforme** (cada envío es independiente, no por-contacto), registra un `messageExperimentSends` y devuelve el contenido para rellenar el textarea (interpola `{{displayName}}`/`{{username}}`).
+3. **Reply**: `messages.addFanMessage` llama `markExperimentReplyForContact` (fire-and-forget) → marca el send abierto más reciente del contacto como `replied`.
+4. **Conversión**: `profile-updater.ts` llama `markExperimentConversionForContact` cuando el contacto avanza de funnel stage.
+5. `calculateMessageExperimentResults` agrega por variante: sends, replies, replyRate, conversions, conversionRate, avgReplySentiment + confianza (z-test del líder vs runner-up). `applyWinner` fija la variante ganadora.
+
+**Estadística compartida** (`src/server/services/ab-stats.ts`): `twoProportionConfidence` + `normalCDF`, usadas por ambos sistemas de A/B (se extrajeron de `ab-experiment.ts`).
+
+**Schema:** `messageExperiments` (variants JSONB, status, winnerVariantKey) + `messageExperimentSends` (variantKey, replied/repliedAt/replySentiment, converted/convertedAt). **API:** `messageExperiments` router (list, get, listRunning, create, update, start, stop, applyWinner, delete, pickForSend). **UI:** página `/experiments` (sidebar "🧪 A/B Mensajes", manager) + selector en `chat-panel`.
+
 ## Conversation Modes (OnlyFans only)
 
 ### Overview
@@ -1104,6 +1119,8 @@ Dismissal persists in `localStorage` (`fanflow:welcome-dismissed = "1"`) so it n
 | `customRoles` | Custom team roles with granular permissions (14 dot-separated) per creator |
 | `teamAuditLog` | Audit trail for team actions (who did what, with details JSONB) |
 | `conversationModeExperiments` | A/B test experiments for conversation modes (variants A/B config, traffic split, lifecycle) |
+| `messageExperiments` | A/B experiments for message/template content (2-5 content variants, status lifecycle, winner) |
+| `messageExperimentSends` | Per-send record for message A/B (variantKey, replied/converted metrics, reply sentiment) |
 | `experimentAssignments` | Contact-to-variant assignments for A/B experiments |
 | `experimentMetrics` | Metric events (response_sent, fan_replied, conversion, etc.) per experiment variant |
 | `coachingSessions` | AI coaching session results (negotiation/retention/upsell) per conversation |

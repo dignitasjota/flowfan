@@ -6,6 +6,7 @@ import {
   timestamp,
   boolean,
   integer,
+  real,
   jsonb,
   pgEnum,
   index,
@@ -1838,6 +1839,98 @@ export const experimentMetricsRelations = relations(
     }),
     contact: one(contacts, {
       fields: [experimentMetrics.contactId],
+      references: [contacts.id],
+    }),
+  })
+);
+
+// ============================================================
+// MESSAGE / TEMPLATE A/B EXPERIMENTS
+// (distinto de conversationModeExperiments: aquí se prueban variantes de
+//  CONTENIDO de mensaje/template y se mide reply rate + conversión)
+// ============================================================
+
+export const messageExperiments = pgTable(
+  "message_experiments",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    creatorId: uuid("creator_id")
+      .notNull()
+      .references(() => creators.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 255 }).notNull(),
+    // Plataforma opcional a la que aplica (informativo). null = cualquiera.
+    platformType: platformTypeEnum("platform_type"),
+    status: varchar("status", { length: 20 }).notNull().default("draft"),
+    // [{ key: "A", label: "Directo", content: "Hola {{displayName}}..." }, ...]
+    variants: jsonb("variants").notNull().default([]),
+    winnerVariantKey: varchar("winner_variant_key", { length: 40 }),
+    startedAt: timestamp("started_at"),
+    endedAt: timestamp("ended_at"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [index("message_exp_creator_idx").on(table.creatorId)]
+);
+
+export const messageExperimentSends = pgTable(
+  "message_experiment_sends",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    experimentId: uuid("experiment_id")
+      .notNull()
+      .references(() => messageExperiments.id, { onDelete: "cascade" }),
+    creatorId: uuid("creator_id")
+      .notNull()
+      .references(() => creators.id, { onDelete: "cascade" }),
+    contactId: uuid("contact_id")
+      .notNull()
+      .references(() => contacts.id, { onDelete: "cascade" }),
+    variantKey: varchar("variant_key", { length: 40 }).notNull(),
+    messageId: uuid("message_id").references(() => messages.id, {
+      onDelete: "set null",
+    }),
+    sentAt: timestamp("sent_at").defaultNow().notNull(),
+    // Métricas de resultado
+    replied: boolean("replied").notNull().default(false),
+    repliedAt: timestamp("replied_at"),
+    replySentiment: real("reply_sentiment"),
+    converted: boolean("converted").notNull().default(false),
+    convertedAt: timestamp("converted_at"),
+  },
+  (table) => [
+    index("message_exp_sends_exp_idx").on(table.experimentId),
+    index("message_exp_sends_exp_variant_idx").on(
+      table.experimentId,
+      table.variantKey
+    ),
+    // Para marcar reply/conversion buscando el send abierto más reciente del contacto
+    index("message_exp_sends_contact_idx").on(
+      table.creatorId,
+      table.contactId
+    ),
+  ]
+);
+
+export const messageExperimentsRelations = relations(
+  messageExperiments,
+  ({ one, many }) => ({
+    creator: one(creators, {
+      fields: [messageExperiments.creatorId],
+      references: [creators.id],
+    }),
+    sends: many(messageExperimentSends),
+  })
+);
+
+export const messageExperimentSendsRelations = relations(
+  messageExperimentSends,
+  ({ one }) => ({
+    experiment: one(messageExperiments, {
+      fields: [messageExperimentSends.experimentId],
+      references: [messageExperiments.id],
+    }),
+    contact: one(contacts, {
+      fields: [messageExperimentSends.contactId],
       references: [contacts.id],
     }),
   })
