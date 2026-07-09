@@ -465,7 +465,7 @@ Estado verificado contra el código el 2026-07-10.
 - [ ] **A/B Testing de mensajes/templates**: existe A/B de conversation modes, pero no de variantes de mensaje individual.
 - [ ] **PWA / Push notifications**: sin `manifest.json`, service worker ni web push.
 - [ ] **Programa de referidos**: no existe (los invites son de team members).
-- [ ] **E2E con Playwright (navegador real)**: hoy solo hay E2E con Postgres real (SQL) bajo `__tests__/e2e/`.
+- [x] **E2E con Playwright (navegador real)**: implementado en `e2e/` (`smoke.spec.ts` + `auth-flow.spec.ts`), opt-in vía `npm run test:e2e`. Ver `e2e/README.md`.
 
 **Deuda técnica / bugs**: ver [`AUDITORIA_BACKLOG.md`](./AUDITORIA_BACKLOG.md) (48 hallazgos priorizados de la auditoría de seguridad/workers/routers/IA/frontend).
 

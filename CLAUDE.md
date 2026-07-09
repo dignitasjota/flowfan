@@ -1053,6 +1053,16 @@ For DB-level invariants that module mocks cannot exercise (unique indexes, FK ca
 
 E2E tests do NOT cover external APIs (mocked), BullMQ enqueue (mocked) or HTTP middleware (covered by integration-with-mocks under `__tests__/integration/`).
 
+### E2E de navegador con Playwright (`e2e/`)
+
+Tests de flujo en navegador real (Chromium), separados de los E2E de Postgres.
+
+- **Opt-in:** `npm run test:e2e` (o `test:e2e:ui`). No se ejecutan con `npm test` (ese es Vitest). Usan `.spec.ts`; Vitest solo recoge `__tests__/**/*.test.ts`, sin colisión.
+- **Config** (`playwright.config.ts`): `testDir: ./e2e`, baseURL de `E2E_BASE_URL` (default `http://localhost:3000`). `E2E_WEB_SERVER=1` deja que Playwright arranque la app (`npm run start`).
+- **`smoke.spec.ts`** (sin cuenta): landing/login/registro renderizan, aviso de invitación con `?ref`, rutas protegidas redirigen a login, login inválido no entra al dashboard.
+- **`auth-flow.spec.ts`** (requiere `E2E_EMAIL`/`E2E_PASSWORD` de una cuenta ya verificada; se salta solo si faltan): login real → dashboard + navegación.
+- Setup en `e2e/README.md` (`npx playwright install chromium` + app con Postgres/Redis levantada).
+
 ## Landing Page & Onboarding
 
 ### Landing (`src/app/page.tsx`)

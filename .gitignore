@@ -18,3 +18,8 @@ uploads/*
 
 # Duplicated skill folders sometimes synced from external tools
 .agent/skills/*[0-9]
+
+# Playwright
+/test-results/
+/playwright-report/
+/playwright/.cache/
