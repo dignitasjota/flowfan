@@ -49,6 +49,17 @@ En Stripe Dashboard > **Products**:
 6. Copiar el **Price ID**
 7. Pegarla en `.env` como `STRIPE_PRO_PRICE_ID`
 
+#### Plan Business ($99/mes) — opcional (self-checkout)
+Por defecto el plan Business es custom/manual (CTA "Contactar"). Si quieres
+habilitar el **checkout automático** del plan Business:
+1. Click **+ Add product**
+2. Nombre: `FanFlow Business`
+3. En "Pricing": **Recurring**, precio `99` USD, intervalo **Monthly** (ajusta
+   el importe al que muestres en `pricing-table.tsx`)
+4. Copiar el **Price ID** y pegarlo en `.env` como `STRIPE_BUSINESS_PRICE_ID`
+5. Si dejas esta variable vacía, Business sigue siendo "Contactar" (mailto) y el
+   router rechaza el checkout con un mensaje claro.
+
 ### 4. Configurar Webhook
 
 1. En Stripe Dashboard, ir a **Developers** > **Webhooks**
@@ -151,6 +162,7 @@ NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_test_...
 STRIPE_WEBHOOK_SECRET=whsec_...
 STRIPE_STARTER_PRICE_ID=price_...
 STRIPE_PRO_PRICE_ID=price_...
+STRIPE_BUSINESS_PRICE_ID=price_...   # opcional: habilita self-checkout de Business
 ```
 
 ## Problemas Comunes

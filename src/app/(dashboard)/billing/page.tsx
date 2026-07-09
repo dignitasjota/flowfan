@@ -13,7 +13,7 @@ export default function BillingPage() {
   const checkoutMutation = trpc.billing.createCheckoutSession.useMutation();
   const portalMutation = trpc.billing.createPortalSession.useMutation();
 
-  async function handleUpgrade(plan: "starter" | "pro") {
+  async function handleUpgrade(plan: "starter" | "pro" | "business") {
     const result = await checkoutMutation.mutateAsync({ plan });
     if (result.url) {
       window.location.href = result.url;
@@ -150,6 +150,7 @@ export default function BillingPage() {
           <PricingTable
             currentPlan={plan?.plan}
             onSelectPlan={handleUpgrade}
+            businessCheckoutEnabled={plan?.businessCheckoutEnabled}
           />
         </div>
 

@@ -543,6 +543,13 @@ Verificar el email es **obligatorio** para acceder al dashboard.
 - **Grandfathering:** las cuentas previas a la feature quedarían bloqueadas (default `email_verified = false`). Ejecutar `npm run grandfather:email-verified` (idempotente, soporta `--dry-run` y `--before=YYYY-MM-DD`) tras el `db:push`.
 - Nota: el registro ya no loguea la URL/token de verificación (SEC-1).
 
+## Billing (Stripe)
+
+- **Planes con self-checkout:** `starter`, `pro` y (opcional) `business`. Price IDs en `PLAN_PRICE_IDS` (`src/lib/stripe.ts`), leídos de `STRIPE_{STARTER,PRO,BUSINESS}_PRICE_ID`.
+- **Business self-checkout condicional:** `isPlanCheckoutable("business")` es `true` solo si `STRIPE_BUSINESS_PRICE_ID` está configurado. Si lo está, `billing.createCheckoutSession` acepta `business` y la `PricingTable` muestra el botón de checkout; si no, Business cae al CTA "Contactar" (mailto) y el router rechaza el checkout con `BAD_REQUEST`. `billing.getPlan` expone `businessCheckoutEnabled` para que la UI decida.
+- **Webhook** (`/api/webhooks/stripe`): `getPlanFromPriceId` mapea también `business`, así que la sincronización de plan funciona automáticamente al activar el price ID.
+- El precio mostrado para Business en `pricing-table.tsx` (€99) debe coincidir con el price real configurado en Stripe.
+
 ## Revenue Tracking
 
 - **Table:** `fanTransactions` — per-contact transaction records

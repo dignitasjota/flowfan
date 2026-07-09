@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { createTRPCRouter, protectedProcedure, ownerProcedure } from "../trpc";
 import { creators } from "@/server/db/schema";
-import { getStripe, PLAN_PRICE_IDS } from "@/lib/stripe";
+import { getStripe, PLAN_PRICE_IDS, isPlanCheckoutable } from "@/lib/stripe";
 import { PLAN_LIMITS, getUsageSummary } from "@/server/services/usage-limits";
 
 export const billingRouter = createTRPCRouter({
@@ -32,6 +32,7 @@ export const billingRouter = createTRPCRouter({
       hasSubscription: !!creator.stripeSubscriptionId,
       onboardingCompleted: creator.onboardingCompleted,
       limits: PLAN_LIMITS[plan],
+      businessCheckoutEnabled: isPlanCheckoutable("business"),
     };
   }),
 
@@ -40,8 +41,18 @@ export const billingRouter = createTRPCRouter({
   }),
 
   createCheckoutSession: ownerProcedure
-    .input(z.object({ plan: z.enum(["starter", "pro"]) }))
+    .input(z.object({ plan: z.enum(["starter", "pro", "business"]) }))
     .mutation(async ({ ctx, input }) => {
+      // Business solo es self-checkout si su price ID está configurado; si no,
+      // sigue siendo un plan custom que se contrata contactando con ventas.
+      if (!isPlanCheckoutable(input.plan)) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message:
+            "El plan Business se contrata manualmente. Contacta con soporte para activarlo.",
+        });
+      }
+
       const creator = await ctx.db.query.creators.findFirst({
         where: eq(creators.id, ctx.creatorId),
         columns: {

@@ -10,7 +10,7 @@ type PricingPlan = {
   features: { text: string; included: boolean; highlight?: boolean }[];
   cta: string;
   popular?: boolean;
-  planId?: "starter" | "pro";
+  planId?: "starter" | "pro" | "business";
 };
 
 const plans: PricingPlan[] = [
@@ -91,9 +91,11 @@ const plans: PricingPlan[] = [
   },
   {
     name: "Business",
-    price: "Custom",
-    priceDetail: "contactanos",
+    // El precio debe coincidir con el price configurado en STRIPE_BUSINESS_PRICE_ID.
+    price: "€99",
+    priceDetail: "/mes",
     description: "Para agencias y equipos grandes",
+    planId: "business",
     features: [
       { text: "Todo en Pro +", included: true, highlight: true },
       { text: "Mensajes IA ilimitados", included: true, highlight: true },
@@ -111,17 +113,27 @@ const plans: PricingPlan[] = [
       { text: "Automatizaciones ilimitadas", included: true },
       { text: "Segmentos ilimitados + API access", included: true, highlight: true },
     ],
-    cta: "Contactar",
+    cta: "Elegir Business",
   },
 ];
 
 type Props = {
   currentPlan?: string;
-  onSelectPlan?: (plan: "starter" | "pro") => void;
+  onSelectPlan?: (plan: "starter" | "pro" | "business") => void;
   isLanding?: boolean;
+  /**
+   * Si Business admite self-checkout (STRIPE_BUSINESS_PRICE_ID configurado).
+   * Cuando es false, Business cae al CTA "Contactar" (mailto).
+   */
+  businessCheckoutEnabled?: boolean;
 };
 
-export function PricingTable({ currentPlan, onSelectPlan, isLanding }: Props) {
+export function PricingTable({
+  currentPlan,
+  onSelectPlan,
+  isLanding,
+  businessCheckoutEnabled,
+}: Props) {
   return (
     <section id="pricing" className="px-4 py-24 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-6xl">
@@ -223,42 +235,59 @@ export function PricingTable({ currentPlan, onSelectPlan, isLanding }: Props) {
                 </ul>
 
                 <div className="mt-8">
-                  {isCurrent ? (
-                    <div className="w-full rounded-lg border border-gray-600 py-2.5 text-center text-sm font-medium text-gray-400">
-                      Plan actual
-                    </div>
-                  ) : plan.planId && onSelectPlan ? (
-                    <button
-                      onClick={() => onSelectPlan(plan.planId!)}
-                      className={cn(
-                        "w-full rounded-lg py-2.5 text-sm font-semibold transition-colors",
-                        plan.popular
-                          ? "bg-indigo-600 text-white hover:bg-indigo-500"
-                          : "bg-gray-800 text-white hover:bg-gray-700"
-                      )}
-                    >
-                      {plan.cta}
-                    </button>
-                  ) : plan.name === "Business" ? (
-                    <a
-                      href="mailto:info@flowfan.app"
-                      className="block w-full rounded-lg bg-gray-800 py-2.5 text-center text-sm font-semibold text-white hover:bg-gray-700 transition-colors"
-                    >
-                      {plan.cta}
-                    </a>
-                  ) : (
-                    <a
-                      href="/register"
-                      className={cn(
-                        "block w-full rounded-lg py-2.5 text-center text-sm font-semibold transition-colors",
-                        plan.popular
-                          ? "bg-indigo-600 text-white hover:bg-indigo-500"
-                          : "bg-gray-800 text-white hover:bg-gray-700"
-                      )}
-                    >
-                      {plan.cta}
-                    </a>
-                  )}
+                  {(() => {
+                    // Business sin price ID configurado sigue siendo custom → mailto.
+                    const businessNoCheckout =
+                      plan.planId === "business" && !businessCheckoutEnabled;
+
+                    if (isCurrent) {
+                      return (
+                        <div className="w-full rounded-lg border border-gray-600 py-2.5 text-center text-sm font-medium text-gray-400">
+                          Plan actual
+                        </div>
+                      );
+                    }
+                    if (businessNoCheckout) {
+                      return (
+                        <a
+                          href="mailto:info@flowfan.app"
+                          className="block w-full rounded-lg bg-gray-800 py-2.5 text-center text-sm font-semibold text-white hover:bg-gray-700 transition-colors"
+                        >
+                          Contactar
+                        </a>
+                      );
+                    }
+                    if (plan.planId && onSelectPlan) {
+                      // Dashboard/billing: dispara el checkout de Stripe.
+                      return (
+                        <button
+                          onClick={() => onSelectPlan(plan.planId!)}
+                          className={cn(
+                            "w-full rounded-lg py-2.5 text-sm font-semibold transition-colors",
+                            plan.popular
+                              ? "bg-indigo-600 text-white hover:bg-indigo-500"
+                              : "bg-gray-800 text-white hover:bg-gray-700"
+                          )}
+                        >
+                          {plan.cta}
+                        </button>
+                      );
+                    }
+                    // Landing (sin sesión): todos los CTA de pago llevan a registro.
+                    return (
+                      <a
+                        href="/register"
+                        className={cn(
+                          "block w-full rounded-lg py-2.5 text-center text-sm font-semibold transition-colors",
+                          plan.popular
+                            ? "bg-indigo-600 text-white hover:bg-indigo-500"
+                            : "bg-gray-800 text-white hover:bg-gray-700"
+                        )}
+                      >
+                        {plan.cta}
+                      </a>
+                    );
+                  })()}
                 </div>
               </div>
             );
