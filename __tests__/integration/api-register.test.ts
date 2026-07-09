@@ -41,7 +41,7 @@ const mockRateLimit = vi.mocked(rateLimit);
 beforeEach(() => {
   vi.clearAllMocks();
   mockRateLimit.mockResolvedValue({ success: true, remaining: 3, resetAt: 0 });
-  mockFindFirst.mockResolvedValue(null);
+  mockFindFirst.mockResolvedValue(null as never);
 });
 
 // Password schema from register route
@@ -132,7 +132,7 @@ describe("POST /api/auth/register", () => {
 
   describe("CSRF protection", () => {
     it("blocks mismatched origin", () => {
-      const origin = "https://evil.com";
+      const origin: string = "https://evil.com";
       const expectedOrigin = "http://localhost:3000";
       expect(origin !== expectedOrigin).toBe(true);
     });

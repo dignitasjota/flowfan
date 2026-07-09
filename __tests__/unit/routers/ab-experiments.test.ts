@@ -3,8 +3,8 @@ import { TRPCError } from "@trpc/server";
 
 vi.mock("@/server/services/ab-experiment", () => ({
   calculateExperimentResults: vi.fn().mockResolvedValue({
-    variantA: { total: 50, conversions: 10, replies: 30 },
-    variantB: { total: 50, conversions: 15, replies: 35 },
+    variantA: { totalContacts: 50, responseSent: 40, fanReplied: 30, conversions: 10, tipsReceived: 5, replyRate: 0.6, conversionRate: 0.2 },
+    variantB: { totalContacts: 50, responseSent: 42, fanReplied: 35, conversions: 15, tipsReceived: 8, replyRate: 0.7, conversionRate: 0.3 },
     confidence: 0.87,
     suggestedWinner: null,
   }),
@@ -158,8 +158,8 @@ describe("ab-experiments router logic", () => {
 
     it("returns metrics per variant", async () => {
       const results = await mockCalculateResults({} as any, "exp-1");
-      expect(results.variantA.total).toBe(50);
-      expect(results.variantB.total).toBe(50);
+      expect(results.variantA.totalContacts).toBe(50);
+      expect(results.variantB.totalContacts).toBe(50);
     });
 
     it("returns confidence level", async () => {

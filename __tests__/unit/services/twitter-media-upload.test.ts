@@ -11,7 +11,7 @@ function jsonRes(data: unknown, status = 200): Response {
 }
 
 function binRes(bytes: Uint8Array, status = 200): Response {
-  return new Response(bytes, {
+  return new Response(new Blob([bytes as BlobPart]), {
     status,
     headers: { "content-type": "application/octet-stream" },
   });

@@ -47,8 +47,15 @@ vi.mock("@/server/services/usage-limits", () => ({
     business: { contacts: -1, aiMessagesPerMonth: -1, platforms: -1, templates: -1, reportsPerMonth: -1 },
   },
   getUsageSummary: vi.fn().mockResolvedValue({
-    contacts: { used: 3, limit: 5, unlimited: false },
-    aiMessages: { used: 10, limit: 20, unlimited: false },
+    plan: "free",
+    limits: { contacts: 5, aiMessagesPerMonth: 20, platforms: 1, templates: 3, reportsPerMonth: 0 },
+    usage: {
+      contacts: { used: 3, limit: 5 },
+      aiMessages: { used: 10, limit: 20 },
+      platforms: { used: 1, limit: 1 },
+      templates: { used: 0, limit: 3 },
+      reports: { used: 0, limit: 0 },
+    },
   }),
 }));
 
@@ -178,8 +185,8 @@ describe("billing router logic", () => {
   describe("getUsage", () => {
     it("returns usage summary", async () => {
       const usage = await getUsageSummary({} as any, "c1");
-      expect(usage.contacts.used).toBe(3);
-      expect(usage.contacts.limit).toBe(5);
+      expect(usage.usage.contacts.used).toBe(3);
+      expect(usage.usage.contacts.limit).toBe(5);
     });
   });
 

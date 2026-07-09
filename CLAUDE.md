@@ -2,6 +2,8 @@
 
 SaaS CRM para creadores de contenido con asistente IA para gestionar conversaciones con fans.
 
+> **Backlog de auditoría:** los bugs y mejoras pendientes identificados en la auditoría (2026-07-02) están en [`AUDITORIA_BACKLOG.md`](./AUDITORIA_BACKLOG.md), con IDs referenciables (`SEC-*`, `TEN-*`, `AI-*`, `WK-*`, `FE-*`, `ARCH-*`), ubicación `archivo:línea`, escenario y fix propuesto. Consúltalo antes de tocar auth, routers tRPC, workers/pollers o la capa realtime.
+
 ## Stack
 
 - **Frontend:** Next.js 15 (App Router) + React 19 + TailwindCSS v4 + shadcn/ui

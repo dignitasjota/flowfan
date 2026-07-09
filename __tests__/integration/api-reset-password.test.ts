@@ -79,13 +79,13 @@ describe("POST /api/auth/reset-password", () => {
 
   describe("token verification", () => {
     it("rejects expired token", async () => {
-      mockFindFirst.mockResolvedValueOnce(null); // expired = not found by query
+      mockFindFirst.mockResolvedValueOnce(null as never); // expired = not found by query
       const token = await db.query.passwordResetTokens.findFirst();
       expect(token).toBeNull();
     });
 
     it("rejects already used token", async () => {
-      mockFindFirst.mockResolvedValueOnce(null); // usedAt != null = not found by query
+      mockFindFirst.mockResolvedValueOnce(null as never); // usedAt != null = not found by query
       const token = await db.query.passwordResetTokens.findFirst();
       expect(token).toBeNull();
     });

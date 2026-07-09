@@ -13,13 +13,13 @@ describe("intelligence.getEnhancedDashboardStats", () => {
     });
 
     it("accepts 60d period", () => {
-      const period = "60d";
+      const period: string = "60d";
       const days = period === "30d" ? 30 : period === "60d" ? 60 : 90;
       expect(days).toBe(60);
     });
 
     it("accepts 90d period", () => {
-      const period = "90d";
+      const period: string = "90d";
       const days = period === "30d" ? 30 : period === "60d" ? 60 : 90;
       expect(days).toBe(90);
     });

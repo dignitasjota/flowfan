@@ -92,7 +92,7 @@ function makeFile(
   filename: string,
   type: string
 ): File {
-  return new File([bytes], filename, { type });
+  return new File([bytes as BlobPart], filename, { type });
 }
 
 // Magic-bytes válidos para cada formato — el upload route ahora valida

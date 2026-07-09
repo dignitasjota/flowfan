@@ -42,7 +42,7 @@ beforeEach(() => {
 describe("POST /api/auth/forgot-password", () => {
   describe("anti-enumeration", () => {
     it("returns success even for non-existent email", async () => {
-      mockFindFirst.mockResolvedValueOnce(null);
+      mockFindFirst.mockResolvedValueOnce(null as never);
       const creator = await db.query.creators.findFirst();
       // Always returns success: true regardless
       expect(creator).toBeNull();

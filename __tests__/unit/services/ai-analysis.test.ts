@@ -31,8 +31,6 @@ describe("analyzeMessage", () => {
           keyPhrases: ["me encanta tu contenido"],
         }),
         tokensUsed: 150,
-        provider: "anthropic",
-        model: "claude-sonnet-4-20250514",
       });
 
       const result = await analyzeMessage(config, { message: "Me encanta tu contenido!" });
@@ -58,8 +56,6 @@ describe("analyzeMessage", () => {
           keyPhrases: [],
         }) + "\n```",
         tokensUsed: 100,
-        provider: "anthropic",
-        model: "claude-sonnet-4-20250514",
       });
 
       const result = await analyzeMessage(config, { message: "Hola" });
@@ -79,8 +75,6 @@ describe("analyzeMessage", () => {
           keyPhrases: ["no me gusta"],
         }),
         tokensUsed: 120,
-        provider: "anthropic",
-        model: "claude-sonnet-4-20250514",
       });
 
       const result = await analyzeMessage(config, { message: "No me gusta esto" });
@@ -94,8 +88,6 @@ describe("analyzeMessage", () => {
       mockCallAI.mockResolvedValueOnce({
         text: JSON.stringify({ score: 5, label: "positive", emotionalTone: "test", topics: [], purchaseIntent: 0, budgetMentions: [], keyPhrases: [] }),
         tokensUsed: 50,
-        provider: "anthropic",
-        model: "claude-sonnet-4-20250514",
       });
 
       const result = await analyzeMessage(config, { message: "test" });
@@ -106,8 +98,6 @@ describe("analyzeMessage", () => {
       mockCallAI.mockResolvedValueOnce({
         text: JSON.stringify({ score: -10, label: "very_negative", emotionalTone: "test", topics: [], purchaseIntent: 0, budgetMentions: [], keyPhrases: [] }),
         tokensUsed: 50,
-        provider: "anthropic",
-        model: "claude-sonnet-4-20250514",
       });
 
       const result = await analyzeMessage(config, { message: "test" });
@@ -118,8 +108,6 @@ describe("analyzeMessage", () => {
       mockCallAI.mockResolvedValueOnce({
         text: JSON.stringify({ score: 0, label: "neutral", emotionalTone: "test", topics: [], purchaseIntent: 2.5, budgetMentions: [], keyPhrases: [] }),
         tokensUsed: 50,
-        provider: "anthropic",
-        model: "claude-sonnet-4-20250514",
       });
 
       const result = await analyzeMessage(config, { message: "test" });
@@ -130,8 +118,6 @@ describe("analyzeMessage", () => {
       mockCallAI.mockResolvedValueOnce({
         text: JSON.stringify({ score: 0, label: "neutral", emotionalTone: "test", topics: ["a", "b", "c", "d", "e", "f", "g"], purchaseIntent: 0, budgetMentions: [], keyPhrases: [] }),
         tokensUsed: 50,
-        provider: "anthropic",
-        model: "claude-sonnet-4-20250514",
       });
 
       const result = await analyzeMessage(config, { message: "test" });
@@ -142,8 +128,6 @@ describe("analyzeMessage", () => {
       mockCallAI.mockResolvedValueOnce({
         text: JSON.stringify({ score: 0, label: "neutral", emotionalTone: "test", topics: [], purchaseIntent: 0, budgetMentions: [], keyPhrases: ["a", "b", "c", "d", "e", "f"] }),
         tokensUsed: 50,
-        provider: "anthropic",
-        model: "claude-sonnet-4-20250514",
       });
 
       const result = await analyzeMessage(config, { message: "test" });
@@ -156,8 +140,6 @@ describe("analyzeMessage", () => {
       mockCallAI.mockResolvedValueOnce({
         text: JSON.stringify({ score: 0.5, label: "amazing", emotionalTone: "test", topics: [], purchaseIntent: 0, budgetMentions: [], keyPhrases: [] }),
         tokensUsed: 50,
-        provider: "anthropic",
-        model: "claude-sonnet-4-20250514",
       });
 
       const result = await analyzeMessage(config, { message: "test" });
@@ -170,8 +152,6 @@ describe("analyzeMessage", () => {
       mockCallAI.mockResolvedValueOnce({
         text: JSON.stringify({ score: 0, label: "neutral", emotionalTone: "test", topics: "not-array", purchaseIntent: 0, budgetMentions: "also-not-array", keyPhrases: 123 }),
         tokensUsed: 50,
-        provider: "anthropic",
-        model: "claude-sonnet-4-20250514",
       });
 
       const result = await analyzeMessage(config, { message: "test" });
@@ -186,8 +166,6 @@ describe("analyzeMessage", () => {
       mockCallAI.mockResolvedValueOnce({
         text: "This is not JSON at all, just random text.",
         tokensUsed: 80,
-        provider: "anthropic",
-        model: "claude-sonnet-4-20250514",
       });
 
       const result = await analyzeMessage(config, { message: "test" });
@@ -203,8 +181,6 @@ describe("analyzeMessage", () => {
       mockCallAI.mockResolvedValueOnce({
         text: "",
         tokensUsed: 10,
-        provider: "anthropic",
-        model: "claude-sonnet-4-20250514",
       });
 
       const result = await analyzeMessage(config, { message: "test" });
@@ -215,8 +191,6 @@ describe("analyzeMessage", () => {
       mockCallAI.mockResolvedValueOnce({
         text: '{"score": 0.5, "label": "positive", broken json here',
         tokensUsed: 50,
-        provider: "anthropic",
-        model: "claude-sonnet-4-20250514",
       });
 
       const result = await analyzeMessage(config, { message: "test" });
@@ -229,8 +203,6 @@ describe("analyzeMessage", () => {
       mockCallAI.mockResolvedValueOnce({
         text: JSON.stringify({ score: 0, label: "neutral", emotionalTone: "test", topics: [], purchaseIntent: 0, budgetMentions: [], keyPhrases: [] }),
         tokensUsed: 50,
-        provider: "anthropic",
-        model: "claude-sonnet-4-20250514",
       });
 
       await analyzeMessage(config, {
@@ -256,8 +228,6 @@ describe("analyzeMessage", () => {
       mockCallAI.mockResolvedValueOnce({
         text: JSON.stringify({ score: 0, label: "neutral", emotionalTone: "test", topics: [], purchaseIntent: 0, budgetMentions: [], keyPhrases: [] }),
         tokensUsed: 50,
-        provider: "anthropic",
-        model: "claude-sonnet-4-20250514",
       });
 
       const history = Array.from({ length: 10 }, (_, i) => ({

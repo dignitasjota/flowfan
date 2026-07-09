@@ -63,8 +63,8 @@ describe("GET /api/health", () => {
 
     it("reports degraded when both fail", () => {
       const checks = {
-        database: { status: "error" as const, error: "down" },
-        redis: { status: "error" as const, error: "down" },
+        database: { status: "error" as "ok" | "error", error: "down" },
+        redis: { status: "error" as "ok" | "error", error: "down" },
       };
 
       const allHealthy = Object.values(checks).every((c) => c.status === "ok");

@@ -51,7 +51,7 @@ describe("account router logic", () => {
       const valid = "ELIMINAR" === "ELIMINAR";
       expect(valid).toBe(true);
 
-      const invalid = "eliminar" === "ELIMINAR";
+      const invalid = ("eliminar" as string) === "ELIMINAR";
       expect(invalid).toBe(false);
     });
 

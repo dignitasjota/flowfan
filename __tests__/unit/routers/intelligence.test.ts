@@ -157,7 +157,7 @@ describe("intelligence router logic", () => {
 
     it("allows CSV for starter plan", () => {
       const plan = "starter" as keyof typeof PLAN_LIMITS;
-      const format = "csv";
+      const format: string = "csv";
       const blocked = PLAN_LIMITS[plan].export === "none" || (format === "json" && PLAN_LIMITS[plan].export === "csv");
       expect(blocked).toBe(false);
     });

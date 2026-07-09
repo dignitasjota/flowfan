@@ -132,7 +132,7 @@ describe("search router logic", () => {
 
     it("does not add chatter restriction for managers", () => {
       const conditions: string[] = ["creatorId", "searchVector"];
-      const teamRole = "manager";
+      const teamRole: string = "manager";
 
       if (teamRole === "chatter") {
         conditions.push("conversationAssignments");

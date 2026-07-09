@@ -57,7 +57,7 @@ const SAMPLE_ITEM = {
   isPrivate: false,
   r2Key: null as string | null,
   mimeType: "image/jpeg",
-} as never;
+};
 
 describe("GET /api/media/[id]", () => {
   beforeEach(() => {
@@ -88,7 +88,7 @@ describe("GET /api/media/[id]", () => {
     mockFindFirst.mockResolvedValue({
       ...SAMPLE_ITEM,
       publicUrl: "https://cdn.fanflow.app/creators/c1/file.jpg",
-    });
+    } as never);
     const res = await GET(
       makeReq("http://localhost/api/media/abc"),
       makeParams("abc")
@@ -105,7 +105,7 @@ describe("GET /api/media/[id]", () => {
     mockFindFirst.mockResolvedValue({
       ...SAMPLE_ITEM,
       publicUrl: "https://cdn.fanflow.app/creators/c1/file.jpg",
-    });
+    } as never);
     mockReadFile.mockResolvedValue(Buffer.from("thumb-bytes") as never);
     const res = await GET(
       makeReq("http://localhost/api/media/abc?thumb=1"),
@@ -119,7 +119,7 @@ describe("GET /api/media/[id]", () => {
   });
 
   it("falls back to FS for the original when publicUrl is null", async () => {
-    mockFindFirst.mockResolvedValue({ ...SAMPLE_ITEM, publicUrl: null });
+    mockFindFirst.mockResolvedValue({ ...SAMPLE_ITEM, publicUrl: null } as never);
     mockReadFile.mockResolvedValue(Buffer.from("original-bytes") as never);
     const res = await GET(
       makeReq("http://localhost/api/media/abc"),
@@ -137,7 +137,7 @@ describe("GET /api/media/[id]", () => {
       isPrivate: true,
       r2Key: "creators/c1/secret.mp4",
       publicUrl: null,
-    });
+    } as never);
     mockSigned.mockResolvedValue("https://signed.r2/abc?exp=3600");
 
     const res = await GET(
@@ -160,7 +160,7 @@ describe("GET /api/media/[id]", () => {
       isPrivate: true,
       r2Key: "creators/c1/secret.mp4",
       publicUrl: null,
-    });
+    } as never);
     mockReadFile.mockResolvedValue(Buffer.from("local-bytes") as never);
 
     const res = await GET(
@@ -178,7 +178,7 @@ describe("GET /api/media/[id]", () => {
       isPrivate: true,
       r2Key: "creators/c1/secret.mp4",
       publicUrl: null,
-    });
+    } as never);
     mockSigned.mockRejectedValue(new Error("presigner down"));
     mockReadFile.mockResolvedValue(Buffer.from("local") as never);
 
@@ -190,7 +190,7 @@ describe("GET /api/media/[id]", () => {
   });
 
   it("returns 404 when the FS file cannot be read", async () => {
-    mockFindFirst.mockResolvedValue({ ...SAMPLE_ITEM, publicUrl: null });
+    mockFindFirst.mockResolvedValue({ ...SAMPLE_ITEM, publicUrl: null } as never);
     mockReadFile.mockRejectedValue(new Error("ENOENT"));
     const res = await GET(
       makeReq("http://localhost/api/media/abc"),
