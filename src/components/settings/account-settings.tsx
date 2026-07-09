@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { signOut } from "next-auth/react";
+import { PushToggle } from "@/components/pwa/push-toggle";
 
 export function AccountSettings() {
   const profileQuery = trpc.account.getProfile.useQuery();
@@ -116,6 +117,17 @@ export function AccountSettings() {
             ))}
           </div>
         )}
+      </div>
+
+      {/* Push Notifications */}
+      <div>
+        <h3 className="text-lg font-semibold text-white">Notificaciones push</h3>
+        <p className="mt-1 text-sm text-gray-400">
+          Avisos en tiempo real en tu navegador o móvil, incluso con FanFlow cerrado.
+        </p>
+        <div className="mt-4">
+          <PushToggle />
+        </div>
       </div>
 
       {/* Danger Zone */}

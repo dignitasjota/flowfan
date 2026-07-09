@@ -10,6 +10,7 @@ import { messages, conversations, contacts } from "@/server/db/schema";
 import { analysisQueue, telegramOutgoingQueue } from "@/server/queues";
 import { logTeamAction } from "@/server/services/team-audit";
 import { markExperimentReplyForContact } from "@/server/services/message-experiment";
+import { sendPushToCreator } from "@/server/services/push-notifications";
 
 export const messagesRouter = createTRPCRouter({
   list: protectedProcedure
@@ -94,14 +95,23 @@ export const messagesRouter = createTRPCRouter({
           columns: { username: true, displayName: true },
         });
 
+        const contactName = contact?.displayName ?? contact?.username ?? "Fan";
         publishEvent(ctx.creatorId, {
           type: "new_message",
           data: {
             conversationId: input.conversationId,
             messageId: message.id,
             role: "fan",
-            contactName: contact?.displayName ?? contact?.username ?? "Fan",
+            contactName,
           },
+        }).catch(() => {});
+
+        // Push notification (no-op si el creator no tiene suscripciones o VAPID).
+        sendPushToCreator(ctx.db, ctx.creatorId, {
+          title: `Nuevo mensaje de ${contactName}`,
+          body: input.content.slice(0, 120),
+          url: `/conversations?c=${input.conversationId}`,
+          tag: `conv-${input.conversationId}`,
         }).catch(() => {});
       }
 

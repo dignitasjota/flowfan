@@ -2,6 +2,7 @@ import { eq, and } from "drizzle-orm";
 import { contacts, contactProfiles, notifications, creators } from "@/server/db/schema";
 import { emailQueue } from "@/server/queues";
 import { createChildLogger } from "@/lib/logger";
+import { sendPushToCreator } from "./push-notifications";
 import type { BehavioralSignals } from "./scoring";
 
 const log = createChildLogger("churn-prediction");
@@ -234,6 +235,18 @@ export async function computeAllChurnScores(db: DB): Promise<void> {
           },
         });
       }
+
+      // Push notification (no-op si no hay suscripciones ni VAPID).
+      const count = alertContacts.length;
+      sendPushToCreator(db, creatorId, {
+        title: `⚠️ ${count} contacto(s) en riesgo de churn`,
+        body: alertContacts
+          .slice(0, 3)
+          .map((c) => `${c.name} (${c.score}%)`)
+          .join(", "),
+        url: "/dashboard",
+        tag: "churn-alert",
+      }).catch(() => {});
     } catch (err) {
       log.error({ err, creatorId }, "Failed to enqueue churn alert email");
     }

@@ -1092,6 +1092,17 @@ Dismissible card at the top of `/dashboard` showing 4 next-step suggestions with
 
 Dismissal persists in `localStorage` (`fanflow:welcome-dismissed = "1"`) so it never reappears for that browser. Independent from `creators.onboardingCompleted` — the wizard is the gate to enter the dashboard; this banner is the "what's next" guide once inside.
 
+## PWA & Push Notifications
+
+FanFlow es una PWA instalable con notificaciones push web.
+
+- **Manifest** (`src/app/manifest.ts`): `/manifest.webmanifest` con `display: standalone`, theme color, iconos (usa `public/logo.png`). Metadata PWA + `themeColor` en el root layout.
+- **Service worker** (`public/sw.js`): registrado por `ServiceWorkerRegister` (montado en el root layout). Maneja `push` (muestra la notificación) y `notificationclick` (enfoca/navega a la URL del payload). No cachea fetch (sin estrategia offline por ahora). Bump `CACHE_VERSION` para forzar update.
+- **Web Push (VAPID):** `src/server/services/push-notifications.ts` — `isPushConfigured()` (true si `VAPID_PUBLIC_KEY`/`VAPID_PRIVATE_KEY`/`VAPID_SUBJECT`), `sendPushToCreator(db, creatorId, payload)` envía a todas las suscripciones del creator y **borra las caducadas** (410/404). Degrada a no-op si no hay VAPID. Genera keys con `npm run generate:vapid`.
+- **Schema:** `pushSubscriptions` (creatorId, userId, endpoint único, p256dh, auth, userAgent). **Router** `push` (getConfig, subscribe, unsubscribe). **UI:** `PushToggle` (`src/components/pwa/push-toggle.tsx`) en Settings → Cuenta — pide permiso, suscribe vía `pushManager` con la VAPID public key, guarda la suscripción. Por navegador/dispositivo.
+- **Disparadores de push:** `messages.addFanMessage` (nuevo mensaje de fan) y `computeAllChurnScores` (alertas de churn en batch). Ambos fire-and-forget, no rompen el flujo.
+- **Deshabilitar:** no configurar las VAPID keys → el toggle muestra "no habilitadas" y los envíos son no-op.
+
 ## Key Database Tables
 
 | Table | Purpose |
@@ -1121,6 +1132,7 @@ Dismissal persists in `localStorage` (`fanflow:welcome-dismissed = "1"`) so it n
 | `conversationModeExperiments` | A/B test experiments for conversation modes (variants A/B config, traffic split, lifecycle) |
 | `messageExperiments` | A/B experiments for message/template content (2-5 content variants, status lifecycle, winner) |
 | `messageExperimentSends` | Per-send record for message A/B (variantKey, replied/converted metrics, reply sentiment) |
+| `pushSubscriptions` | Web Push subscriptions per browser/device (endpoint, p256dh, auth) for PWA notifications |
 | `experimentAssignments` | Contact-to-variant assignments for A/B experiments |
 | `experimentMetrics` | Metric events (response_sent, fan_replied, conversion, etc.) per experiment variant |
 | `coachingSessions` | AI coaching session results (negotiation/retention/upsell) per conversation |

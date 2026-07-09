@@ -1937,6 +1937,43 @@ export const messageExperimentSendsRelations = relations(
 );
 
 // ============================================================
+// WEB PUSH SUBSCRIPTIONS (PWA)
+// ============================================================
+
+export const pushSubscriptions = pgTable(
+  "push_subscriptions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    creatorId: uuid("creator_id")
+      .notNull()
+      .references(() => creators.id, { onDelete: "cascade" }),
+    // Usuario concreto que suscribió este navegador (puede ser un miembro de equipo).
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => creators.id, { onDelete: "cascade" }),
+    endpoint: text("endpoint").notNull(),
+    p256dh: text("p256dh").notNull(),
+    auth: text("auth").notNull(),
+    userAgent: text("user_agent"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("push_sub_endpoint_unique_idx").on(table.endpoint),
+    index("push_sub_creator_idx").on(table.creatorId),
+  ]
+);
+
+export const pushSubscriptionsRelations = relations(
+  pushSubscriptions,
+  ({ one }) => ({
+    creator: one(creators, {
+      fields: [pushSubscriptions.creatorId],
+      references: [creators.id],
+    }),
+  })
+);
+
+// ============================================================
 // COACHING SESSIONS
 // ============================================================
 
