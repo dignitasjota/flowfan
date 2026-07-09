@@ -1,8 +1,12 @@
 # FanFlow v2 — Estado del Proyecto
 
 > **Documento de referencia para agentes y desarrolladores.**
-> Última actualización: 2026-03-14
-> Estado actual: **Producción-ready**. Todas las funcionalidades core implementadas, testeadas y documentadas.
+> Última actualización: 2026-07-10
+> Estado actual: **Producción-ready**. Todas las funcionalidades core + el grueso del roadmap (fases 5-13, 15) implementadas, testeadas y documentadas.
+>
+> ⚠️ **Este documento resume el estado; el detalle exhaustivo y siempre actualizado de cada módulo está en [`CLAUDE.md`](./CLAUDE.md)** (85 KB, fuente de verdad de la arquitectura). Aquí se mantienen la visión general, el stack, la seguridad y lo que queda pendiente. Para el roadmap de features ver [`ROADMAP.md`](./ROADMAP.md); para bugs/deuda técnica ver [`AUDITORIA_BACKLOG.md`](./AUDITORIA_BACKLOG.md).
+>
+> **Desde la v1 de este doc (marzo 2026) se han añadido** (ver detalle en CLAUDE.md): Team Management + roles custom + audit log, Telegram bot, Broadcasts, Revenue Tracking, Mensajes Programados, Media Vault (Cloudflare R2), Workflows, Segmentación, A/B Testing de conversation modes, Calendario unificado, bandeja de Comentarios públicos (Reddit/Twitter/Instagram), Publishing Scheduler nativo con OAuth, Blog-to-Social, Content Gaps, Audience Insights, Coaching IA, Churn Prediction, API REST pública + webhooks salientes, import de contactos, auto-respuestas y panel de admin. El API tiene **37 routers tRPC** (no los ~10 listados en la sección 4, que refleja el estado de marzo).
 
 ---
 
@@ -273,9 +277,9 @@ LOG_LEVEL=info  # debug | info | warn | error
 
 ---
 
-## 11. Tests — Suite completa (367 tests)
+## 11. Tests — Suite completa (855+ tests)
 
-**Configuración**: `vitest.config.ts` + `__tests__/setup.ts` (mocks de Redis, variables de entorno)
+**Configuración**: `vitest.config.mts` + `__tests__/setup.ts` (mocks de Redis, variables de entorno). Nota: el config es `.mts` (ESM) para compatibilidad con Vitest 4 + std-env 4.x. Las tablas de abajo reflejan el subconjunto core de marzo 2026; hoy hay **69 ficheros de test / 855 tests unitarios+integración en verde** (+ 9 E2E opt-in que requieren `TEST_DATABASE_URL`). Ver `__tests__/` para la cobertura completa (incluye scheduler, social-comments, media/R2, publishers de IG/X/Reddit, recurrence, blog-to-social, audience-insights, etc.).
 
 ### Tests unitarios — Servicios
 | Archivo | Tests | Qué cubre |
@@ -449,13 +453,21 @@ En Stripe Dashboard, crear endpoint en `https://fanflow.example.com/api/webhooks
 
 ## 16. Tareas pendientes / Posibles mejoras
 
-Estas funcionalidades **no están implementadas** pero el código tiene TODOs:
+Estado verificado contra el código el 2026-07-10.
 
-- [ ] **Email service**: `register` y `forgot-password` generan las URLs pero no envían emails. Integrar Resend, SendGrid o similar.
-- [ ] **Email verification**: La tabla tiene `emailVerified` pero el flujo no fuerza verificar antes de acceder.
-- [ ] **Cancel Stripe subscription on deleteAccount**: El router `account.deleteAccount` tiene un `TODO` para cancelar la suscripción de Stripe antes de borrar el cuenta.
-- [ ] **E2E tests con Playwright**: Los tests actuales son unitarios/integración con mocks. Faltan tests de flujo completo en navegador real.
-- [ ] **Business plan checkout**: Solo `starter` y `pro` tienen Price IDs. Business es custom/manual.
+**Ya resueltas** (estaban pendientes en la v1 de este doc):
+- [x] **Email service** — implementado con Resend (`src/server/services/email.ts` + cola `emailQueue`). Verificación, reset, resúmenes diario/semanal y alertas de churn.
+- [x] **Cancel Stripe subscription on deleteAccount** — implementado (`account.ts` cancela `stripeSubscriptionId` antes de borrar).
+
+**Funcionalidad nueva pendiente** (ver ROADMAP.md → "Lo que falta por implementar"):
+- [ ] **Verificación de email obligatoria**: existe `verify-email` y la columna `emailVerified`, pero nada bloquea el acceso sin verificar y el token no expira.
+- [ ] **Business plan self-checkout**: solo `starter` y `pro` tienen Price IDs; Business es custom/manual (falta `STRIPE_BUSINESS_PRICE_ID`).
+- [ ] **A/B Testing de mensajes/templates**: existe A/B de conversation modes, pero no de variantes de mensaje individual.
+- [ ] **PWA / Push notifications**: sin `manifest.json`, service worker ni web push.
+- [ ] **Programa de referidos**: no existe (los invites son de team members).
+- [ ] **E2E con Playwright (navegador real)**: hoy solo hay E2E con Postgres real (SQL) bajo `__tests__/e2e/`.
+
+**Deuda técnica / bugs**: ver [`AUDITORIA_BACKLOG.md`](./AUDITORIA_BACKLOG.md) (48 hallazgos priorizados de la auditoría de seguridad/workers/routers/IA/frontend).
 
 ---
 

@@ -1,21 +1,36 @@
 # FanFlow v2 — Roadmap de Mejoras
 
+> **Última actualización: 2026-07-10.** La mayor parte del roadmap original (fases 5-13 y 15) ya está **implementada y en producción**. Ver el detalle de cada módulo en [`CLAUDE.md`](./CLAUDE.md). Este documento conserva la descripción de diseño de cada fase para referencia histórica, con su estado marcado en el título. La lista viva de lo que queda está en la sección [**Lo que falta por implementar**](#lo-que-falta-por-implementar) al final.
+>
+> Para bugs y deuda técnica (distinto de features nuevas), ver [`AUDITORIA_BACKLOG.md`](./AUDITORIA_BACKLOG.md).
+
 ## Estado Actual (Completado)
 
 - **Fase 1-2-4**: Core features (conversaciones, IA multi-provider, scoring, contactos, templates, reportes, price advisor)
 - **Fase 3**: SaaS completo (billing Stripe, límites por plan, landing, onboarding)
+- **Fase 5**: Team Management (owner/manager/chatter + roles custom + asignaciones + audit log) ✅
+- **Fase 6**: Telegram Bot (integración bidireccional + auto-reply) ✅
+- **Fase 7**: Broadcasts / Mass Messaging (segmentos + variables + envío por cola) ✅
+- **Fase 8**: Revenue Tracking por fan (transacciones + ROI) ✅
+- **Fase 9**: Mensajes Programados (delayed jobs + calendario) ✅
+- **Fase 10**: Media Vault (con Cloudflare R2, no MinIO) ✅
+- **Fase 11**: Workflows / Automatizaciones (trigger→acción) ✅
+- **Fase 12**: Segmentación Avanzada (segmentos guardados) ✅
+- **Fase 13**: A/B Testing (de conversation modes — el de *mensajes* aún pendiente) ⚠️ parcial
+- **Fase 15**: Calendario unificado (posts + mensajes programados) ✅
+- **Extra (no estaba en el roadmap)**: Bandeja de comentarios públicos (Reddit/Twitter/Instagram con polling + webhooks + stream), Publishing Scheduler nativo con OAuth, Blog-to-Social, Content Gaps, Audience Insights, Coaching IA, Churn Prediction, API REST pública + webhooks salientes, import de contactos, auto-respuestas, panel de admin
 - **Admin Panel**: Superadmin con SEO config, auditoría, estadísticas globales
 - **Producción**: Docker + Portainer + Nginx Proxy Manager en VPS
 
 ---
 
-## Mejoras Propuestas
+## Mejoras Propuestas (diseño histórico)
 
 ### Impacto Alto (Diferenciadores Clave)
 
 ---
 
-### Fase 5: Team Management (Chatters)
+### Fase 5: Team Management (Chatters) — ✅ IMPLEMENTADO
 
 **Prioridad**: 🔴 Alta
 **Justificación**: Impacta el middleware de auth que afecta a todo lo demás. Desbloquea el plan Business de verdad.
@@ -67,7 +82,7 @@
 
 ---
 
-### Fase 6: Integración Telegram Bot API
+### Fase 6: Integración Telegram Bot API — ✅ IMPLEMENTADO
 
 **Prioridad**: 🔴 Alta
 **Justificación**: Elimina la fricción del copy-paste manual. Es la plataforma más fácil de integrar (API oficial, webhooks nativos). Habilita auto-respuestas reales.
@@ -111,7 +126,7 @@
 
 ---
 
-### Fase 7: Mass Messaging / Broadcasts
+### Fase 7: Mass Messaging / Broadcasts — ✅ IMPLEMENTADO
 
 **Prioridad**: 🔴 Alta
 **Justificación**: Herramienta de monetización #1 para creadores. Envío masivo a segmentos de fans. Depende de Telegram para envío automático.
@@ -158,7 +173,7 @@
 
 ---
 
-### Fase 8: Revenue Tracking por Fan
+### Fase 8: Revenue Tracking por Fan — ✅ IMPLEMENTADO
 
 **Prioridad**: 🟡 Media
 **Justificación**: El scoring de "payment probability" es predictivo, pero falta el dato real. Saber exactamente cuánto ha gastado cada fan permite calcular ROI del tiempo de chat.
@@ -174,7 +189,7 @@
 
 ---
 
-### Fase 9: Mensajes Programados
+### Fase 9: Mensajes Programados — ✅ IMPLEMENTADO
 
 **Prioridad**: 🟡 Media
 **Justificación**: Muy útil combinado con broadcasts. Los creadores trabajan en horarios irregulares pero los fans tienen picos de actividad predecibles.
@@ -190,7 +205,7 @@
 
 ---
 
-### Fase 10: Media Vault / Biblioteca de Contenido
+### Fase 10: Media Vault / Biblioteca de Contenido — ✅ IMPLEMENTADO (con Cloudflare R2)
 
 **Prioridad**: 🟡 Media
 **Justificación**: Los creadores envían contenido repetidamente. Organizar fotos/videos, rastrear qué se envió a quién, evitar duplicados. Esencial para PPV management.
@@ -254,7 +269,7 @@ Cuando el volumen crezca, hay dos opciones de migración preparadas:
 
 ---
 
-### Fase 11: Workflows / Automatizaciones
+### Fase 11: Workflows / Automatizaciones — ✅ IMPLEMENTADO
 
 **Prioridad**: 🟡 Media
 **Justificación**: El módulo de proactive actions ya genera sugerencias, pero no las ejecuta. Automatizar acciones reduce carga del creator.
@@ -277,7 +292,7 @@ Cuando el volumen crezca, hay dos opciones de migración preparadas:
 
 ---
 
-### Fase 12: Segmentación Avanzada de Fans
+### Fase 12: Segmentación Avanzada de Fans — ✅ IMPLEMENTADO
 
 **Prioridad**: 🟡 Media
 **Justificación**: Más allá del funnel stage, los creadores necesitan listas dinámicas basadas en criterios compuestos para targeting preciso en broadcasts.
@@ -297,7 +312,7 @@ Cuando el volumen crezca, hay dos opciones de migración preparadas:
 
 ---
 
-### Fase 13: A/B Testing de Mensajes
+### Fase 13: A/B Testing de Mensajes — ⚠️ PARCIAL (existe A/B de conversation modes; falta el de mensajes/templates)
 
 **Prioridad**: 🟢 Baja
 **Justificación**: Dato interesante para optimizar conversiones, pero requiere volumen suficiente para ser estadísticamente significativo.
@@ -313,7 +328,7 @@ Cuando el volumen crezca, hay dos opciones de migración preparadas:
 
 ---
 
-### Fase 14: PWA / Mobile App
+### Fase 14: PWA / Mobile App — ⏳ PENDIENTE
 
 **Prioridad**: 🟢 Baja
 **Justificación**: La app es responsive pero una PWA con push notifications sería un upgrade importante para creators que trabajan desde el móvil.
@@ -326,7 +341,7 @@ Cuando el volumen crezca, hay dos opciones de migración preparadas:
 
 ---
 
-### Fase 15: Calendario de Contenido
+### Fase 15: Calendario de Contenido — ✅ IMPLEMENTADO (calendario unificado)
 
 **Prioridad**: 🟢 Baja
 **Justificación**: Complementa media vault y broadcasts. Los creadores planifican posts y promociones con antelación.
@@ -340,7 +355,7 @@ Cuando el volumen crezca, hay dos opciones de migración preparadas:
 
 ---
 
-### Fase 16: Programa de Referidos
+### Fase 16: Programa de Referidos — ⏳ PENDIENTE
 
 **Prioridad**: 🟢 Baja
 **Justificación**: Crecimiento orgánico. Que creators inviten a otros creators a cambio de descuento o comisión.
@@ -356,17 +371,32 @@ Cuando el volumen crezca, hay dos opciones de migración preparadas:
 
 ## Resumen de Prioridades
 
-| Fase | Feature | Impacto | Dependencias |
-|------|---------|---------|-------------|
-| 5 | Team Management | 🔴 Alto | Ninguna (hacer primero, impacta auth) |
-| 6 | Telegram Bot | 🔴 Alto | Fase 5 (chatters pueden responder Telegram) |
-| 7 | Broadcasts | 🔴 Alto | Fase 6 (envío automático por Telegram) |
-| 8 | Revenue Tracking | 🟡 Medio | Ninguna |
-| 9 | Mensajes Programados | 🟡 Medio | Fase 6 (envío por Telegram) |
-| 10 | Media Vault | 🟡 Medio | Ninguna |
-| 11 | Workflows | 🟡 Medio | Fase 6 + 7 (acciones automáticas) |
-| 12 | Segmentación Avanzada | 🟡 Medio | Fase 7 (targeting para broadcasts) |
-| 13 | A/B Testing | 🟢 Bajo | Fase 7 (broadcasts como canal) |
-| 14 | PWA / Mobile | 🟢 Bajo | Ninguna |
-| 15 | Calendario | 🟢 Bajo | Fase 10 (media vault) |
-| 16 | Referidos | 🟢 Bajo | Fase 3 (billing/Stripe) ✅ ya existe |
+| Fase | Feature | Impacto | Estado |
+|------|---------|---------|--------|
+| 5 | Team Management | 🔴 Alto | ✅ Implementado |
+| 6 | Telegram Bot | 🔴 Alto | ✅ Implementado |
+| 7 | Broadcasts | 🔴 Alto | ✅ Implementado |
+| 8 | Revenue Tracking | 🟡 Medio | ✅ Implementado |
+| 9 | Mensajes Programados | 🟡 Medio | ✅ Implementado |
+| 10 | Media Vault | 🟡 Medio | ✅ Implementado (R2) |
+| 11 | Workflows | 🟡 Medio | ✅ Implementado |
+| 12 | Segmentación Avanzada | 🟡 Medio | ✅ Implementado |
+| 13 | A/B Testing | 🟢 Bajo | ⚠️ Parcial (modes sí, mensajes no) |
+| 14 | PWA / Mobile | 🟢 Bajo | ⏳ Pendiente |
+| 15 | Calendario | 🟢 Bajo | ✅ Implementado |
+| 16 | Referidos | 🟢 Bajo | ⏳ Pendiente |
+
+---
+
+## Lo que falta por implementar
+
+Estado verificado contra el código el 2026-07-10. Estas son las únicas piezas de **funcionalidad nueva** que quedan del roadmap y de los TODOs históricos:
+
+1. **A/B Testing de mensajes/templates** (fase 13, parcial) — hoy existe A/B de *conversation modes* (`ab-experiments`), pero no de variantes de mensaje/template individual con medición de conversión.
+2. **PWA / Push notifications** (fase 14) — sin `manifest.json`, sin service worker, sin web push. Es lo único de peso que queda como feature de producto.
+3. **Programa de referidos** (fase 16) — no existe; los invites actuales son de team members, no un referral program con cupones de Stripe.
+4. **Verificación de email obligatoria** — existe la ruta `verify-email` y la columna `emailVerified`, pero nada bloquea el acceso sin verificar (el token tampoco expira).
+5. **Business plan self-checkout** — solo Starter y Pro tienen checkout automático; Business sigue siendo manual/custom (sin `STRIPE_BUSINESS_PRICE_ID`).
+6. **E2E con navegador real (Playwright)** — solo hay E2E con Postgres real (SQL); no hay tests de flujo en navegador.
+
+**Ya resueltos** (el histórico los listaba como pendientes): email service (Resend), cancelar suscripción de Stripe en `deleteAccount`.
