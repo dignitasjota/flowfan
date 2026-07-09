@@ -165,6 +165,9 @@ export const creators = pgTable("creators", {
   emailNotificationsEnabled: boolean("email_notifications_enabled").default(true).notNull(),
   dailySummaryEnabled: boolean("daily_summary_enabled").default(false).notNull(),
   weeklySummaryEnabled: boolean("weekly_summary_enabled").default(true).notNull(),
+  // Programa de referidos
+  referralCode: varchar("referral_code", { length: 20 }).unique(),
+  referredById: uuid("referred_by_id"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -1972,6 +1975,42 @@ export const pushSubscriptionsRelations = relations(
     }),
   })
 );
+
+// ============================================================
+// REFERRALS
+// ============================================================
+
+export const referralRewards = pgTable(
+  "referral_rewards",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    // Quién refirió (recibe la comisión)
+    referrerId: uuid("referrer_id")
+      .notNull()
+      .references(() => creators.id, { onDelete: "cascade" }),
+    // Quién fue referido y convirtió
+    referredId: uuid("referred_id")
+      .notNull()
+      .references(() => creators.id, { onDelete: "cascade" }),
+    plan: subscriptionPlanEnum("plan").notNull(),
+    rewardCents: integer("reward_cents").notNull().default(0),
+    // pending = convertido pero comisión no pagada; paid = liquidada
+    status: varchar("status", { length: 20 }).notNull().default("pending"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("referral_rewards_referrer_idx").on(table.referrerId),
+    // Un referido genera una única recompensa (primera conversión).
+    uniqueIndex("referral_rewards_referred_unique_idx").on(table.referredId),
+  ]
+);
+
+export const referralRewardsRelations = relations(referralRewards, ({ one }) => ({
+  referrer: one(creators, {
+    fields: [referralRewards.referrerId],
+    references: [creators.id],
+  }),
+}));
 
 // ============================================================
 // COACHING SESSIONS

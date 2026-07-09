@@ -56,6 +56,17 @@ export async function POST(req: NextRequest) {
               updatedAt: new Date(),
             })
             .where(eq(creators.id, creatorId));
+
+          // Referidos: primera conversión a plan de pago → comisión al referrer.
+          // Idempotente (unique index sobre referredId).
+          try {
+            const { recordReferralConversion } = await import(
+              "@/server/services/referrals"
+            );
+            await recordReferralConversion(db, creatorId, plan);
+          } catch (err) {
+            log.warn({ err }, "Failed to record referral conversion");
+          }
         }
         break;
       }

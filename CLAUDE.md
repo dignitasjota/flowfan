@@ -1092,6 +1092,16 @@ Dismissible card at the top of `/dashboard` showing 4 next-step suggestions with
 
 Dismissal persists in `localStorage` (`fanflow:welcome-dismissed = "1"`) so it never reappears for that browser. Independent from `creators.onboardingCompleted` — the wizard is the gate to enter the dashboard; this banner is the "what's next" guide once inside.
 
+## Programa de Referidos
+
+Cada creator tiene un código/link de referido; cuando un referido se suscribe a un plan de pago, el referrer gana una comisión (tracking, el pago es manual).
+
+- **Servicio** (`src/server/services/referrals.ts`): `getOrCreateReferralCode` (código de 8 chars sin caracteres ambiguos, lazy con reintentos ante colisión), `resolveReferrer` (código → creatorId), `recordReferralConversion` (crea la comisión, idempotente por unique index sobre `referredId`), `getReferralStats`. Comisiones en `REFERRAL_REWARD_CENTS` (starter €5 / pro €10 / business €30).
+- **Schema:** `creators.referralCode` (unique) + `creators.referredById`; tabla `referralRewards` (referrerId, referredId, plan, rewardCents, status pending/paid, unique por referredId).
+- **Registro** (`/api/auth/register`): acepta `ref` → `resolveReferrer` → guarda `referredById` en el nuevo creator. El form de registro captura `?ref=CODE` de la URL y muestra un aviso "Te han invitado".
+- **Conversión** (`/api/webhooks/stripe`, `checkout.session.completed`): al pasar a plan de pago llama `recordReferralConversion` (idempotente).
+- **API** `referrals` router (getMyCode, getStats, listRewards). **UI:** página `/referrals` (sidebar "🎁 Referidos", owner) con link copiable, stats (invitados/convertidos/pendiente/total) y tabla de comisiones.
+
 ## PWA & Push Notifications
 
 FanFlow es una PWA instalable con notificaciones push web.
@@ -1133,6 +1143,7 @@ FanFlow es una PWA instalable con notificaciones push web.
 | `messageExperiments` | A/B experiments for message/template content (2-5 content variants, status lifecycle, winner) |
 | `messageExperimentSends` | Per-send record for message A/B (variantKey, replied/converted metrics, reply sentiment) |
 | `pushSubscriptions` | Web Push subscriptions per browser/device (endpoint, p256dh, auth) for PWA notifications |
+| `referralRewards` | Referral commissions (referrerId, referredId, plan, rewardCents, pending/paid); unique per referred |
 | `experimentAssignments` | Contact-to-variant assignments for A/B experiments |
 | `experimentMetrics` | Metric events (response_sent, fan_replied, conversion, etc.) per experiment variant |
 | `coachingSessions` | AI coaching session results (negotiation/retention/upsell) per conversation |

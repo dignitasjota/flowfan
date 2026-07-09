@@ -31,6 +31,7 @@ import { presenceRouter } from "./routers/presence";
 import { abExperimentsRouter } from "./routers/ab-experiments";
 import { messageExperimentsRouter } from "./routers/message-experiments";
 import { pushRouter } from "./routers/push";
+import { referralsRouter } from "./routers/referrals";
 import { contentGapsRouter } from "./routers/content-gaps";
 import { socialCommentsRouter } from "./routers/social-comments";
 import { schedulerRouter } from "./routers/scheduler";
@@ -69,6 +70,7 @@ export const appRouter = createTRPCRouter({
   abExperiments: abExperimentsRouter,
   messageExperiments: messageExperimentsRouter,
   push: pushRouter,
+  referrals: referralsRouter,
   contentGaps: contentGapsRouter,
   socialComments: socialCommentsRouter,
   scheduler: schedulerRouter,

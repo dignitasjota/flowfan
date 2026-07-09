@@ -1,13 +1,19 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { signIn } from "next-auth/react";
 
 export default function RegisterPage() {
   const router = useRouter();
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [referralCode, setReferralCode] = useState<string | null>(null);
+
+  useEffect(() => {
+    const ref = new URLSearchParams(window.location.search).get("ref");
+    if (ref) setReferralCode(ref);
+  }, []);
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -25,6 +31,7 @@ export default function RegisterPage() {
         name: formData.get("name"),
         email,
         password,
+        ref: referralCode ?? undefined,
       }),
     });
 
@@ -58,6 +65,13 @@ export default function RegisterPage() {
         <p className="mb-8 text-center text-sm text-gray-400">
           Empieza a gestionar tus conversaciones con IA
         </p>
+
+        {referralCode && (
+          <div className="mb-6 rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-4 py-2.5 text-center text-sm text-indigo-300">
+            🎉 Te han invitado con el código{" "}
+            <span className="font-semibold">{referralCode}</span>
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>

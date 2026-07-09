@@ -26,6 +26,7 @@ const registerSchema = z.object({
   name: z.string().min(1).max(255),
   email: z.string().email(),
   password: passwordSchema,
+  ref: z.string().max(20).optional(),
 });
 
 export async function POST(req: Request) {
@@ -71,7 +72,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: firstError }, { status: 400 });
   }
 
-  const { name, email, password } = parsed.data;
+  const { name, email, password, ref } = parsed.data;
 
   // Check if email already exists
   const existing = await db.query.creators.findFirst({
@@ -85,6 +86,17 @@ export async function POST(req: Request) {
     );
   }
 
+  // Resolver código de referido (si viene) a un referrer.
+  let referredById: string | null = null;
+  if (ref) {
+    try {
+      const { resolveReferrer } = await import("@/server/services/referrals");
+      referredById = await resolveReferrer(db, ref);
+    } catch {
+      referredById = null;
+    }
+  }
+
   const passwordHash = await hash(password, 12);
   const verificationToken = randomBytes(32).toString("hex");
   // Token válido 24h (SEC-8)
@@ -96,6 +108,7 @@ export async function POST(req: Request) {
     passwordHash,
     emailVerificationToken: verificationToken,
     emailVerificationExpiresAt: verificationExpiresAt,
+    referredById,
   });
 
   // Send verification email. No logueamos la URL ni el token (SEC-1).

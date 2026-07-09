@@ -34,6 +34,7 @@ const navigation = [
   { name: "Broadcasts", href: "/broadcasts", icon: "📢", access: "manager" as const },
   { name: "Equipo", href: "/team", icon: "👤", access: "owner" as const },
   { name: "Billing", href: "/billing", icon: "💳", access: "owner" as const },
+  { name: "Referidos", href: "/referrals", icon: "🎁", access: "owner" as const },
   { name: "Configuración", href: "/settings", icon: "⚙️", access: "owner" as const },
 ];
 
