@@ -135,8 +135,21 @@ class TwitterStreamRunner {
     const decoder = new TextDecoder("utf-8");
     let buffer = "";
 
+    // WK-11: watchdog de inactividad. Twitter emite heartbeats (~20s); si en 60s
+    // no llega ningún byte, la conexión murió silenciosamente (NAT/LB drop sin
+    // FIN) y reader.read() quedaría colgado para siempre. Abortamos el fetch para
+    // que read() falle y el bucle externo reconecte con backoff.
+    const IDLE_TIMEOUT_MS = 60_000;
     while (true) {
-      const { done, value } = await reader.read();
+      const readPromise = reader.read();
+      const idle = new Promise<never>((_, reject) => {
+        const t = setTimeout(() => {
+          this.controller?.abort();
+          reject(new Error("twitter stream idle timeout"));
+        }, IDLE_TIMEOUT_MS);
+        readPromise.finally(() => clearTimeout(t)).catch(() => {});
+      });
+      const { done, value } = await Promise.race([readPromise, idle]);
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
 

@@ -263,8 +263,12 @@ export async function updateContactProfile(
         }
       }
 
-      // Dispatch workflow event for significant sentiment change
-      const sentimentDelta = analysis.score - (prevEngagement / 100);
+      // Dispatch workflow event for significant sentiment change.
+      // WK-10: comparar sentimiento NUEVO vs sentimiento PREVIO (ambos en −1..1).
+      // Antes se restaba engagement normalizado (0..1), que no es un sentimiento,
+      // así que casi cualquier mensaje disparaba el workflow espuriamente.
+      const prevSentiment = currentSignals?.avgSentiment ?? 0;
+      const sentimentDelta = analysis.score - prevSentiment;
       if (Math.abs(sentimentDelta) >= 0.2) {
         try {
           await workflowQueue.add("sentiment_change", {

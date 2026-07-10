@@ -200,6 +200,9 @@ export async function pollTwitterCommentsForCreator(
             source: "polling",
             publishedAt: reply.created_at ? new Date(reply.created_at) : null,
           })
+          // WK-7: si dos ticks se solapan sobre el mismo post, el índice único
+          // dedupe en vez de lanzar y abortar el resto de comments del post.
+          .onConflictDoNothing()
           .returning();
         if (!insertedRow) continue;
         inserted++;

@@ -1,10 +1,8 @@
 import { Queue } from "bullmq";
+import { getRedisConnectionOptions } from "@/lib/redis-connection";
 
 export const analysisQueue = new Queue("message-analysis", {
-  connection: {
-    host: new URL(process.env.REDIS_URL ?? "redis://localhost:6379").hostname,
-    port: Number(new URL(process.env.REDIS_URL ?? "redis://localhost:6379").port) || 6379,
-  },
+  connection: getRedisConnectionOptions(),
   defaultJobOptions: {
     attempts: 3,
     backoff: { type: "exponential", delay: 2000 },
@@ -29,10 +27,7 @@ export type AnalysisJobData = {
 // --- Workflow evaluation queue ---
 
 export const workflowQueue = new Queue("workflow-evaluation", {
-  connection: {
-    host: new URL(process.env.REDIS_URL ?? "redis://localhost:6379").hostname,
-    port: Number(new URL(process.env.REDIS_URL ?? "redis://localhost:6379").port) || 6379,
-  },
+  connection: getRedisConnectionOptions(),
   defaultJobOptions: {
     attempts: 2,
     backoff: { type: "exponential", delay: 3000 },
@@ -51,10 +46,7 @@ export type WorkflowJobData =
 // --- Telegram queues ---
 
 export const telegramOutgoingQueue = new Queue("telegram-outgoing", {
-  connection: {
-    host: new URL(process.env.REDIS_URL ?? "redis://localhost:6379").hostname,
-    port: Number(new URL(process.env.REDIS_URL ?? "redis://localhost:6379").port) || 6379,
-  },
+  connection: getRedisConnectionOptions(),
   defaultJobOptions: {
     attempts: 3,
     backoff: { type: "exponential", delay: 2000 },
@@ -72,10 +64,7 @@ export type TelegramOutgoingJobData = {
 };
 
 export const telegramAutoReplyQueue = new Queue("telegram-auto-reply", {
-  connection: {
-    host: new URL(process.env.REDIS_URL ?? "redis://localhost:6379").hostname,
-    port: Number(new URL(process.env.REDIS_URL ?? "redis://localhost:6379").port) || 6379,
-  },
+  connection: getRedisConnectionOptions(),
   defaultJobOptions: {
     attempts: 2,
     backoff: { type: "exponential", delay: 3000 },
@@ -95,10 +84,7 @@ export type TelegramAutoReplyJobData = {
 // --- Broadcast queues ---
 
 export const broadcastProcessingQueue = new Queue("broadcast-processing", {
-  connection: {
-    host: new URL(process.env.REDIS_URL ?? "redis://localhost:6379").hostname,
-    port: Number(new URL(process.env.REDIS_URL ?? "redis://localhost:6379").port) || 6379,
-  },
+  connection: getRedisConnectionOptions(),
   defaultJobOptions: {
     attempts: 2,
     backoff: { type: "exponential", delay: 5000 },
@@ -113,10 +99,7 @@ export type BroadcastProcessingJobData = {
 };
 
 export const broadcastSendQueue = new Queue("broadcast-send", {
-  connection: {
-    host: new URL(process.env.REDIS_URL ?? "redis://localhost:6379").hostname,
-    port: Number(new URL(process.env.REDIS_URL ?? "redis://localhost:6379").port) || 6379,
-  },
+  connection: getRedisConnectionOptions(),
   defaultJobOptions: {
     attempts: 3,
     backoff: { type: "exponential", delay: 2000 },
@@ -134,10 +117,7 @@ export type BroadcastSendJobData = {
 // --- Scheduled messages queue ---
 
 export const scheduledMessageQueue = new Queue("scheduled-message-send", {
-  connection: {
-    host: new URL(process.env.REDIS_URL ?? "redis://localhost:6379").hostname,
-    port: Number(new URL(process.env.REDIS_URL ?? "redis://localhost:6379").port) || 6379,
-  },
+  connection: getRedisConnectionOptions(),
   defaultJobOptions: {
     attempts: 3,
     backoff: { type: "exponential", delay: 2000 },
@@ -154,10 +134,7 @@ export type ScheduledMessageJobData = {
 // --- Contact import queue ---
 
 export const importQueue = new Queue("contact-import", {
-  connection: {
-    host: new URL(process.env.REDIS_URL ?? "redis://localhost:6379").hostname,
-    port: Number(new URL(process.env.REDIS_URL ?? "redis://localhost:6379").port) || 6379,
-  },
+  connection: getRedisConnectionOptions(),
   defaultJobOptions: {
     attempts: 1,
     removeOnComplete: { count: 100 },
@@ -173,10 +150,7 @@ export type ImportJobData = {
 // --- Email queue ---
 
 export const emailQueue = new Queue("email-send", {
-  connection: {
-    host: new URL(process.env.REDIS_URL ?? "redis://localhost:6379").hostname,
-    port: Number(new URL(process.env.REDIS_URL ?? "redis://localhost:6379").port) || 6379,
-  },
+  connection: getRedisConnectionOptions(),
   defaultJobOptions: {
     attempts: 3,
     backoff: { type: "exponential", delay: 2000 },
@@ -194,10 +168,7 @@ export type EmailJobData = {
 // --- Sequence queue ---
 
 export const sequenceQueue = new Queue("sequence-processing", {
-  connection: {
-    host: new URL(process.env.REDIS_URL ?? "redis://localhost:6379").hostname,
-    port: Number(new URL(process.env.REDIS_URL ?? "redis://localhost:6379").port) || 6379,
-  },
+  connection: getRedisConnectionOptions(),
   defaultJobOptions: {
     attempts: 3,
     backoff: { type: "exponential", delay: 5000 },
@@ -213,10 +184,7 @@ export type SequenceJobData =
 // --- Webhook delivery queue ---
 
 export const webhookDeliveryQueue = new Queue("webhook-delivery", {
-  connection: {
-    host: new URL(process.env.REDIS_URL ?? "redis://localhost:6379").hostname,
-    port: Number(new URL(process.env.REDIS_URL ?? "redis://localhost:6379").port) || 6379,
-  },
+  connection: getRedisConnectionOptions(),
   defaultJobOptions: {
     attempts: 3,
     backoff: { type: "exponential", delay: 5000 },
@@ -236,10 +204,7 @@ export type WebhookDeliveryJobData = {
 // --- Scheduled post publishing queue ---
 
 export const scheduledPostQueue = new Queue("scheduled-post-publish", {
-  connection: {
-    host: new URL(process.env.REDIS_URL ?? "redis://localhost:6379").hostname,
-    port: Number(new URL(process.env.REDIS_URL ?? "redis://localhost:6379").port) || 6379,
-  },
+  connection: getRedisConnectionOptions(),
   defaultJobOptions: {
     attempts: 3,
     backoff: { type: "exponential", delay: 5000 },

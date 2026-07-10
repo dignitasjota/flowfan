@@ -28,9 +28,13 @@ function clone(d: Date): Date {
   return new Date(d.getTime());
 }
 
+// WK-12: operar en UTC. La UI del composer presenta "hora/minuto UTC", así que
+// todo el cálculo debe usar getUTC*/setUTC* — con setHours (hora local del
+// servidor) las series se desplazaban si el contenedor no corría en UTC y
+// saltaban ±1h con el DST.
 function setTime(d: Date, hour: number, minute: number): Date {
   const next = clone(d);
-  next.setHours(hour, minute, 0, 0);
+  next.setUTCHours(hour, minute, 0, 0);
   return next;
 }
 
@@ -52,25 +56,25 @@ export function computeNextOccurrence(
     case "daily": {
       next = setTime(from, rule.hour, rule.minute);
       // Always advance at least one interval forward
-      next.setDate(next.getDate() + interval);
+      next.setUTCDate(next.getUTCDate() + interval);
       break;
     }
     case "weekly": {
-      const target = (rule.dayOfWeek ?? from.getDay()) % 7;
+      const target = (rule.dayOfWeek ?? from.getUTCDay()) % 7;
       next = setTime(from, rule.hour, rule.minute);
-      const currentDay = next.getDay();
+      const currentDay = next.getUTCDay();
       let delta = (target - currentDay + 7) % 7;
       if (delta === 0) delta = 7 * interval;
       else if (interval > 1) delta += 7 * (interval - 1);
-      next.setDate(next.getDate() + delta);
+      next.setUTCDate(next.getUTCDate() + delta);
       break;
     }
     case "monthly": {
       const day = Math.min(28, Math.max(1, rule.dayOfMonth ?? 1));
       next = setTime(from, rule.hour, rule.minute);
-      next.setDate(1); // avoid overflow when adding months
-      next.setMonth(next.getMonth() + interval);
-      next.setDate(day);
+      next.setUTCDate(1); // avoid overflow when adding months
+      next.setUTCMonth(next.getUTCMonth() + interval);
+      next.setUTCDate(day);
       break;
     }
     default:

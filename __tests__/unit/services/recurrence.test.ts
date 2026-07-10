@@ -75,10 +75,10 @@ describe("recurrence", () => {
         0
       );
       expect(next).not.toBeNull();
-      // Next day 10:00 in local TZ
-      expect(next!.getDate()).toBe(from.getDate() + 1);
-      expect(next!.getHours()).toBe(10);
-      expect(next!.getMinutes()).toBe(0);
+      // Next day 10:00 UTC (WK-12: recurrence usa UTC de forma consistente)
+      expect(next!.getUTCDate()).toBe(from.getUTCDate() + 1);
+      expect(next!.getUTCHours()).toBe(10);
+      expect(next!.getUTCMinutes()).toBe(0);
     });
 
     it("weekly: jumps to the requested day", () => {
@@ -89,9 +89,9 @@ describe("recurrence", () => {
         0
       );
       expect(next).not.toBeNull();
-      expect(next!.getDay()).toBe(1);
-      expect(next!.getHours()).toBe(9);
-      expect(next!.getMinutes()).toBe(30);
+      expect(next!.getUTCDay()).toBe(1);
+      expect(next!.getUTCHours()).toBe(9);
+      expect(next!.getUTCMinutes()).toBe(30);
       // Should be the upcoming Monday, not today
       expect(next!.getTime()).toBeGreaterThan(from.getTime());
     });
@@ -103,9 +103,9 @@ describe("recurrence", () => {
         0
       );
       expect(next).not.toBeNull();
-      expect(next!.getDate()).toBe(15);
-      // Month after May (6 = June, 0-indexed)
-      expect(next!.getMonth()).toBe(from.getMonth() + 1);
+      expect(next!.getUTCDate()).toBe(15);
+      // Month after May (5 = June, 0-indexed)
+      expect(next!.getUTCMonth()).toBe(from.getUTCMonth() + 1);
     });
 
     it("returns null when maxCount reached", () => {
@@ -138,7 +138,7 @@ describe("recurrence", () => {
         0
       );
       expect(next).not.toBeNull();
-      expect(next!.getDate()).toBe(from.getDate() + 3);
+      expect(next!.getUTCDate()).toBe(from.getUTCDate() + 3);
     });
   });
 });

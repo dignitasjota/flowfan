@@ -1,4 +1,5 @@
 import { Worker } from "bullmq";
+import { getRedisConnectionOptions } from "@/lib/redis-connection";
 import { db } from "./db";
 import { analyzeMessage } from "./services/ai-analysis";
 import { updateContactProfile } from "./services/profile-updater";
@@ -208,10 +209,7 @@ const worker = new Worker<AnalysisJobData>(
     log.info({ jobId: job.id, contactId }, "Message analysis completed");
   },
   {
-    connection: {
-      host: redisUrl.hostname,
-      port: Number(redisUrl.port) || 6379,
-    },
+    connection: getRedisConnectionOptions(),
     concurrency: 5,
     limiter: {
       max: 10,
@@ -242,10 +240,7 @@ const workflowWorker = new Worker<WorkflowJobData>(
     log.info({ jobId: job.id, type: job.data.type }, "Workflow evaluation completed");
   },
   {
-    connection: {
-      host: redisUrl.hostname,
-      port: Number(redisUrl.port) || 6379,
-    },
+    connection: getRedisConnectionOptions(),
     concurrency: 3,
   }
 );
@@ -295,10 +290,7 @@ const telegramOutgoingWorker = new Worker<TelegramOutgoingJobData>(
     log.info({ jobId: job.id, telegramMessageId: result.message_id }, "Telegram message sent");
   },
   {
-    connection: {
-      host: redisUrl.hostname,
-      port: Number(redisUrl.port) || 6379,
-    },
+    connection: getRedisConnectionOptions(),
     concurrency: 5,
   }
 );
@@ -390,10 +382,7 @@ const telegramAutoReplyWorker = new Worker<TelegramAutoReplyJobData>(
     log.info({ jobId: job.id, chatId }, "Auto-reply sent");
   },
   {
-    connection: {
-      host: redisUrl.hostname,
-      port: Number(redisUrl.port) || 6379,
-    },
+    connection: getRedisConnectionOptions(),
     concurrency: 3,
   }
 );
@@ -430,10 +419,7 @@ const broadcastProcessingWorker = new Worker<BroadcastProcessingJobData>(
     }
   },
   {
-    connection: {
-      host: redisUrl.hostname,
-      port: Number(redisUrl.port) || 6379,
-    },
+    connection: getRedisConnectionOptions(),
     concurrency: 2,
   }
 );
@@ -458,10 +444,7 @@ const broadcastSendWorker = new Worker<BroadcastSendJobData>(
     await sendBroadcastMessage(db, recipientId);
   },
   {
-    connection: {
-      host: redisUrl.hostname,
-      port: Number(redisUrl.port) || 6379,
-    },
+    connection: getRedisConnectionOptions(),
     concurrency: 10,
     limiter: {
       max: 30,
@@ -589,10 +572,7 @@ const scheduledMessageWorker = new Worker<ScheduledMessageJobData>(
     }
   },
   {
-    connection: {
-      host: redisUrl.hostname,
-      port: Number(redisUrl.port) || 6379,
-    },
+    connection: getRedisConnectionOptions(),
     concurrency: 5,
   }
 );
@@ -667,6 +647,11 @@ async function checkScheduledBroadcasts() {
 }
 
 let schedulerInterval: ReturnType<typeof setInterval> | null = null;
+// WK-7: guard de reentrada. El callback del tick es async y encadena pollers
+// que, con varias cuentas, pueden durar más de 5 min. Sin este flag, setInterval
+// dispararía otro ciclo en paralelo (doble consumo de rate limit + dos pollers
+// sobre el mismo post).
+let schedulerTickRunning = false;
 let churnCheckCounter = 0;
 let inactivityFollowupCounter = 0;
 
@@ -679,6 +664,13 @@ async function startScheduler() {
   }
 
   schedulerInterval = setInterval(async () => {
+    // WK-7: si el tick anterior sigue corriendo, saltar este para no solaparse.
+    if (schedulerTickRunning) {
+      log.warn({}, "Scheduler tick still running, skipping this cycle");
+      return;
+    }
+    schedulerTickRunning = true;
+    try {
     try {
       await checkNoResponseTimeouts(db);
     } catch (err) {
@@ -759,6 +751,10 @@ async function startScheduler() {
       } catch (err) {
         log.error({ err }, "Error in batch churn recalculation");
       }
+    }
+    } finally {
+      // WK-7: liberar el guard pase lo que pase.
+      schedulerTickRunning = false;
     }
   }, 5 * 60 * 1000);
 }
@@ -932,7 +928,7 @@ const importWorker = new Worker<ImportJobData>(
         .where(eq(importJobs.id, importJobId));
     }
   },
-  { connection: { host: redisUrl.hostname, port: Number(redisUrl.port) || 6379 }, concurrency: 2 }
+  { connection: getRedisConnectionOptions(), concurrency: 2 }
 );
 
 importWorker.on("failed", (job, err) => {
@@ -960,7 +956,7 @@ const sequenceWorker = new Worker<SequenceJobData>(
         log.warn({ type }, "Unknown sequence job type");
     }
   },
-  { connection: { host: redisUrl.hostname, port: Number(redisUrl.port) || 6379 }, concurrency: 3 }
+  { connection: getRedisConnectionOptions(), concurrency: 3 }
 );
 
 sequenceWorker.on("failed", (job, err) => {
@@ -980,7 +976,7 @@ const webhookDeliveryWorker = new Worker<WebhookDeliveryJobData>(
     await deliverWebhook(db, webhookConfigId, event, payload, url, secret, job.attemptsMade + 1);
   },
   {
-    connection: { host: redisUrl.hostname, port: Number(redisUrl.port) || 6379 },
+    connection: getRedisConnectionOptions(),
     concurrency: 5,
   }
 );
@@ -1023,7 +1019,7 @@ const emailWorker = new Worker<EmailJobData>(
         log.warn({ type }, "Unknown email job type");
     }
   },
-  { connection: { host: redisUrl.hostname, port: Number(redisUrl.port) || 6379 }, concurrency: 5 }
+  { connection: getRedisConnectionOptions(), concurrency: 5 }
 );
 
 emailWorker.on("failed", (job, err) => {
@@ -1539,10 +1535,7 @@ const scheduledPostWorker = new Worker<ScheduledPostJobData>(
     }
   },
   {
-    connection: {
-      host: redisUrl.hostname,
-      port: Number(redisUrl.port) || 6379,
-    },
+    connection: getRedisConnectionOptions(),
     concurrency: 3,
   }
 );

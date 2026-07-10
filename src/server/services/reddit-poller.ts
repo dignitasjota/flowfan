@@ -210,6 +210,8 @@ export async function pollRedditCommentsForCreator(
               : null,
             metadata: c.permalink ? { permalink: c.permalink } : {},
           })
+          // WK-7: dedupe en vez de lanzar si dos ticks se solapan.
+          .onConflictDoNothing()
           .returning();
 
         if (!inserted_row) continue;

@@ -1,4 +1,4 @@
-import { eq, and, desc, gte, sql } from "drizzle-orm";
+import { eq, and, desc, gte, sql, inArray } from "drizzle-orm";
 import {
   workflows,
   workflowExecutions,
@@ -271,7 +271,10 @@ export async function checkCooldown(
       and(
         eq(workflowExecutions.workflowId, workflowId),
         eq(workflowExecutions.contactId, contactId),
-        eq(workflowExecutions.status, "success"),
+        // WK-13: contar también las ejecuciones fallidas recientes. Antes solo
+        // "success" entraba en el cooldown, así que una acción que falla siempre
+        // (template borrado, config rota) se re-ejecutaba cada 5 min sin fin.
+        inArray(workflowExecutions.status, ["success", "failed"]),
         gte(workflowExecutions.executedAt, cutoff),
       ),
     )

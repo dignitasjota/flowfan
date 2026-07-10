@@ -1,5 +1,5 @@
 import { eq, gte, and, count, sql, sum } from "drizzle-orm";
-import { contacts, messages, contactProfiles, fanTransactions, creators } from "@/server/db/schema";
+import { contacts, messages, contactProfiles, fanTransactions, creators, conversations } from "@/server/db/schema";
 import { emailQueue } from "@/server/queues";
 import { createChildLogger } from "@/lib/logger";
 import type { DailySummaryData, WeeklySummaryData } from "./email";
@@ -23,22 +23,21 @@ export async function generateDailySummary(db: DB, creatorId: string): Promise<D
     .from(contacts)
     .where(and(eq(contacts.creatorId, creatorId), gte(contacts.createdAt, startOfDay)));
 
-  // Messages today (fan messages only)
+  // Messages today (fan messages only).
+  // WK-14: join real a la tabla `conversations` (antes un sql`conversations ON …`
+  // renderizaba doble ON → error de sintaxis Postgres → el resumen fallaba y se
+  // tragaba el error, así que NUNCA se enviaban resúmenes diarios).
   const [messagesResult] = await db
     .select({ count: count() })
     .from(messages)
-    .innerJoin(
-      sql`conversations ON conversations.id = ${messages.conversationId}`,
-      sql`conversations.creator_id = ${creatorId}`
-    )
-    .where(and(eq(messages.role, "fan"), gte(messages.createdAt, startOfDay)));
-
-  // At-risk contacts (churn score >= 50)
-  const [atRiskResult] = await db
-    .select({ count: count() })
-    .from(contactProfiles)
-    .innerJoin(contacts, eq(contacts.id, contactProfiles.contactId))
-    .where(and(eq(contacts.creatorId, creatorId), gte(contactProfiles.engagementLevel, 20)));
+    .innerJoin(conversations, eq(conversations.id, messages.conversationId))
+    .where(
+      and(
+        eq(conversations.creatorId, creatorId),
+        eq(messages.role, "fan"),
+        gte(messages.createdAt, startOfDay)
+      )
+    );
 
   const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
