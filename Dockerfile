@@ -25,6 +25,7 @@ COPY package.json package-lock.json ./
 COPY drizzle.config.ts ./
 COPY tsconfig.json ./
 COPY src ./src
+COPY scripts ./scripts
 RUN addgroup --system --gid 1001 nodejs && adduser --system --uid 1001 nextjs
 USER nextjs
 CMD ["npx", "tsx", "src/server/worker.ts"]

@@ -202,9 +202,20 @@ Verificar en: `https://fanflow.example.com` → debería mostrar la landing page
 
 ### 6.1 Ejecutar migraciones de BD
 ```bash
-# Acceder al contenedor de la app
-docker compose -f /opt/fanflow/docker-compose.prod.yml exec app npm run db:push
+# IMPORTANTE: las migraciones se corren en el contenedor WORKER, no en app.
+# La imagen `app` (Next.js standalone) no incluye drizzle.config.ts ni src/;
+# el `worker` sí (además de drizzle-kit y las scripts de mantenimiento).
+docker compose -f /opt/fanflow/docker-compose.prod.yml exec worker npm run db:push
+
+# Scripts de mantenimiento (también en el worker). Las env vienen del compose,
+# por eso los scripts usan --env-file-if-exists (no requieren un .env dentro del contenedor):
+docker compose -f /opt/fanflow/docker-compose.prod.yml exec worker npm run grandfather:email-verified
+docker compose -f /opt/fanflow/docker-compose.prod.yml exec worker npm run generate:vapid
 ```
+
+> Recuerda hacer `git pull` en el servidor y **reconstruir las imágenes**
+> (`docker compose -f docker-compose.prod.yml build && ... up -d`) antes de
+> migrar, para que el worker tenga el schema actualizado.
 
 ### 6.2 Verificar logs
 ```bash

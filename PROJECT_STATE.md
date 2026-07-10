@@ -430,8 +430,8 @@ Al completar → `billing.completeOnboarding()` pone `onboardingCompleted = true
 
 ### Post-deploy
 ```bash
-# Ejecutar migraciones DB
-docker compose exec app npm run db:push
+# Ejecutar migraciones DB — en el contenedor WORKER (el `app` no tiene el schema)
+docker compose exec worker npm run db:push
 
 # Verificar salud
 curl https://fanflow.example.com/api/health
