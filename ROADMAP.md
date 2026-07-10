@@ -16,8 +16,10 @@
 - **Fase 10**: Media Vault (con Cloudflare R2, no MinIO) ✅
 - **Fase 11**: Workflows / Automatizaciones (trigger→acción) ✅
 - **Fase 12**: Segmentación Avanzada (segmentos guardados) ✅
-- **Fase 13**: A/B Testing (de conversation modes — el de *mensajes* aún pendiente) ⚠️ parcial
+- **Fase 13**: A/B Testing (conversation modes + mensajes/templates) ✅
+- **Fase 14**: PWA instalable + push notifications ✅
 - **Fase 15**: Calendario unificado (posts + mensajes programados) ✅
+- **Fase 16**: Programa de referidos ✅
 - **Extra (no estaba en el roadmap)**: Bandeja de comentarios públicos (Reddit/Twitter/Instagram con polling + webhooks + stream), Publishing Scheduler nativo con OAuth, Blog-to-Social, Content Gaps, Audience Insights, Coaching IA, Churn Prediction, API REST pública + webhooks salientes, import de contactos, auto-respuestas, panel de admin
 - **Admin Panel**: Superadmin con SEO config, auditoría, estadísticas globales
 - **Producción**: Docker + Portainer + Nginx Proxy Manager en VPS
@@ -312,7 +314,7 @@ Cuando el volumen crezca, hay dos opciones de migración preparadas:
 
 ---
 
-### Fase 13: A/B Testing de Mensajes — ⚠️ PARCIAL (existe A/B de conversation modes; falta el de mensajes/templates)
+### Fase 13: A/B Testing de Mensajes — ✅ IMPLEMENTADO (modes + mensajes)
 
 **Prioridad**: 🟢 Baja
 **Justificación**: Dato interesante para optimizar conversiones, pero requiere volumen suficiente para ser estadísticamente significativo.
@@ -328,7 +330,7 @@ Cuando el volumen crezca, hay dos opciones de migración preparadas:
 
 ---
 
-### Fase 14: PWA / Mobile App — ⏳ PENDIENTE
+### Fase 14: PWA / Mobile App — ✅ IMPLEMENTADO (push notifications)
 
 **Prioridad**: 🟢 Baja
 **Justificación**: La app es responsive pero una PWA con push notifications sería un upgrade importante para creators que trabajan desde el móvil.
@@ -355,7 +357,7 @@ Cuando el volumen crezca, hay dos opciones de migración preparadas:
 
 ---
 
-### Fase 16: Programa de Referidos — ⏳ PENDIENTE
+### Fase 16: Programa de Referidos — ✅ IMPLEMENTADO
 
 **Prioridad**: 🟢 Baja
 **Justificación**: Crecimiento orgánico. Que creators inviten a otros creators a cambio de descuento o comisión.
@@ -381,22 +383,24 @@ Cuando el volumen crezca, hay dos opciones de migración preparadas:
 | 10 | Media Vault | 🟡 Medio | ✅ Implementado (R2) |
 | 11 | Workflows | 🟡 Medio | ✅ Implementado |
 | 12 | Segmentación Avanzada | 🟡 Medio | ✅ Implementado |
-| 13 | A/B Testing | 🟢 Bajo | ⚠️ Parcial (modes sí, mensajes no) |
-| 14 | PWA / Mobile | 🟢 Bajo | ⏳ Pendiente |
+| 13 | A/B Testing | 🟢 Bajo | ✅ Implementado (modes + mensajes) |
+| 14 | PWA / Mobile | 🟢 Bajo | ✅ Implementado (push) |
 | 15 | Calendario | 🟢 Bajo | ✅ Implementado |
-| 16 | Referidos | 🟢 Bajo | ⏳ Pendiente |
+| 16 | Referidos | 🟢 Bajo | ✅ Implementado |
 
 ---
 
 ## Lo que falta por implementar
 
-Estado verificado contra el código el 2026-07-10. Estas son las únicas piezas de **funcionalidad nueva** que quedan del roadmap y de los TODOs históricos:
+Estado verificado contra el código el 2026-07-10. **Las 6 piezas que quedaban se implementaron ese mismo día** (rama `feat/roadmap-pending-features`, un commit por feature). Detalle de cada módulo en [`CLAUDE.md`](./CLAUDE.md):
 
-1. **A/B Testing de mensajes/templates** (fase 13, parcial) — hoy existe A/B de *conversation modes* (`ab-experiments`), pero no de variantes de mensaje/template individual con medición de conversión.
-2. **PWA / Push notifications** (fase 14) — sin `manifest.json`, sin service worker, sin web push. Es lo único de peso que queda como feature de producto.
-3. **Programa de referidos** (fase 16) — no existe; los invites actuales son de team members, no un referral program con cupones de Stripe.
-4. **Verificación de email obligatoria** — existe la ruta `verify-email` y la columna `emailVerified`, pero nada bloquea el acceso sin verificar (el token tampoco expira).
-5. **Business plan self-checkout** — solo Starter y Pro tienen checkout automático; Business sigue siendo manual/custom (sin `STRIPE_BUSINESS_PRICE_ID`).
-6. **E2E con navegador real (Playwright)** — solo hay E2E con Postgres real (SQL); no hay tests de flujo en navegador.
+1. ✅ **A/B Testing de mensajes/templates** (fase 13) — `messageExperiments` + `messageExperimentSends`, selector "🧪 A/B" en el chat, mide reply rate + conversión con z-test. Página `/experiments`.
+2. ✅ **PWA / Push notifications** (fase 14) — manifest instalable, service worker (`public/sw.js`), web push con VAPID (`push_subscriptions`), toggle en Settings → Cuenta. Disparadores: nuevo mensaje + alerta de churn.
+3. ✅ **Programa de referidos** (fase 16) — código/link por creator, comisión al referrer al convertir (webhook Stripe), página `/referrals`.
+4. ✅ **Verificación de email obligatoria** — token con expiración 24h, gate en el dashboard, reenvío + grandfathering.
+5. ✅ **Business plan self-checkout** — `STRIPE_BUSINESS_PRICE_ID` opcional habilita el checkout; si no, sigue siendo custom (mailto).
+6. ✅ **E2E con navegador real (Playwright)** — `e2e/` (`smoke` + `auth-flow`), opt-in `npm run test:e2e`.
 
-**Ya resueltos** (el histórico los listaba como pendientes): email service (Resend), cancelar suscripción de Stripe en `deleteAccount`.
+**Ya resueltos previamente** (el histórico los listaba como pendientes): email service (Resend), cancelar suscripción de Stripe en `deleteAccount`.
+
+**Lo único que queda ahora es deuda técnica / bugs**, no funcionalidad nueva → ver [`AUDITORIA_BACKLOG.md`](./AUDITORIA_BACKLOG.md).

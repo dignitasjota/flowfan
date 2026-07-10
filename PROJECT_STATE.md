@@ -459,13 +459,15 @@ Estado verificado contra el código el 2026-07-10.
 - [x] **Email service** — implementado con Resend (`src/server/services/email.ts` + cola `emailQueue`). Verificación, reset, resúmenes diario/semanal y alertas de churn.
 - [x] **Cancel Stripe subscription on deleteAccount** — implementado (`account.ts` cancela `stripeSubscriptionId` antes de borrar).
 
-**Funcionalidad nueva pendiente** (ver ROADMAP.md → "Lo que falta por implementar"):
-- [ ] **Verificación de email obligatoria**: existe `verify-email` y la columna `emailVerified`, pero nada bloquea el acceso sin verificar y el token no expira.
-- [ ] **Business plan self-checkout**: solo `starter` y `pro` tienen Price IDs; Business es custom/manual (falta `STRIPE_BUSINESS_PRICE_ID`).
-- [ ] **A/B Testing de mensajes/templates**: existe A/B de conversation modes, pero no de variantes de mensaje individual.
-- [ ] **PWA / Push notifications**: sin `manifest.json`, service worker ni web push.
-- [ ] **Programa de referidos**: no existe (los invites son de team members).
-- [x] **E2E con Playwright (navegador real)**: implementado en `e2e/` (`smoke.spec.ts` + `auth-flow.spec.ts`), opt-in vía `npm run test:e2e`. Ver `e2e/README.md`.
+**Funcionalidad nueva — implementada (jul 2026):**
+- [x] **Verificación de email obligatoria**: token con expiración 24h, gate en el dashboard, reenvío. Grandfathering vía `npm run grandfather:email-verified`.
+- [x] **Business plan self-checkout**: `STRIPE_BUSINESS_PRICE_ID` (opcional) habilita el checkout de Business; si no, sigue siendo custom.
+- [x] **A/B Testing de mensajes/templates**: `messageExperiments` + selector en el chat, mide reply rate + conversión.
+- [x] **PWA / Push notifications**: manifest, service worker, web push (VAPID). `npm run generate:vapid`.
+- [x] **Programa de referidos**: código/link por creator, comisión al referrer en la conversión, página `/referrals`.
+- [x] **E2E con Playwright (navegador real)**: `e2e/` (`smoke` + `auth-flow`), opt-in `npm run test:e2e`.
+
+> Cada feature con schema nuevo requiere su `npm run db:push` (columnas/tablas): email verification, A/B mensajes, PWA (push_subscriptions), referidos.
 
 **Deuda técnica / bugs**: ver [`AUDITORIA_BACKLOG.md`](./AUDITORIA_BACKLOG.md) (48 hallazgos priorizados de la auditoría de seguridad/workers/routers/IA/frontend).
 
