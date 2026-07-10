@@ -167,6 +167,11 @@ export async function pollTwitterCommentsForCreator(
           .filter((x: string | null): x is string => !!x)
       );
 
+      // WK-6: contador y timestamp por-post (no globales) para no bumpear
+      // last_comment_at de posts sin replies nuevas ni perder replies antiguas.
+      let insertedForPost = 0;
+      let maxPublishedAt: Date | null = null;
+
       for (const reply of replies) {
         if (!reply.id || !reply.text || !reply.author_id) continue;
         if (seen.has(reply.id)) continue;
@@ -198,6 +203,9 @@ export async function pollTwitterCommentsForCreator(
           .returning();
         if (!insertedRow) continue;
         inserted++;
+        insertedForPost++;
+        const pub = reply.created_at ? new Date(reply.created_at) : null;
+        if (pub && (!maxPublishedAt || pub > maxPublishedAt)) maxPublishedAt = pub;
         seen.add(reply.id);
 
         dispatchWebhookEvent(db, account.creatorId, "comment.received", {
@@ -229,7 +237,7 @@ export async function pollTwitterCommentsForCreator(
         }).catch(() => {});
       }
 
-      if (inserted > 0) {
+      if (insertedForPost > 0) {
         await (db as any).execute(
           (await import("drizzle-orm")).sql`
             UPDATE social_posts
@@ -243,7 +251,7 @@ export async function pollTwitterCommentsForCreator(
                 AND social_comments.is_handled = false
                 AND social_comments.role = 'fan'
             ),
-            last_comment_at = NOW()
+            last_comment_at = ${maxPublishedAt ?? new Date()}
             WHERE social_posts.id = ${post.id}
           `
         );

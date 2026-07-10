@@ -152,6 +152,10 @@ export async function pollRedditCommentsForCreator(
 
       const ownUsername = account.accountUsername?.toLowerCase();
 
+      // WK-6: contador y timestamp por-post (no globales).
+      let insertedForPost = 0;
+      let maxPublishedAt: Date | null = null;
+
       for (const c of comments) {
         if (!c.id || !c.body || !c.author) continue;
         const fullName = c.name ?? `t1_${c.id}`;
@@ -210,6 +214,9 @@ export async function pollRedditCommentsForCreator(
 
         if (!inserted_row) continue;
         inserted++;
+        insertedForPost++;
+        const pub = c.created_utc ? new Date(c.created_utc * 1000) : null;
+        if (pub && (!maxPublishedAt || pub > maxPublishedAt)) maxPublishedAt = pub;
         seen.add(fullName);
 
         dispatchWebhookEvent(db, account.creatorId, "comment.received", {
@@ -241,7 +248,7 @@ export async function pollRedditCommentsForCreator(
         }).catch(() => {});
       }
 
-      if (inserted > 0) {
+      if (insertedForPost > 0) {
         // Refresh post counters from DB-level aggregates
         await (db as any).execute(
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -257,7 +264,7 @@ export async function pollRedditCommentsForCreator(
                 AND social_comments.is_handled = false
                 AND social_comments.role = 'fan'
             ),
-            last_comment_at = NOW()
+            last_comment_at = ${maxPublishedAt ?? new Date()}
             WHERE social_posts.id = ${post.id}
           `
         );

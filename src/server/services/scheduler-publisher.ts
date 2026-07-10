@@ -28,8 +28,11 @@ function getCacheRedis(): Redis {
   return cacheRedis;
 }
 
-function tokenCacheKey(creatorId: string): string {
-  return `reddit:token:${creatorId}`;
+// WK-5: la clave incluye el username de la cuenta Reddit. Un creator puede
+// tener varias cuentas Reddit; sin el username, la segunda cuenta reutilizaría
+// el token de la primera y publicaría/leería como el usuario equivocado.
+function tokenCacheKey(creatorId: string, accountUsername: string): string {
+  return `reddit:token:${creatorId}:${accountUsername}`;
 }
 
 export type PublishResult = {
@@ -64,8 +67,9 @@ export async function getRedditAccessTokenCached(
   if (!creatorId) {
     return getRedditAccessToken(creds);
   }
+  const key = tokenCacheKey(creatorId, creds.username);
   try {
-    const cached = await getCacheRedis().get(tokenCacheKey(creatorId));
+    const cached = await getCacheRedis().get(key);
     if (cached) return cached;
   } catch {
     // Redis miss / down — continue to fetch
@@ -73,7 +77,7 @@ export async function getRedditAccessTokenCached(
 
   const token = await getRedditAccessToken(creds);
   try {
-    await getCacheRedis().set(tokenCacheKey(creatorId), token, "EX", TOKEN_TTL_SECONDS);
+    await getCacheRedis().set(key, token, "EX", TOKEN_TTL_SECONDS);
   } catch {
     // Cache write failure is non-fatal
   }
@@ -85,10 +89,11 @@ export async function getRedditAccessTokenCached(
  * change or when an authenticated request fails with 401.
  */
 export async function invalidateRedditTokenCache(
-  creatorId: string
+  creatorId: string,
+  accountUsername: string
 ): Promise<void> {
   try {
-    await getCacheRedis().del(tokenCacheKey(creatorId));
+    await getCacheRedis().del(tokenCacheKey(creatorId, accountUsername));
   } catch {
     // ignore
   }
@@ -247,7 +252,7 @@ export async function publishToReddit(
       // 401 means the cached token is stale (revoked / pwd changed).
       // Invalidate so the next call refetches a fresh one.
       if (response.status === 401 && creatorId) {
-        await invalidateRedditTokenCache(creatorId);
+        await invalidateRedditTokenCache(creatorId, creds.username);
       }
       return {
         success: false,

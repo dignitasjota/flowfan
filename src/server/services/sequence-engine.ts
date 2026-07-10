@@ -1,4 +1,4 @@
-import { eq, and, lte, sql } from "drizzle-orm";
+import { eq, and, lte, sql, isNotNull } from "drizzle-orm";
 import {
   sequences,
   sequenceEnrollments,
@@ -133,6 +133,28 @@ export async function processSequenceStep(db: DB, enrollmentId: string): Promise
 
   const step = steps[currentStepIndex]!;
 
+  // WK-3: claim atómico antes de ejecutar la acción. Pone nextStepAt=NULL de
+  // forma condicional; si otro job (concurrencia) ya tomó este paso, no
+  // devuelve fila y salimos → no se ejecuta la acción dos veces. Además, si la
+  // acción o el avance fallan después, nextStepAt ya es NULL, así que
+  // checkSequenceSteps no lo re-encola en bucle cada 5 min.
+  const claimed = await (db as any)
+    .update(sequenceEnrollments)
+    .set({ nextStepAt: null, updatedAt: new Date() })
+    .where(
+      and(
+        eq(sequenceEnrollments.id, enrollmentId),
+        eq(sequenceEnrollments.currentStep, currentStepIndex),
+        isNotNull(sequenceEnrollments.nextStepAt)
+      )
+    )
+    .returning({ id: sequenceEnrollments.id });
+
+  if (!claimed || claimed.length === 0) {
+    log.info({ enrollmentId, currentStepIndex }, "Step already claimed, skipping");
+    return;
+  }
+
   // Execute the step action
   try {
     await executeStepAction(db, step, enrollment);
@@ -181,7 +203,10 @@ export async function processSequenceStep(db: DB, enrollmentId: string): Promise
         .where(eq(sequenceEnrollments.id, enrollmentId));
     }
   } catch (err) {
+    // WK-3: relanzar para que BullMQ reintente con backoff (antes se tragaba,
+    // anulando los reintentos). El claim ya evitó el bucle de re-encolado.
     log.error({ err, enrollmentId, stepNumber: currentStepIndex }, "Step execution failed");
+    throw err;
   }
 }
 
@@ -221,12 +246,16 @@ export async function checkSequenceSteps(db: DB): Promise<void> {
 
   for (const enrollment of dueEnrollments) {
     try {
-      await sequenceQueue.add(`step-${enrollment.id}`, {
-        type: "process_step",
-        enrollmentId: enrollment.id,
-      });
+      // WK-3: jobId determinista para deduplicar el encolado. Antes el primer
+      // arg era solo el NOMBRE del job (no dedup), así que cada tick encolaba
+      // otro job para el mismo enrollment.
+      await sequenceQueue.add(
+        "process_step",
+        { type: "process_step", enrollmentId: enrollment.id },
+        { jobId: `step-${enrollment.id}` }
+      );
     } catch {
-      // Duplicate job, skip
+      // Duplicate job (mismo jobId aún en cola), skip
     }
   }
 

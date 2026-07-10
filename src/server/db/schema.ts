@@ -906,6 +906,7 @@ export const broadcastRecipients = pgTable(
 
 export const scheduledMessageStatusEnum = pgEnum("scheduled_message_status", [
   "pending",
+  "sending", // WK-4: estado intermedio para el claim atómico (evita doble envío)
   "sent",
   "cancelled",
   "failed",

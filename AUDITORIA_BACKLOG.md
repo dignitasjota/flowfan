@@ -124,20 +124,20 @@ Backlog de hallazgos de la auditoría en profundidad del proyecto. Cada item tie
 
 ### Workers / colas
 
-- [ ] **WK-3 · Secuencias: pasos duplicados y reenvío cada 5 min por errores tragados** `src/server/services/sequence-engine.ts:222-231,137-185`
+- [x] **WK-3 · Secuencias: pasos duplicados y reenvío cada 5 min por errores tragados** `src/server/services/sequence-engine.ts:222-231,137-185`
   - **Problema:** `sequenceQueue.add(\`step-${id}\`, {...})` usa el primer arg como **nombre** de job, no `jobId` → sin deduplicación (el comentario "Duplicate job, skip" es falso). Con retraso >5 min, cada tick encola otro job; con concurrency 3, dos jobs leen `currentStep=0` → **el fan recibe el mensaje dos veces**. Además `processSequenceStep` envuelve la acción + update en try/catch que solo hace `log.error`: si el update de `currentStep` falla tras insertar el mensaje, `nextStepAt` no cambia → **mismo mensaje reenviado cada 5 min**.
   - **Fix:** pasar `{ jobId: \`step-${enrollmentId}-${currentStep}\` }`; claim atómico (`UPDATE ... SET nextStepAt=NULL WHERE id=? AND currentStep=? RETURNING`) antes de la acción; relanzar el error.
 
-- [ ] **WK-4 · Mensajes programados: carrera check-then-act → doble envío** `src/server/worker.ts:600-623,497-543`
+- [x] **WK-4 · Mensajes programados: carrera check-then-act → doble envío** `src/server/worker.ts:600-623,497-543`
   - **Problema:** `checkScheduledMessagesToSend` encola sin `jobId` cada 5 min todo lo `pending`. Con backlog, coexisten dos jobs para el mismo `scheduledMessageId`; ambos leen `pending` antes de marcar `sent` → **mensaje insertado dos veces** (y doble envío a Telegram).
   - **Fix:** `jobId: scheduledMessageId` en el `add`, y claim atómico `UPDATE ... SET status='sending' WHERE id=? AND status='pending' RETURNING`.
 
-- [ ] **WK-5 · Cache de token Reddit por `creatorId` rompe multi-cuenta** `src/server/services/scheduler-publisher.ts:31-33`
+- [x] **WK-5 · Cache de token Reddit por `creatorId` rompe multi-cuenta** `src/server/services/scheduler-publisher.ts:31-33`
   - **Problema:** `tokenCacheKey(creatorId)` = `reddit:token:${creatorId}`, pero el esquema permite varias cuentas Reddit por creador. La segunda cuenta reutiliza el token cacheado de la primera dentro de la ventana de 50 min.
   - **Escenario:** publica posts y lee comentarios como el **usuario equivocado** (publisher y poller comparten la clave).
   - **Fix:** incluir el account id en la clave: `reddit:token:${creatorId}:${accountId}`.
 
-- [ ] **WK-6 · Poller de Twitter: contador `inserted` acumulado corrompe `last_comment_at`** `src/server/services/twitter-poller.ts:140,232-250` (mismo patrón en `reddit-poller.ts:129,244`)
+- [x] **WK-6 · Poller de Twitter: contador `inserted` acumulado corrompe `last_comment_at`** `src/server/services/twitter-poller.ts:140,232-250` (mismo patrón en `reddit-poller.ts:129,244`)
   - **Problema:** `inserted` se acumula a través de todos los posts del bucle; el `if (inserted>0)` se cumple para posts posteriores sin replies nuevas y les fija `last_comment_at=NOW()`. Como la siguiente búsqueda usa `start_time = lastCommentAt-60s`, cualquier reply anterior a ese `NOW()` artificial no capturada queda **fuera de la ventana para siempre** (sin paginación de `next_token`).
   - **Fix:** contador `insertedForPost` por iteración; fijar `last_comment_at` al `publishedAt` máximo real de los comments insertados; añadir paginación `next_token`.
 

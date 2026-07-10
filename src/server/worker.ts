@@ -486,7 +486,7 @@ const scheduledMessageWorker = new Worker<ScheduledMessageJobData>(
     const { scheduledMessageId, creatorId } = job.data;
     log.info({ jobId: job.id, scheduledMessageId }, "Processing scheduled message");
 
-    const { eq } = await import("drizzle-orm");
+    const { eq, and } = await import("drizzle-orm");
     const {
       scheduledMessages,
       messages: messagesTable,
@@ -494,12 +494,22 @@ const scheduledMessageWorker = new Worker<ScheduledMessageJobData>(
       contacts,
     } = await import("@/server/db/schema");
 
-    const scheduled = await db.query.scheduledMessages.findFirst({
-      where: eq(scheduledMessages.id, scheduledMessageId),
-    });
+    // WK-4: claim atómico. Un UPDATE condicional (status pending → sending)
+    // reserva el mensaje antes de insertarlo; si dos jobs coinciden, solo uno
+    // obtiene la fila (RETURNING) y el otro sale → sin doble envío.
+    const [scheduled] = await db
+      .update(scheduledMessages)
+      .set({ status: "sending", updatedAt: new Date() })
+      .where(
+        and(
+          eq(scheduledMessages.id, scheduledMessageId),
+          eq(scheduledMessages.status, "pending")
+        )
+      )
+      .returning();
 
-    if (!scheduled || scheduled.status !== "pending") {
-      log.warn({ scheduledMessageId }, "Scheduled message not found or not pending, skipping");
+    if (!scheduled) {
+      log.warn({ scheduledMessageId }, "Scheduled message not pending (already claimed/sent), skipping");
       return;
     }
 
@@ -614,10 +624,13 @@ async function checkScheduledMessagesToSend() {
     );
 
   for (const msg of pendingMessages) {
-    await scheduledMessageQueue.add("send", {
-      scheduledMessageId: msg.id,
-      creatorId: msg.creatorId,
-    });
+    // WK-4: jobId determinista para deduplicar el encolado. Sin él, si un tick
+    // anterior aún no se procesó, coexistían dos jobs para el mismo mensaje.
+    await scheduledMessageQueue.add(
+      "send",
+      { scheduledMessageId: msg.id, creatorId: msg.creatorId },
+      { jobId: `sched-msg-${msg.id}` }
+    );
     log.info({ scheduledMessageId: msg.id }, "Scheduled message enqueued for sending");
   }
 }
