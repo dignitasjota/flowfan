@@ -76,7 +76,9 @@ services:
     ports:
       - "5434:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U fanflow"]
+      # Usa el usuario/DB reales (no hardcodeados) para que el check sea válido
+      # aunque se configuren credenciales personalizadas.
+      test: ["CMD-SHELL", "pg_isready -U \"${POSTGRES_USER:-fanflow}\" -d \"${POSTGRES_DB:-fanflow}\""]
       interval: 10s
       timeout: 5s
       retries: 10
