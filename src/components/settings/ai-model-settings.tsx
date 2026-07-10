@@ -47,17 +47,22 @@ export function AIModelSettings() {
 
   const configQuery = trpc.aiConfig.get.useQuery();
 
+  // FE-8: no pisar ediciones en curso. refetchOnWindowFocus re-dispara el query
+  // al volver a la pestaña; sincronizar mientras `isEditing` revertía el form.
+  // Los valores "saved*" (referencia de la config en DB) sí se refrescan siempre.
   useEffect(() => {
     const data = configQuery.data;
     if (data) {
-      setProvider(data.provider);
-      setModel(data.model);
-      setApiKey(data.apiKey);
       setSavedProvider(data.provider);
       setSavedModel(data.model);
       setSavedApiKeyMasked(data.apiKey);
+      if (!isEditing) {
+        setProvider(data.provider);
+        setModel(data.model);
+        setApiKey(data.apiKey);
+      }
     }
-  }, [configQuery.data]);
+  }, [configQuery.data, isEditing]);
 
   const modelsQuery = trpc.aiConfig.getModels.useQuery();
 

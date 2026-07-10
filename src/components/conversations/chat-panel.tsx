@@ -2,11 +2,12 @@
 
 import { useState, useRef, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
-import { cn } from "@/lib/utils";
+import { cn, formatDateTimeLocal } from "@/lib/utils";
 import { useTrpcErrorHandler } from "@/hooks/useTrpcErrorHandler";
 import { useToast } from "@/components/ui/toast";
 import { MediaPicker } from "@/components/media/media-picker";
-import { useRealtimeContext } from "@/hooks/use-realtime";
+import { useRealtimePresence } from "@/hooks/use-realtime";
+import { useTyping } from "@/hooks/use-typing";
 import { useSession } from "next-auth/react";
 import { TypingIndicator } from "@/components/conversations/typing-indicator";
 import { ActiveViewers } from "@/components/conversations/active-viewers";
@@ -56,7 +57,7 @@ type Props = {
 
 export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact, highlightMessageId }: Props) {
   const { data: sessionData } = useSession();
-  const { typingUsers, conversationViewers } = useRealtimeContext();
+  const { typingUsers, conversationViewers } = useRealtimePresence();
   const currentTyping = typingUsers.get(conversation.id) ?? [];
   const currentViewers = conversationViewers.get(conversation.id) ?? [];
   const typingNames = currentTyping
@@ -81,6 +82,10 @@ export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const creatorTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  // FE-9: indicador de "escribiendo" para colaboradores en la misma conversación.
+  const { onKeyPress: onCreatorTyping, stop: stopCreatorTyping } = useTyping(
+    conversation.id
+  );
 
   // Listen for the global "focus reply" shortcut (fired by `r` keybinding).
   // In AI mode there is no creator textarea so the shortcut is a no-op.
@@ -214,6 +219,7 @@ export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact
       setFanMessageInput("");
     } else {
       setCreatorMessageInput("");
+      stopCreatorTyping();
     }
   }
 
@@ -551,7 +557,7 @@ export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact
                         type="datetime-local"
                         value={scheduleDate}
                         onChange={(e) => setScheduleDate(e.target.value)}
-                        min={new Date().toISOString().slice(0, 16)}
+                        min={formatDateTimeLocal(new Date())}
                         className="flex-1 rounded border border-gray-700 bg-gray-800 px-2 py-1 text-xs text-white focus:border-indigo-500 focus:outline-none"
                       />
                       <button
@@ -683,7 +689,11 @@ export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact
                     <textarea
                       ref={creatorTextareaRef}
                       value={creatorMessageInput}
-                      onChange={(e) => setCreatorMessageInput(e.target.value)}
+                      onChange={(e) => {
+                        setCreatorMessageInput(e.target.value);
+                        onCreatorTyping();
+                      }}
+                      onBlur={stopCreatorTyping}
                       onKeyDown={(e) => {
                         if (e.key === "Enter" && !e.shiftKey) {
                           e.preventDefault();
@@ -758,7 +768,7 @@ export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact
                   type="datetime-local"
                   value={scheduleManualDate}
                   onChange={(e) => setScheduleManualDate(e.target.value)}
-                  min={new Date().toISOString().slice(0, 16)}
+                  min={formatDateTimeLocal(new Date())}
                   className="flex-1 rounded border border-gray-700 bg-gray-800 px-2 py-1 text-xs text-white focus:border-indigo-500 focus:outline-none"
                 />
                 <button

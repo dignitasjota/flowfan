@@ -7,15 +7,21 @@ import { trpc } from "@/lib/trpc";
 import superjson from "superjson";
 import { SessionProvider } from "next-auth/react";
 import { ToastProvider } from "@/components/ui/toast";
-import { useRealtime, RealtimeContext } from "@/hooks/use-realtime";
+import {
+  useRealtime,
+  RealtimeMessagesContext,
+  RealtimePresenceContext,
+} from "@/hooks/use-realtime";
 
 function RealtimeConnection({ children }: { children: React.ReactNode }) {
-  const realtime = useRealtime();
+  const { messages, presence } = useRealtime();
 
   return (
-    <RealtimeContext.Provider value={realtime}>
-      {children}
-    </RealtimeContext.Provider>
+    <RealtimeMessagesContext.Provider value={messages}>
+      <RealtimePresenceContext.Provider value={presence}>
+        {children}
+      </RealtimePresenceContext.Provider>
+    </RealtimeMessagesContext.Provider>
   );
 }
 

@@ -4,6 +4,7 @@ import {
   createContext,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
   useCallback,
@@ -28,13 +29,21 @@ type ViewerInfo = {
   userName: string;
 };
 
-type RealtimeContextValue = {
+// FE-7: dos contextos separados en vez de uno monolítico. Antes cualquier evento
+// de typing/presence/viewing re-renderizaba TODOS los consumidores (cada
+// SidebarBadge + lista + chat). Ahora el sidebar/lista solo se suscriben a
+// "messages" y el chat solo a "presence", así un "está escribiendo" no repinta
+// los badges del sidebar.
+type RealtimeMessagesValue = {
   /** Conversation IDs with unread new messages */
   newMessageConversations: Set<string>;
   /** Mark a conversation as read (remove from set) */
   markConversationSeen: (conversationId: string) => void;
   /** SSE connection status */
   status: "connecting" | "connected" | "disconnected";
+};
+
+type RealtimePresenceValue = {
   /** Online team members */
   onlineMembers: Map<string, PresenceInfo>;
   /** Typing users per conversation */
@@ -43,17 +52,24 @@ type RealtimeContextValue = {
   conversationViewers: Map<string, ViewerInfo[]>;
 };
 
-export const RealtimeContext = createContext<RealtimeContextValue>({
+export const RealtimeMessagesContext = createContext<RealtimeMessagesValue>({
   newMessageConversations: new Set(),
   markConversationSeen: () => {},
   status: "disconnected",
+});
+
+export const RealtimePresenceContext = createContext<RealtimePresenceValue>({
   onlineMembers: new Map(),
   typingUsers: new Map(),
   conversationViewers: new Map(),
 });
 
-export function useRealtimeContext() {
-  return useContext(RealtimeContext);
+export function useRealtimeMessages() {
+  return useContext(RealtimeMessagesContext);
+}
+
+export function useRealtimePresence() {
+  return useContext(RealtimePresenceContext);
 }
 
 export function useRealtime() {
@@ -132,11 +148,16 @@ export function useRealtime() {
             utils.conversations.getById.invalidate({ id: conversationId });
             utils.conversations.list.invalidate();
 
-            setNewMessageConversations((prev) => {
-              const next = new Set(prev);
-              next.add(conversationId);
-              return next;
-            });
+            // FE-6: el servidor publica new_message también para role="creator"
+            // (tus propias respuestas). No enciendas el badge de "no leído" por
+            // un mensaje propio — solo los mensajes de fans cuentan como pendientes.
+            if (role === "fan") {
+              setNewMessageConversations((prev) => {
+                const next = new Set(prev);
+                next.add(conversationId);
+                return next;
+              });
+            }
 
             if (
               role === "fan" &&
@@ -328,12 +349,22 @@ export function useRealtime() {
     // nuevo en cada refetch de sesión y provocaba reconexiones constantes).
   }, [sessionStatus, session?.user?.id, utils, reconnectNonce]);
 
-  return {
-    newMessageConversations,
-    markConversationSeen,
-    status: connectionStatus,
-    onlineMembers,
-    typingUsers,
-    conversationViewers,
-  };
+  // FE-7: cada slice memoizada por separado. Un cambio en presence no genera un
+  // nuevo objeto `messages` (y viceversa), así el Provider correspondiente
+  // conserva referencia estable y no repinta a sus consumidores sin necesidad.
+  const messages = useMemo<RealtimeMessagesValue>(
+    () => ({
+      newMessageConversations,
+      markConversationSeen,
+      status: connectionStatus,
+    }),
+    [newMessageConversations, markConversationSeen, connectionStatus]
+  );
+
+  const presence = useMemo<RealtimePresenceValue>(
+    () => ({ onlineMembers, typingUsers, conversationViewers }),
+    [onlineMembers, typingUsers, conversationViewers]
+  );
+
+  return { messages, presence };
 }

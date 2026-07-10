@@ -4,6 +4,7 @@ import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/lib/trpc";
 import { useToast } from "@/components/ui/toast";
+import { Modal } from "@/components/ui/modal";
 
 type Contact = {
   id: string;
@@ -346,9 +347,12 @@ export function ContactPanel({ contact, conversationId, onBack }: Props) {
 
       {/* Delete confirmation modal */}
       {deleteTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-          <div className="mx-4 w-full max-w-sm rounded-xl border border-gray-700 bg-gray-900 p-6 shadow-2xl">
-            <h3 className="text-base font-semibold text-white">
+        <Modal
+          onClose={() => setDeleteTarget(null)}
+          labelledBy="delete-contact-title"
+          className="mx-4 w-full max-w-sm rounded-xl border border-gray-700 bg-gray-900 p-6 shadow-2xl"
+        >
+            <h3 id="delete-contact-title" className="text-base font-semibold text-white">
               Eliminar contacto
             </h3>
             <p className="mt-2 text-sm text-gray-400">
@@ -374,8 +378,7 @@ export function ContactPanel({ contact, conversationId, onBack }: Props) {
                 {deleteContact.isPending ? "Eliminando..." : "Eliminar"}
               </button>
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
     </div>
   );
@@ -437,16 +440,16 @@ function ReportModal({ reportId, onClose }: { reportId: string; onClose: () => v
   const { data, isLoading } = trpc.ai.getReport.useQuery({ reportId });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
-      <div
-        className="mx-4 max-h-[80vh] w-full max-w-lg overflow-y-auto rounded-lg border border-gray-700 bg-gray-900 p-6"
-        onClick={(e) => e.stopPropagation()}
-      >
+    <Modal
+      onClose={onClose}
+      labelledBy="report-modal-title"
+      className="mx-4 max-h-[80vh] w-full max-w-lg overflow-y-auto rounded-lg border border-gray-700 bg-gray-900 p-6"
+    >
         <div className="mb-4 flex items-center justify-between">
-          <h3 className="text-sm font-medium text-white">
+          <h3 id="report-modal-title" className="text-sm font-medium text-white">
             Informe — {data ? new Date(data.createdAt).toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "..."}
           </h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-white">
+          <button onClick={onClose} className="text-gray-400 hover:text-white" aria-label="Cerrar">
             ✕
           </button>
         </div>
@@ -459,8 +462,7 @@ function ReportModal({ reportId, onClose }: { reportId: string; onClose: () => v
             <ReportContent data={data.reportData as { overview: string; patterns: string[]; funnelPrediction: { nextStage: string; probability: number; timeframe: string }; riskLevel: string; recommendations: string[] }} />
           </>
         )}
-      </div>
-    </div>
+    </Modal>
   );
 }
 

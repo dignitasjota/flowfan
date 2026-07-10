@@ -4,7 +4,7 @@ import { useState, useMemo } from "react";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/lib/trpc";
 import { ConversationListSkeleton } from "@/components/ui/skeleton";
-import { useRealtimeContext } from "@/hooks/use-realtime";
+import { useRealtimeMessages } from "@/hooks/use-realtime";
 
 type Conversation = {
   id: string;
@@ -81,7 +81,7 @@ export function ConversationList({
   onSelect,
   isLoading,
 }: Props) {
-  const { newMessageConversations, markConversationSeen } = useRealtimeContext();
+  const { newMessageConversations, markConversationSeen } = useRealtimeMessages();
   const [searchTerm, setSearchTerm] = useState("");
   const [collapsedPlatforms, setCollapsedPlatforms] = useState<Set<string>>(
     new Set()
@@ -440,14 +440,26 @@ export function ConversationList({
                 {/* Conversation items */}
                 {!isCollapsed &&
                   convs.map((conv) => (
-                    <button
+                    // FE-10: contenedor como div[role=button] en vez de <button>.
+                    // Contenía otros <button> (fijar/archivar) → HTML inválido y
+                    // a11y rota (lectores anunciaban un solo control).
+                    <div
                       key={conv.id}
+                      role="button"
+                      tabIndex={0}
                       onClick={() => {
                         onSelect(conv.id);
                         markConversationSeen(conv.id);
                       }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          onSelect(conv.id);
+                          markConversationSeen(conv.id);
+                        }
+                      }}
                       className={cn(
-                        "group flex w-full items-center gap-3 border-b border-gray-800/50 px-4 py-3 text-left transition-colors",
+                        "group flex w-full cursor-pointer items-center gap-3 border-b border-gray-800/50 px-4 py-3 text-left transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-indigo-500",
                         selectedId === conv.id
                           ? "bg-gray-800"
                           : "hover:bg-gray-800/30"
@@ -547,7 +559,7 @@ export function ConversationList({
                           </button>
                         )}
                       </div>
-                    </button>
+                    </div>
                   ))}
               </div>
             );

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { trpc } from "@/lib/trpc";
 
 export function useTyping(conversationId: string | null) {
@@ -8,6 +8,17 @@ export function useTyping(conversationId: string | null) {
   const stopTyping = trpc.presence.stopTyping.useMutation();
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isTypingRef = useRef(false);
+
+  // FE-9: al cambiar de conversación (o desmontar), limpia el timer y resetea el
+  // flag. Sin esto, si cambiabas de conversación con isTypingRef=true, el nuevo
+  // onKeyPress quedaba suprimido 3s (creyendo que ya estabas "escribiendo") y el
+  // stopTyping pendiente disparaba sobre la conversación anterior.
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+      isTypingRef.current = false;
+    };
+  }, [conversationId]);
 
   const onKeyPress = useCallback(() => {
     if (!conversationId) return;

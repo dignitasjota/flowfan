@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { cn } from "@/lib/utils";
+import { cn, formatDateTimeLocal } from "@/lib/utils";
+import { Modal } from "@/components/ui/modal";
 import { trpc } from "@/lib/trpc";
 import { PostPreview } from "@/components/scheduler/post-preview";
 import { MediaUploader } from "@/components/scheduler/media-uploader";
@@ -40,13 +41,6 @@ const PLATFORM_ICONS: Record<string, string> = {
   twitter: "🐦",
   instagram: "📷",
 };
-
-function formatDateTimeLocal(d: Date): string {
-  const pad = (n: number) => n.toString().padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(
-    d.getHours()
-  )}:${pad(d.getMinutes())}`;
-}
 
 type RedditKind = "self" | "link" | "image" | "video" | "videogif";
 type Frequency = "daily" | "weekly" | "monthly";
@@ -283,12 +277,17 @@ export function PostComposer({
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div className="w-full max-w-xl rounded-xl border border-gray-800 bg-gray-900 p-6 shadow-2xl">
+    <Modal
+      onClose={onClose}
+      closeOnBackdrop={false}
+      labelledBy="post-composer-title"
+      className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-xl border border-gray-800 bg-gray-900 p-6 shadow-2xl"
+    >
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-white">Programar publicación</h2>
+          <h2 id="post-composer-title" className="text-lg font-semibold text-white">Programar publicación</h2>
           <button
             onClick={onClose}
+            aria-label="Cerrar"
             className="rounded-md p-1 text-gray-500 hover:bg-gray-800 hover:text-white"
           >
             ✕
@@ -822,7 +821,6 @@ export function PostComposer({
             {create.isPending ? "Programando..." : "Programar"}
           </button>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

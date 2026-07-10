@@ -10,7 +10,7 @@ import { useTheme } from "@/hooks/useTheme";
 import { useSession } from "next-auth/react";
 import { TeamSwitcher } from "./team-switcher";
 import { GlobalSearch } from "./global-search";
-import { useRealtimeContext } from "@/hooks/use-realtime";
+import { useRealtimeMessages } from "@/hooks/use-realtime";
 import Image from "next/image";
 
 // access: "all" = any team member, "manager" = owner+manager, "owner" = owner only
@@ -216,7 +216,7 @@ export function Sidebar({ user }: SidebarProps) {
 }
 
 function SidebarBadge({ href }: { href: string }) {
-  const realtime = useRealtimeContext();
+  const realtime = useRealtimeMessages();
 
   // Only enable the comments query for the comments item to avoid global polling
   const isCommentsItem = href === "/comments";

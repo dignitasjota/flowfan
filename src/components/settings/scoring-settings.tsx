@@ -101,16 +101,18 @@ export function ScoringSettings() {
   });
 
   // Sync from query
+  // FE-8: no pisar ediciones sin guardar. refetchOnWindowFocus está activo, así
+  // que un alt-tab re-dispara el query; sincronizar sin comprobar `dirty`
+  // revertía lo que el usuario estaba editando.
   useEffect(() => {
-    if (configQuery.data) {
+    if (configQuery.data && !dirty) {
       setEw(configQuery.data.ew);
       setPw(configQuery.data.pw);
       setBm(configQuery.data.bm);
       setFt(configQuery.data.ft);
       setAf(configQuery.data.af);
-      setDirty(false);
     }
-  }, [configQuery.data]);
+  }, [configQuery.data, dirty]);
 
   const updateEw = useCallback((key: string, val: number) => {
     setEw((prev) => ({ ...prev, [key]: val }));

@@ -121,11 +121,19 @@ export function SchedulerCalendar({ posts, onSelectPost, onSelectDay }: Props) {
           const dayPosts = postsByDay.get(key) ?? [];
           const isToday = key === todayKey;
           return (
-            <button
+            <div
               key={key}
+              role="button"
+              tabIndex={0}
               onClick={() => onSelectDay?.(cell.date)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onSelectDay?.(cell.date);
+                }
+              }}
               className={cn(
-                "min-h-[88px] border-b border-r border-gray-800 p-1 text-left align-top transition hover:bg-gray-800/40",
+                "min-h-[88px] cursor-pointer border-b border-r border-gray-800 p-1 text-left align-top transition hover:bg-gray-800/40 focus:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-indigo-500",
                 !cell.inMonth && "bg-gray-950/40 text-gray-600"
               )}
             >
@@ -190,7 +198,7 @@ export function SchedulerCalendar({ posts, onSelectPost, onSelectDay }: Props) {
                   </div>
                 )}
               </div>
-            </button>
+            </div>
           );
         })}
       </div>
