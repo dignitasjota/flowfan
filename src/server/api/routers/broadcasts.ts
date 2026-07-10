@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { eq, and, desc, count } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
-import { createTRPCRouter, protectedProcedure } from "../trpc";
+import { createTRPCRouter, protectedProcedure, managerProcedure } from "../trpc";
 import {
   broadcasts,
   broadcastRecipients,
@@ -94,7 +94,7 @@ export const broadcastsRouter = createTRPCRouter({
       return broadcast ?? null;
     }),
 
-  create: protectedProcedure
+  create: managerProcedure
     .input(
       z.object({
         name: z.string().min(1).max(255),
@@ -121,7 +121,7 @@ export const broadcastsRouter = createTRPCRouter({
       return created;
     }),
 
-  update: protectedProcedure
+  update: managerProcedure
     .input(
       z.object({
         id: z.string().uuid(),
@@ -170,7 +170,7 @@ export const broadcastsRouter = createTRPCRouter({
       return updated;
     }),
 
-  delete: protectedProcedure
+  delete: managerProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       const existing = await ctx.db.query.broadcasts.findFirst({
@@ -227,7 +227,7 @@ export const broadcastsRouter = createTRPCRouter({
       return { total: result.total, segmentName: segment.name };
     }),
 
-  send: protectedProcedure
+  send: managerProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       const broadcast = await ctx.db.query.broadcasts.findFirst({
@@ -301,7 +301,7 @@ export const broadcastsRouter = createTRPCRouter({
       return updated;
     }),
 
-  schedule: protectedProcedure
+  schedule: managerProcedure
     .input(
       z.object({
         id: z.string().uuid(),
@@ -367,7 +367,7 @@ export const broadcastsRouter = createTRPCRouter({
       return updated;
     }),
 
-  cancel: protectedProcedure
+  cancel: managerProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       const existing = await ctx.db.query.broadcasts.findFirst({
@@ -406,7 +406,7 @@ export const broadcastsRouter = createTRPCRouter({
       return updated;
     }),
 
-  duplicate: protectedProcedure
+  duplicate: managerProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       const existing = await ctx.db.query.broadcasts.findFirst({

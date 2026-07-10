@@ -2,7 +2,7 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { randomBytes } from "crypto";
-import { createTRPCRouter, protectedProcedure } from "../trpc";
+import { createTRPCRouter, protectedProcedure, ownerProcedure } from "../trpc";
 import { createChildLogger } from "@/lib/logger";
 import { telegramBotConfigs } from "@/server/db/schema";
 import { encrypt, decrypt } from "@/lib/crypto";
@@ -52,7 +52,7 @@ export const telegramRouter = createTRPCRouter({
   /**
    * Connect a Telegram bot by providing a bot token.
    */
-  connect: protectedProcedure
+  connect: ownerProcedure
     .input(z.object({ botToken: z.string().min(20) }))
     .mutation(async ({ ctx, input }) => {
       await checkTelegramAccess(ctx.db, ctx.creatorId);
@@ -131,7 +131,7 @@ export const telegramRouter = createTRPCRouter({
   /**
    * Disconnect the Telegram bot.
    */
-  disconnect: protectedProcedure.mutation(async ({ ctx }) => {
+  disconnect: ownerProcedure.mutation(async ({ ctx }) => {
     const config = await ctx.db.query.telegramBotConfigs.findFirst({
       where: eq(telegramBotConfigs.creatorId, ctx.creatorId),
     });
@@ -161,7 +161,7 @@ export const telegramRouter = createTRPCRouter({
   /**
    * Update auto-reply and message settings.
    */
-  updateSettings: protectedProcedure
+  updateSettings: ownerProcedure
     .input(
       z.object({
         autoReplyEnabled: z.boolean().optional(),

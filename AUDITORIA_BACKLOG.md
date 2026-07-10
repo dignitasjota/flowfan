@@ -108,17 +108,17 @@ Backlog de hallazgos de la auditoría en profundidad del proyecto. Cada item tie
 
 ### Multi-tenancy / permisos
 
-- [ ] **TEN-7 · `broadcasts` completo en `protectedProcedure`** `src/server/api/routers/broadcasts.ts:97,173,230,304`
+- [x] **TEN-7 · `broadcasts` completo en `protectedProcedure`** `src/server/api/routers/broadcasts.ts:97,173,230,304`
   - **Problema:** `create`, `delete`, `send` y `schedule` no exigen manager.
   - **Escenario:** un chatter lanza un envío masivo a todo un segmento (acción irreversible una vez encolada).
   - **Fix:** `managerProcedure` (o `permissionProcedure`) para create/update/delete/send/schedule.
 
-- [ ] **TEN-8 · `telegram.connect/disconnect/updateSettings` sin gating de owner** `src/server/api/routers/telegram.ts:55,134,164`
+- [x] **TEN-8 · `telegram.connect/disconnect/updateSettings` sin gating de owner** `src/server/api/routers/telegram.ts:55,134,164`
   - **Problema:** guardar/reemplazar el bot token es equivalente a `scheduler.connectReddit` (que sí es `ownerProcedure`).
   - **Escenario:** un chatter reemplaza el bot token (hijack del canal saliente) o lo desconecta.
   - **Fix:** `ownerProcedure`.
 
-- [ ] **TEN-9 · `revenue.create/update/delete` en `protectedProcedure`** `src/server/api/routers/revenue.ts:10,62,102`
+- [x] **TEN-9 · `revenue.create/update/delete` en `protectedProcedure`** `src/server/api/routers/revenue.ts:10,62,102`
   - **Problema:** un chatter puede fabricar, editar o borrar transacciones. Efecto colateral: `contacts.delete` decide archivar vs hard-delete según existan transacciones → borrándolas primero se habilita el **hard delete en cascada** del historial. El `update` (línea 92-96) hace el UPDATE final solo por `id` (seguro solo por el findFirst previo; frágil ante refactors).
   - **Fix:** `managerProcedure` en las 3 mutaciones y mantener `creatorId` en el `.where()` del update.
 

@@ -1,13 +1,13 @@
 import { z } from "zod";
 import { eq, and, gte, lte, sql, desc, count, sum } from "drizzle-orm";
-import { createTRPCRouter, protectedProcedure } from "../trpc";
+import { createTRPCRouter, protectedProcedure, managerProcedure } from "../trpc";
 import { fanTransactions, contacts, contactProfiles, messages, conversations } from "@/server/db/schema";
 import { checkRevenueAccess } from "@/server/services/usage-limits";
 import { dispatchWebhookEvent } from "@/server/services/webhook-dispatcher";
 
 export const revenueRouter = createTRPCRouter({
   // Registrar transacción
-  create: protectedProcedure
+  create: managerProcedure
     .input(
       z.object({
         contactId: z.string().uuid(),
@@ -59,7 +59,7 @@ export const revenueRouter = createTRPCRouter({
     }),
 
   // Editar transacción
-  update: protectedProcedure
+  update: managerProcedure
     .input(
       z.object({
         id: z.string().uuid(),
@@ -99,7 +99,7 @@ export const revenueRouter = createTRPCRouter({
     }),
 
   // Eliminar transacción
-  delete: protectedProcedure
+  delete: managerProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       await checkRevenueAccess(ctx.db, ctx.creatorId, "basic");
