@@ -74,12 +74,12 @@ Backlog de hallazgos de la auditoría en profundidad del proyecto. Cada item tie
 
 ### Seguridad
 
-- [ ] **SEC-1 · Tokens secretos escritos en logs en claro** `src/app/api/auth/register/route.ts:100`, `src/app/api/auth/forgot-password/route.ts:57`
+- [x] **SEC-1 · Tokens secretos escritos en logs en claro** `src/app/api/auth/register/route.ts:100`, `src/app/api/auth/forgot-password/route.ts:57`
   - **Problema:** `log.info({ email, verifyUrl })` y `log.info({ email, resetUrl })` registran las URLs completas con `emailVerificationToken` / `resetToken`.
   - **Escenario:** cualquiera con acceso a logs verifica cuentas ajenas y **resetea la contraseña de cualquier usuario** cuyo `forgot-password` se haya disparado (token válido 1h = control total).
   - **Fix:** no loguear la URL ni el token; como mucho el `email` o un hash del token a nivel debug.
 
-- [ ] **SEC-2 · SSRF vía URL de webhook saliente + exfiltración de respuesta** `src/server/api/routers/webhooks-outgoing.ts:34` + `src/server/services/webhook-dispatcher.ts:86,98-107`
+- [x] **SEC-2 · SSRF vía URL de webhook saliente + exfiltración de respuesta** `src/server/api/routers/webhooks-outgoing.ts:34` + `src/server/services/webhook-dispatcher.ts:86,98-107`
   - **Problema:** la creación valida solo `z.string().url()` (sin restricción de host/IP); la entrega hace `fetch(url)` directo y guarda `responseBody.slice(0,2000)` en `webhookDeliveryLogs`, recuperable por el owner.
   - **Escenario:** owner configura webhook a `http://169.254.169.254/latest/meta-data/...` o servicios internos del VPS, dispara `testWebhook` y **lee la respuesta interna en los delivery logs**.
   - **Fix:** bloquear IPs privadas/loopback/link-local/metadata (resolver DNS y re-chequear antes del fetch), o allowlist/proxy egress. No almacenar el cuerpo de respuestas de destinos no verificados.

@@ -3,6 +3,7 @@ import { eq, and } from "drizzle-orm";
 import { webhookConfigs, webhookDeliveryLogs } from "@/server/db/schema";
 import { webhookDeliveryQueue } from "@/server/queues";
 import { createChildLogger } from "@/lib/logger";
+import { assertPublicHttpUrl } from "@/lib/ssrf";
 
 const log = createChildLogger("webhook-dispatcher");
 
@@ -83,6 +84,10 @@ export async function deliverWebhook(
     .returning({ id: webhookDeliveryLogs.id });
 
   try {
+    // SEC-2: validar destino justo antes del fetch (bloquea IPs privadas/
+    // metadata; evita TOCTOU frente a validar solo al crear el webhook).
+    await assertPublicHttpUrl(url);
+
     const response = await fetch(url, {
       method: "POST",
       headers: {
@@ -92,6 +97,7 @@ export async function deliverWebhook(
         "User-Agent": "FanFlow-Webhooks/1.0",
       },
       body,
+      redirect: "manual", // no seguir redirecciones a destinos internos
       signal: AbortSignal.timeout(10_000),
     });
 

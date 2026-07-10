@@ -54,7 +54,8 @@ export async function POST(req: Request) {
 
   // Send password reset email
   const resetUrl = `${process.env.NEXTAUTH_URL}/reset-password?token=${token}`;
-  log.info({ email, resetUrl }, "Password reset URL generated");
+  // SEC-1: no loguear la URL ni el token de reseteo (control total de la cuenta).
+  log.info({ email }, "Password reset enqueued");
 
   try {
     const { emailQueue } = await import("@/server/queues");

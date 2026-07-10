@@ -1,11 +1,25 @@
 import { z } from "zod";
 import { eq, and, desc } from "drizzle-orm";
 import { randomBytes } from "crypto";
+import { TRPCError } from "@trpc/server";
 import { createTRPCRouter, ownerProcedure } from "../trpc";
 import { webhookConfigs, webhookDeliveryLogs } from "@/server/db/schema";
 import { checkWebhookAccess } from "@/server/services/usage-limits";
 import { dispatchWebhookEvent } from "@/server/services/webhook-dispatcher";
 import { encrypt } from "@/lib/crypto";
+import { assertPublicHttpUrl } from "@/lib/ssrf";
+
+/** Valida la URL de webhook y traduce el error a TRPCError (SEC-2). */
+async function assertSafeWebhookUrl(url: string): Promise<void> {
+  try {
+    await assertPublicHttpUrl(url);
+  } catch (err) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: err instanceof Error ? err.message : "URL de destino no permitida",
+    });
+  }
+}
 
 const WEBHOOK_EVENTS = [
   "contact.created",
@@ -38,6 +52,9 @@ export const webhooksOutgoingRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       await checkWebhookAccess(ctx.db, ctx.creatorId);
 
+      // SEC-2: rechazar destinos internos ya al crear (feedback inmediato).
+      await assertSafeWebhookUrl(input.url);
+
       const secret = randomBytes(32).toString("hex");
       const encryptedSecret = encrypt(secret);
 
@@ -65,6 +82,10 @@ export const webhooksOutgoingRouter = createTRPCRouter({
     }))
     .mutation(async ({ ctx, input }) => {
       const { id, ...updates } = input;
+      // SEC-2: validar el destino si se cambia la URL.
+      if (updates.url) {
+        await assertSafeWebhookUrl(updates.url);
+      }
       await ctx.db
         .update(webhookConfigs)
         .set({ ...updates, updatedAt: new Date() })
