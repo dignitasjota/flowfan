@@ -277,9 +277,9 @@ LOG_LEVEL=info  # debug | info | warn | error
 
 ---
 
-## 11. Tests — Suite completa (855+ tests)
+## 11. Tests — Suite completa (900+ tests)
 
-**Configuración**: `vitest.config.mts` + `__tests__/setup.ts` (mocks de Redis, variables de entorno). Nota: el config es `.mts` (ESM) para compatibilidad con Vitest 4 + std-env 4.x. Las tablas de abajo reflejan el subconjunto core de marzo 2026; hoy hay **69 ficheros de test / 855 tests unitarios+integración en verde** (+ 9 E2E opt-in que requieren `TEST_DATABASE_URL`). Ver `__tests__/` para la cobertura completa (incluye scheduler, social-comments, media/R2, publishers de IG/X/Reddit, recurrence, blog-to-social, audience-insights, etc.).
+**Configuración**: `vitest.config.mts` + `__tests__/setup.ts` (mocks de Redis, variables de entorno). Nota: el config es `.mts` (ESM) para compatibilidad con Vitest 4 + std-env 4.x. Las tablas de abajo reflejan el subconjunto core de marzo 2026; hoy hay **77 ficheros de test / 904 tests unitarios+integración en verde** (+ 9 E2E opt-in que requieren `TEST_DATABASE_URL`). Ver `__tests__/` para la cobertura completa (incluye scheduler, social-comments, media/R2, publishers de IG/X/Reddit, recurrence, blog-to-social, audience-insights, etc.).
 
 ### Tests unitarios — Servicios
 | Archivo | Tests | Qué cubre |
@@ -469,7 +469,15 @@ Estado verificado contra el código el 2026-07-10.
 
 > Cada feature con schema nuevo requiere su `npm run db:push` (columnas/tablas): email verification, A/B mensajes, PWA (push_subscriptions), referidos.
 
-**Deuda técnica / bugs**: ver [`AUDITORIA_BACKLOG.md`](./AUDITORIA_BACKLOG.md) (48 hallazgos priorizados de la auditoría de seguridad/workers/routers/IA/frontend).
+**Deuda técnica / bugs — auditoría (2026-07-02)**: ver [`AUDITORIA_BACKLOG.md`](./AUDITORIA_BACKLOG.md) (48 hallazgos priorizados de seguridad/workers/routers/IA/frontend). Estado de remediación:
+- [x] **Críticos (9/9)** resueltos — IDORs cross-tenant en `sequences`/`intelligence`/`team`, model IDs de Anthropic, fuga de conexiones Redis SSE, doble publicación en scheduled posts.
+- [x] **Altos (17/17)** resueltos.
+- [x] **Medios** — todos los accionables resueltos (SEC-3/4/5/6, AI-6/7/9/10, TEN-10/11/12/13, WK-7/9/11/12/13/14, FE-6..12). **Diferidos con nota**: AI-8 y WK-8 (requieren contador de uso en Redis / rediseño del refresh rotativo de Twitter → se abordan con ARCH-2/7); **parciales**: WK-10 (delta de sentimiento corregido; lost-update por concurrencia a ARCH-9) y WK-13 (cooldown cierra el bucle; índice único de `sequenceEnrollments` pendiente de migración).
+- [ ] **Bajos** (SEC-7..11, TEN-14/15, WK-15) y **mejoras ARCH-1..11**: pendientes, no bloqueantes.
+
+Cambios de infraestructura introducidos por la remediación: `src/lib/ssrf.ts` (anti-SSRF), `src/lib/request-ip.ts` (X-Forwarded-For con `TRUSTED_PROXY_HOPS`), `src/lib/redis-connection.ts` (`getRedisConnectionOptions()` — factoría única que respeta password/TLS/DB de `REDIS_URL`), `src/components/ui/modal.tsx` (overlay accesible reutilizable) y split del contexto realtime en `useRealtimeMessages()` / `useRealtimePresence()`.
+
+> ⚠️ **Migración pendiente**: el índice único parcial de `sequenceEnrollments` (WK-13) requiere un `npm run db:generate` + `db:push`.
 
 ---
 
