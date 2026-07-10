@@ -5,7 +5,7 @@ import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
 
 const providers = [
-  { value: "anthropic", label: "Anthropic (Claude)", defaultModel: "claude-sonnet-4-6-20250514" },
+  { value: "anthropic", label: "Anthropic (Claude)", defaultModel: "claude-sonnet-4-6" },
   { value: "openai", label: "OpenAI (GPT-4)", defaultModel: "gpt-4o" },
   { value: "google", label: "Google (Gemini)", defaultModel: "gemini-2.5-pro" },
 ] as const;

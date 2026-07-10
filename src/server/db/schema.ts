@@ -366,7 +366,7 @@ export const aiConfigs = pgTable("ai_configs", {
     .unique()
     .references(() => creators.id, { onDelete: "cascade" }),
   provider: aiProviderEnum("provider").default("anthropic").notNull(),
-  model: varchar("model", { length: 100 }).notNull().default("claude-sonnet-4-6-20250514"),
+  model: varchar("model", { length: 100 }).notNull().default("claude-sonnet-4-6"),
   apiKey: text("api_key").notNull(),
   isActive: boolean("is_active").default(true).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),

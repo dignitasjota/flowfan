@@ -24,7 +24,7 @@ Backlog de hallazgos de la auditoría en profundidad del proyecto. Cada item tie
 
 ## 🔴 Críticos (bloqueantes / impacto directo en producto o datos entre tenants)
 
-- [ ] **AI-1 · Model IDs de Anthropic inválidos → 404 garantizado** `src/server/services/ai.ts:77-78`
+- [x] **AI-1 · Model IDs de Anthropic inválidos → 404 garantizado** `src/server/services/ai.ts:77-78` — ✅ Corregidos a `claude-sonnet-4-6`/`claude-opus-4-6` (sin fecha), default del schema actualizado, script `npm run fix:anthropic-model-ids` para migrar configs existentes.
   - **Problema:** `claude-sonnet-4-6-20250514` y `claude-opus-4-6-20250514` no existen. Los alias correctos son `claude-sonnet-4-6` y `claude-opus-4-6` **sin sufijo de fecha** (y `20250514` no corresponde a esos modelos). Solo `claude-haiku-4-5-20251001` es válido.
   - **Escenario:** cualquier creador que seleccione Sonnet u Opus en Settings → **toda llamada Anthropic devuelve 404**. El proveedor principal está roto para 2 de sus 3 modelos.
   - **Fix:** corregir a `claude-sonnet-4-6` / `claude-opus-4-6` en `PROVIDER_MODELS` + script de migración de filas existentes en `aiConfigs`/`aiModelAssignments`.
