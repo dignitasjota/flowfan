@@ -98,20 +98,22 @@ export function SlashTemplateMenu({
 
     function onKeyDown(e: KeyboardEvent) {
       if (!slash || filtered.length === 0) return;
-      if (e.key === "ArrowDown") {
+      // FE-4: stopPropagation además de preventDefault. Sin él, el evento
+      // burbujea y el onKeyDown sintético del textarea (React lo adjunta en el
+      // root) también se ejecuta → Enter encolaba el texto crudo "/salu".
+      if (["ArrowDown", "ArrowUp", "Enter", "Tab", "Escape"].includes(e.key)) {
         e.preventDefault();
+        e.stopPropagation();
+      }
+      if (e.key === "ArrowDown") {
         setHighlight((h) => (h + 1) % filtered.length);
       } else if (e.key === "ArrowUp") {
-        e.preventDefault();
         setHighlight((h) => (h - 1 + filtered.length) % filtered.length);
       } else if (e.key === "Enter") {
-        e.preventDefault();
         applyTemplate(filtered[highlight]);
       } else if (e.key === "Tab") {
-        e.preventDefault();
         applyTemplate(filtered[highlight]);
       } else if (e.key === "Escape") {
-        e.preventDefault();
         // Replace the slash range with empty so the menu closes
         const next = value.slice(0, slash.start) + value.slice(slash.end);
         onInsert(next);

@@ -4,7 +4,6 @@ import { useState, useEffect, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
-import { useQueryClient } from "@tanstack/react-query";
 import { ConversationList } from "@/components/conversations/conversation-list";
 import { ChatPanel } from "@/components/conversations/chat-panel";
 import { ContactPanel } from "@/components/conversations/contact-panel";
@@ -29,7 +28,6 @@ export default function ConversationsPage() {
     }
   }, [searchParams]);
 
-  const queryClient = useQueryClient();
   const utils = trpc.useUtils();
   const conversationsQuery = trpc.conversations.list.useQuery();
   const conversationQuery = trpc.conversations.getById.useQuery(
@@ -121,6 +119,9 @@ export default function ConversationsPage() {
       >
         {hasConversation ? (
           <ChatPanel
+            // FE-2: remontar al cambiar de conversación para resetear el estado
+            // local (cola manual, sugerencias, inputs) y no arrastrarlo al fan B.
+            key={conversationQuery.data!.id}
             conversation={{
               ...conversationQuery.data!,
               messages: conversationQuery.data!.messages.map((m) => ({
@@ -131,8 +132,10 @@ export default function ConversationsPage() {
             onMessageSent={() => {
               utils.conversations.getById.invalidate({ id: selectedConversationId! });
               utils.conversations.list.invalidate();
-              queryClient.invalidateQueries({
-                queryKey: [["intelligence.getContactScoring"]],
+              // FE-5: invalidación tRPC real (la key manual con string-punto no
+              // matcheaba nada → el scoring del panel quedaba obsoleto).
+              utils.intelligence.getContactScoring.invalidate({
+                contactId: conversationQuery.data!.contact.id,
               });
             }}
             onBack={handleBack}

@@ -143,21 +143,21 @@ Backlog de hallazgos de la auditoría en profundidad del proyecto. Cada item tie
 
 ### Frontend / realtime
 
-- [ ] **FE-2 · El estado del ChatPanel se filtra entre conversaciones** `src/components/conversations/chat-panel.tsx:66-80` + `src/app/(dashboard)/conversations/page.tsx:123`
+- [x] **FE-2 · El estado del ChatPanel se filtra entre conversaciones** `src/components/conversations/chat-panel.tsx:66-80` + `src/app/(dashboard)/conversations/page.tsx:123`
   - **Problema:** `ChatPanel` se monta una vez y solo cambia la prop `conversation`; nada resetea `manualQueue`, `suggestions`, `variants`, inputs ni `showScheduleFor` al cambiar de conversación.
   - **Escenario:** encolas 3 mensajes para el fan A, pulsas `j`, "Guardar todo" → `handleSendManual` usa `conversation.id` actual → **se guardan en la conversación del fan B**. Igual con "Usar" una sugerencia IA.
   - **Fix:** `<ChatPanel key={conversationQuery.data.id} ... />` en la página. Una línea.
 
-- [ ] **FE-3 · Reconexión SSE: teardown por identidad de objeto y sin recuperación tras fallo fatal** `src/hooks/use-realtime.ts:308,298`
+- [x] **FE-3 · Reconexión SSE: teardown por identidad de objeto y sin recuperación tras fallo fatal** `src/hooks/use-realtime.ts:308,298`
   - **Problema:** el efecto que crea el `EventSource` depende de `session?.user` (objeto nuevo en cada refetch de sesión) → cierra/reabre la conexión constantemente (y por FE-1 huérfana una conexión Redis cada ciclo). Además `es.onerror` confía en la auto-reconexión del navegador, pero ante 401/HTML el `EventSource` pasa a `CLOSED` **permanentemente** sin backoff.
   - **Fix:** depender de `session?.user?.id`; en `onerror`, si `readyState===CLOSED`, recrear con backoff exponencial (cap ~30s).
 
-- [ ] **FE-4 · Enter en el menú de templates dispara también el `onKeyDown` del textarea** `src/components/conversations/slash-template-menu.tsx:107-121` + `chat-panel.tsx:639-644`
+- [x] **FE-4 · Enter en el menú de templates dispara también el `onKeyDown` del textarea** `src/components/conversations/slash-template-menu.tsx:107-121` + `chat-panel.tsx:639-644`
   - **Problema:** el menú registra un listener nativo con `e.preventDefault()` pero **sin `e.stopPropagation()`**; el `onKeyDown` sintético de React sigue ejecutándose.
   - **Escenario:** escribes `/salu` + Enter → se ejecutan ambos: `addToQueue("creator","/salu")` encola el texto crudo y `onInsert` re-rellena el textarea → **mensaje basura `/salu` en la cola**.
   - **Fix:** `e.stopPropagation()` en el handler nativo para Enter/Tab/Escape/flechas.
 
-- [ ] **FE-5 · Invalidación con query key inválida: el scoring nunca se refresca** `src/app/(dashboard)/conversations/page.tsx:134-136`
+- [x] **FE-5 · Invalidación con query key inválida: el scoring nunca se refresca** `src/app/(dashboard)/conversations/page.tsx:134-136`
   - **Problema:** `queryClient.invalidateQueries({ queryKey: [["intelligence.getContactScoring"]] })` — en tRPC v11 las keys son `[["intelligence","getContactScoring"], {...}]` (segmentos separados). La invalidación **no matchea nada, silenciosamente**.
   - **Escenario:** tras enviar mensajes, el panel de contacto sigue mostrando probabilidad de pago / factores / funnel stage obsoletos.
   - **Fix:** `utils.intelligence.getContactScoring.invalidate({ contactId })`.

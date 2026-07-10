@@ -76,6 +76,11 @@ export function useRealtime() {
   >(new Map());
   const eventSourceRef = useRef<EventSource | null>(null);
   const notificationPermissionAsked = useRef(false);
+  // FE-3: reconexión con backoff cuando el EventSource cae a CLOSED
+  // (401/HTML tras un deploy o sesión expirada) — el navegador no reconecta solo.
+  const [reconnectNonce, setReconnectNonce] = useState(0);
+  const reconnectAttempt = useRef(0);
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const markConversationSeen = useCallback((conversationId: string) => {
     setNewMessageConversations((prev) => {
@@ -104,6 +109,7 @@ export function useRealtime() {
     eventSourceRef.current = es;
 
     es.onopen = () => {
+      reconnectAttempt.current = 0; // reset backoff al conectar
       setConnectionStatus("connected");
     };
 
@@ -297,15 +303,30 @@ export function useRealtime() {
 
     es.onerror = () => {
       setConnectionStatus("disconnected");
-      // EventSource reconnects automatically
+      // El navegador reconecta solo mientras readyState es CONNECTING. Si pasa a
+      // CLOSED (401/HTML), reprogramamos una reconexión con backoff exponencial
+      // (cap 30s) incrementando el nonce → el efecto se re-ejecuta y recrea el ES.
+      if (es.readyState === EventSource.CLOSED) {
+        es.close();
+        const delay = Math.min(30_000, 1000 * 2 ** reconnectAttempt.current);
+        reconnectAttempt.current += 1;
+        if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
+        reconnectTimer.current = setTimeout(
+          () => setReconnectNonce((n) => n + 1),
+          delay
+        );
+      }
     };
 
     return () => {
+      if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
       es.close();
       eventSourceRef.current = null;
       setConnectionStatus("disconnected");
     };
-  }, [sessionStatus, session?.user, utils]);
+    // FE-3: depender de session?.user?.id (no del objeto session.user, que es
+    // nuevo en cada refetch de sesión y provocaba reconexiones constantes).
+  }, [sessionStatus, session?.user?.id, utils, reconnectNonce]);
 
   return {
     newMessageConversations,
