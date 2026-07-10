@@ -1,7 +1,20 @@
-import { callAIProvider, type AIConfig } from "./ai";
+import { callAIProvider, stripThinkingBlocks, type AIConfig } from "./ai";
 import { createChildLogger } from "@/lib/logger";
 
 const log = createChildLogger("message-classifier");
+
+/**
+ * AI-10: parser tolerante (igual que el resto de servicios de IA). Antes hacía
+ * JSON.parse(result.text) crudo → con modelos que envuelven en ```json o emiten
+ * <think>, fallaba siempre y caía a general/0.5 en silencio.
+ */
+function tolerantParse(text: string): { category?: string; confidence?: number } {
+  let cleaned = stripThinkingBlocks(text).replace(/```(?:json)?/gi, "").trim();
+  const start = cleaned.indexOf("{");
+  const end = cleaned.lastIndexOf("}");
+  if (start !== -1 && end > start) cleaned = cleaned.slice(start, end + 1);
+  return JSON.parse(cleaned);
+}
 
 export type MessageCategory = "urgent" | "price_inquiry" | "spam" | "general";
 
@@ -19,15 +32,17 @@ const KEYWORD_PATTERNS: { category: MessageCategory; patterns: RegExp[] }[] = [
   },
   {
     category: "urgent",
+    // AI-10: quitado solo "ya" (muy común en coloquial: "ya veo", "ya lo hice").
     patterns: [
-      /\b(urgente|ahora|ya|necesito|rapido|emergencia|importante|asap|please now|right now|hurry)\b/i,
+      /\b(urgente|ahora|necesito|rapido|emergencia|importante|asap|please now|right now|hurry)\b/i,
     ],
   },
   {
     category: "spam",
+    // AI-10: quitados "free" (colisiona con "feel free to ask") y "link" (mención
+    // normal). Las URLs múltiples se detectan aparte (ver classifyByKeywords).
     patterns: [
-      /\b(gratis|free|sorteo|click|enlace|link|promo|descuento|gana|winner|lottery)\b/i,
-      /(https?:\/\/\S+){2,}/i, // Multiple URLs
+      /\b(gratis|sorteo|click|enlace|promo|descuento|gana|winner|lottery)\b/i,
     ],
   },
 ];
@@ -43,6 +58,10 @@ function classifyByKeywords(message: string): ClassificationResult | null {
         return { category, confidence: 0.7 };
       }
     }
+  }
+  // AI-10: 2+ URLs (en cualquier posición, no solo consecutivas) → spam.
+  if ((message.match(/https?:\/\/\S+/gi)?.length ?? 0) >= 2) {
+    return { category: "spam", confidence: 0.7 };
   }
   return null;
 }
@@ -77,7 +96,7 @@ No incluyas nada mas. Plataforma: ${platformType}`;
       100
     );
 
-    const parsed = JSON.parse(result.text);
+    const parsed = tolerantParse(result.text);
     const category = parsed.category as string;
     const confidence = Number(parsed.confidence) || 0.5;
 

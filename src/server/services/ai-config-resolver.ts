@@ -40,7 +40,11 @@ export async function resolveAIConfig(
       where: eq(aiConfigs.creatorId, creatorId),
     });
 
-    if (defaultConfig) {
+    // AI-7: solo heredar la key por defecto si el provider COINCIDE. Antes se
+    // usaba una key de Anthropic (sk-ant-...) contra OpenAI → 401 críptico en
+    // runtime. Si no coincide y el assignment no tiene key propia, caemos al
+    // default coherente (provider+model+key del defaultConfig) más abajo.
+    if (defaultConfig && defaultConfig.provider === assignment.provider) {
       return {
         provider: assignment.provider,
         model: assignment.model,

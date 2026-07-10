@@ -44,7 +44,7 @@ export const aiRouter = createTRPCRouter({
     .input(
       z.object({
         conversationId: z.string().uuid(),
-        fanMessage: z.string().min(1),
+        fanMessage: z.string().min(1).max(4000), // AI-9: cap de entrada
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -471,6 +471,9 @@ export const aiRouter = createTRPCRouter({
   summarizeConversation: protectedProcedure
     .input(z.object({ conversationId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
+      // AI-9: aplicar el límite mensual (antes era ilimitado en Free).
+      await checkAIMessageLimit(ctx.db, ctx.creatorId);
+
       const config = await resolveAIConfig(ctx.db, ctx.creatorId, "summary");
 
       if (!config) {
@@ -654,6 +657,8 @@ export const aiRouter = createTRPCRouter({
     .input(z.object({ contactId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       await checkFeatureAccess(ctx.db, ctx.creatorId, "priceAdvisor");
+      // AI-9: contar contra el cupo mensual (antes solo validaba el flag de plan).
+      await checkAIMessageLimit(ctx.db, ctx.creatorId);
 
       const config = await resolveAIConfig(ctx.db, ctx.creatorId, "price_advice");
 

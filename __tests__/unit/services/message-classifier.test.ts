@@ -9,6 +9,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("@/server/services/ai", () => ({
   callAIProvider: vi.fn(),
+  // AI-10: el classifier ahora usa stripThinkingBlocks en su parser tolerante.
+  stripThinkingBlocks: (text: string) =>
+    text.replace(/<think>[\s\S]*?<\/think>/gi, "").replace(/<think>[\s\S]*$/i, "").trim(),
 }));
 
 vi.mock("@/lib/logger", () => ({

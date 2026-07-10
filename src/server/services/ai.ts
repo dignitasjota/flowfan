@@ -412,15 +412,23 @@ export async function callAIProvider(
         parts: [{ text: msg.content }],
       }));
       const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${config.model}:generateContent?key=${config.apiKey}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/${config.model}:generateContent`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            // AI-6: API key en header, no en la query string (quedaba en logs
+            // de proxies/APM y en error.cause de fetch fallidos).
+            "x-goog-api-key": config.apiKey,
+          },
           body: JSON.stringify({
             system_instruction: { parts: [{ text: systemPrompt }] },
             contents,
             generationConfig: { maxOutputTokens: maxTokens },
           }),
+          // AI-6: timeout explícito (los SDK de Anthropic/OpenAI ya traen uno;
+          // Google via fetch podía colgar la mutación tRPC indefinidamente).
+          signal: AbortSignal.timeout(60_000),
         }
       );
       if (!response.ok) {

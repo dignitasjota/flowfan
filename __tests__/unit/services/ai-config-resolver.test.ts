@@ -50,7 +50,7 @@ describe("resolveAIConfig", () => {
     });
   });
 
-  it("uses assignment provider/model but default config API key when assignment has no key", async () => {
+  it("AI-7: assignment sin key y provider distinto → cae al default coherente (no mezcla keys)", async () => {
     const db = mockDb(
       { provider: "openai", model: "gpt-4o", apiKey: null },
       { provider: "anthropic", model: "claude-sonnet-4-20250514", apiKey: "default-encrypted" }
@@ -58,10 +58,27 @@ describe("resolveAIConfig", () => {
 
     const result = await resolveAIConfig(db, "creator-1", "analysis");
 
+    // Antes devolvía provider openai con key de anthropic (401). Ahora, al no
+    // coincidir el provider, usa el default completo y coherente.
     expect(result).toEqual({
-      provider: "openai",
-      model: "gpt-4o",
+      provider: "anthropic",
+      model: "claude-sonnet-4-20250514",
       apiKey: "decrypted:default-encrypted",
+    });
+  });
+
+  it("AI-7: assignment sin key pero mismo provider → hereda la key del default", async () => {
+    const db = mockDb(
+      { provider: "anthropic", model: "claude-opus-4-6", apiKey: null },
+      { provider: "anthropic", model: "claude-sonnet-4-6", apiKey: "default-encrypted" }
+    );
+
+    const result = await resolveAIConfig(db, "creator-1", "analysis");
+
+    expect(result).toEqual({
+      provider: "anthropic",
+      model: "claude-opus-4-6", // el modelo del assignment
+      apiKey: "decrypted:default-encrypted", // la key heredada (provider coincide)
     });
   });
 
