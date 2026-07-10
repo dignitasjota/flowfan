@@ -144,18 +144,28 @@ export async function publishToTwitter(args: {
     );
     threadIds.push(first.id);
 
-    // Follow-up tweets, each reply-chained to the previous
+    // Follow-up tweets, each reply-chained to the previous.
+    // WK-1: el tweet principal YA está publicado. Si un tweet del hilo falla,
+    // NO propagamos al catch externo (devolvería success:false y el worker
+    // republicaría el principal en el retry, duplicándolo). Registramos el
+    // error del hilo aparte y devolvemos éxito con el externalId del principal.
+    let threadError: string | undefined;
     if (args.thread && args.thread.length > 0) {
       let parentId = first.id;
       for (const followup of args.thread) {
         if (!followup.trim()) continue;
-        const child = await postTweet(
-          args.accessToken,
-          followup,
-          parentId
-        );
-        threadIds.push(child.id);
-        parentId = child.id;
+        try {
+          const child = await postTweet(
+            args.accessToken,
+            followup,
+            parentId
+          );
+          threadIds.push(child.id);
+          parentId = child.id;
+        } catch (threadErr) {
+          threadError = (threadErr as Error).message;
+          break;
+        }
       }
     }
 
@@ -165,6 +175,9 @@ export async function publishToTwitter(args: {
       externalId: first.id,
       externalUrl: `https://twitter.com/${handleForUrl}/status/${first.id}`,
       threadIds,
+      ...(threadError
+        ? { error: `Tweet principal publicado; el hilo falló parcialmente: ${threadError}` }
+        : {}),
     };
   } catch (err) {
     return { success: false, error: (err as Error).message };

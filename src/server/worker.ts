@@ -1108,6 +1108,14 @@ const scheduledPostWorker = new Worker<ScheduledPostJobData>(
     let successCount = 0;
 
     for (const platform of post.targetPlatforms) {
+      // WK-1: idempotencia en reintentos. Si esta plataforma ya se publicó en
+      // un intento anterior (externalId persistido en externalPostIds), no
+      // republicar — evita duplicados si el job se reprocesa.
+      if (externalIds[platform]?.id) {
+        successCount++;
+        continue;
+      }
+
       // Multi-account: prefer the explicit accountId from platformConfigs,
       // otherwise fall back to the first active account on that platform.
       const platformCfg =
@@ -1504,7 +1512,14 @@ const scheduledPostWorker = new Worker<ScheduledPostJobData>(
       "Scheduled post processed"
     );
 
-    if (baseStatus === "failed" || baseStatus === "partial") {
+    // WK-1: si ya se re-armó la siguiente ocurrencia (finalStatus="scheduled"),
+    // NO relanzar: el throw provocaría un retry que republicaría las plataformas
+    // ya publicadas y duplicaría la cadena de recurrencia. El fallo parcial queda
+    // registrado en lastError. Solo relanzamos cuando no hay recurrencia pendiente.
+    if (
+      (baseStatus === "failed" || baseStatus === "partial") &&
+      finalStatus !== "scheduled"
+    ) {
       throw new Error(
         `Publishing finished with status=${baseStatus}: ${JSON.stringify(errors)}`
       );

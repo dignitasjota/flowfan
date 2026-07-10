@@ -59,7 +59,7 @@ Backlog de hallazgos de la auditoría en profundidad del proyecto. Cada item tie
   - **Escenario:** el usuario cierra la pestaña → la conexión Redis suscrita queda viva (para un creator inactivo, **para siempre**). Combinado con FE-3, el servidor acumula conexiones hasta agotar `maxclients`.
   - **Fix:** firmar `GET(req: Request)`, mover `cleanup()` completo a `cancel()` y a `req.signal.addEventListener("abort", cleanup)`; en el catch del heartbeat llamar a `cleanup()`.
 
-- [ ] **WK-1 · Doble publicación en redes al reintentar un scheduled post** `src/server/worker.ts:1439-1511` + `src/server/services/twitter-publisher.ts:139-160`
+- [x] **WK-1 · Doble publicación en redes al reintentar un scheduled post** `src/server/worker.ts:1439-1511` + `src/server/services/twitter-publisher.ts:139-160`
   - **Problema:** (a) con `recurrenceRule` y éxito parcial, el worker fija `status="scheduled"`, encola la siguiente ocurrencia **y luego lanza** (baseStatus `partial`) → BullMQ reintenta → republica en TODAS las plataformas ya publicadas + duplica la cadena de recurrencia. (b) En `publishToTwitter`, si el tweet principal sale bien pero falla un tweet del hilo, devuelve `success:false` con el principal ya publicado → retry duplica el tweet principal.
   - **Fix:** no relanzar cuando hay recurrencia programada; persistir `externalPostIds` por plataforma **antes** de decidir estado y saltar plataformas ya publicadas en cada retry; en Twitter devolver `success:true` con `threadIds` parciales + error de hilo aparte.
 
