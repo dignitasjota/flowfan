@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { TRPCError } from "@trpc/server";
 import { createTRPCRouter, protectedProcedure } from "../trpc";
 import { sequences, sequenceEnrollments, contacts } from "@/server/db/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
@@ -7,6 +8,18 @@ import {
   cancelEnrollment,
   getSequenceStats,
 } from "@/server/services/sequence-engine";
+
+/** Verifica que una secuencia pertenece al tenant (evita IDOR). */
+async function assertSequenceOwned(ctx: any, sequenceId: string) {
+  const [seq] = await ctx.db
+    .select({ id: sequences.id })
+    .from(sequences)
+    .where(and(eq(sequences.id, sequenceId), eq(sequences.creatorId, ctx.creatorId)))
+    .limit(1);
+  if (!seq) {
+    throw new TRPCError({ code: "NOT_FOUND", message: "Secuencia no encontrada" });
+  }
+}
 
 const stepSchema = z.object({
   stepNumber: z.number(),
@@ -136,6 +149,8 @@ export const sequencesRouter = createTRPCRouter({
   getStats: protectedProcedure
     .input(z.object({ id: z.string().uuid() }))
     .query(async ({ ctx, input }) => {
+      // TEN-2: verificar ownership antes de exponer stats.
+      await assertSequenceOwned(ctx, input.id);
       return getSequenceStats(ctx.db, input.id);
     }),
 
@@ -149,7 +164,11 @@ export const sequencesRouter = createTRPCRouter({
       })
     )
     .query(async ({ ctx, input }) => {
-      const conditions = [eq(sequenceEnrollments.sequenceId, input.sequenceId)];
+      // TEN-1: scopear por creatorId para no filtrar enrollments de otros tenants.
+      const conditions = [
+        eq(sequenceEnrollments.sequenceId, input.sequenceId),
+        eq(sequenceEnrollments.creatorId, ctx.creatorId),
+      ];
       if (input.status) {
         conditions.push(eq(sequenceEnrollments.status, input.status));
       }
@@ -207,6 +226,17 @@ export const sequencesRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      // TEN-3: verificar que secuencia Y contacto son del tenant antes de inscribir
+      // (si no, el engine acabaría enviando mensajes a conversaciones ajenas).
+      await assertSequenceOwned(ctx, input.sequenceId);
+      const [contact] = await ctx.db
+        .select({ id: contacts.id })
+        .from(contacts)
+        .where(and(eq(contacts.id, input.contactId), eq(contacts.creatorId, ctx.creatorId)))
+        .limit(1);
+      if (!contact) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Contacto no encontrado" });
+      }
       return enrollContact(ctx.db, input.sequenceId, input.contactId, ctx.creatorId);
     }),
 });

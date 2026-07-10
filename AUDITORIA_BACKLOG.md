@@ -29,17 +29,17 @@ Backlog de hallazgos de la auditoría en profundidad del proyecto. Cada item tie
   - **Escenario:** cualquier creador que seleccione Sonnet u Opus en Settings → **toda llamada Anthropic devuelve 404**. El proveedor principal está roto para 2 de sus 3 modelos.
   - **Fix:** corregir a `claude-sonnet-4-6` / `claude-opus-4-6` en `PROVIDER_MODELS` + script de migración de filas existentes en `aiConfigs`/`aiModelAssignments`.
 
-- [ ] **TEN-1 · IDOR entre tenants en `sequences.getEnrollments`** `src/server/api/routers/sequences.ts:142-182`
+- [x] **TEN-1 · IDOR entre tenants en `sequences.getEnrollments`** `src/server/api/routers/sequences.ts:142-182`
   - **Problema:** las condiciones son solo `eq(sequenceEnrollments.sequenceId, input.sequenceId)`, sin verificar que la secuencia pertenezca a `ctx.creatorId`.
   - **Escenario:** un tenant con el UUID de una secuencia ajena obtiene los enrollments con `contactUsername`/`contactDisplayName` de fans de otro creador.
   - **Fix:** verificar ownership de la secuencia (`and(eq(id), eq(creatorId))`) antes de la query, o añadir `eq(sequenceEnrollments.creatorId, ctx.creatorId)`.
 
-- [ ] **TEN-2 · IDOR en `sequences.getStats`** `src/server/api/routers/sequences.ts:136-140`
+- [x] **TEN-2 · IDOR en `sequences.getStats`** `src/server/api/routers/sequences.ts:136-140`
   - **Problema:** llama a `getSequenceStats(ctx.db, input.id)` y el servicio (`sequence-engine.ts:242-258`) tampoco filtra por creator.
   - **Escenario:** cualquier tenant lee contadores y conversion rate de secuencias ajenas.
   - **Fix:** cargar la secuencia con `and(eq(id), eq(creatorId))` primero (patrón de `getById`).
 
-- [ ] **TEN-3 · Escritura cross-tenant en `sequences.enrollContact`** `src/server/api/routers/sequences.ts:202-211` + `sequence-engine.ts:29-97`
+- [x] **TEN-3 · Escritura cross-tenant en `sequences.enrollContact`** `src/server/api/routers/sequences.ts:202-211` + `sequence-engine.ts:29-97`
   - **Problema:** el router pasa `sequenceId` y `contactId` sin comprobar que pertenezcan a `ctx.creatorId`; el engine solo valida que la secuencia exista y esté activa.
   - **Escenario:** un atacante inscribe un contacto de otro tenant en una secuencia → `processSequenceStep` **envía mensajes automatizados a conversaciones de otro tenant**.
   - **Fix:** verificar `sequences.creatorId` y `contacts.creatorId` contra `ctx.creatorId` en el router.
