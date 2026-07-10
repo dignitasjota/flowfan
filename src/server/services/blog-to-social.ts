@@ -4,6 +4,7 @@ import {
   type AIConfig,
 } from "./ai";
 import { getLanguageInstruction } from "./language-utils";
+import { assertPublicHttpUrl } from "@/lib/ssrf";
 
 export type SocialPlatform = "reddit" | "twitter" | "instagram";
 
@@ -83,12 +84,16 @@ function pickBetween(
 }
 
 export async function extractContent(url: string): Promise<ExtractedContent> {
+  // TEN-10: anti-SSRF — bloquear IPs privadas/metadata y forzar http(s) antes
+  // del fetch server-side.
+  await assertPublicHttpUrl(url);
   const res = await fetch(url, {
     headers: {
       "User-Agent":
         "Mozilla/5.0 (compatible; FanFlow/1.0; +https://flowfan.app)",
       Accept: "text/html",
     },
+    redirect: "manual", // no seguir redirects a rangos internos
     signal: AbortSignal.timeout(15_000),
   });
   if (!res.ok) {

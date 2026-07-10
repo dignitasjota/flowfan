@@ -13,6 +13,10 @@ export const conversationsRouter = createTRPCRouter({
         contactId: z.string().uuid().optional(),
         status: z.enum(["active", "paused", "archived"]).optional(),
         search: z.string().max(100).optional(),
+        // TEN-13: paginación con cap para no cargar TODAS las conversaciones
+        // (+ contact + profile) de un tenant grande en cada request.
+        limit: z.number().min(1).max(200).default(100),
+        offset: z.number().min(0).default(0),
       }).optional()
     )
     .query(async ({ ctx, input }) => {
@@ -41,6 +45,8 @@ export const conversationsRouter = createTRPCRouter({
           contact: { with: { profile: true } },
         },
         orderBy: [desc(conversations.lastMessageAt)],
+        limit: input?.limit ?? 100,
+        offset: input?.offset ?? 0,
       });
 
       // Filter by contact search in-memory (contact is a relation)

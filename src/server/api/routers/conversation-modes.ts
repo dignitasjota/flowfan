@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { eq, and } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
-import { createTRPCRouter, protectedProcedure } from "../trpc";
+import { createTRPCRouter, protectedProcedure, managerProcedure } from "../trpc";
 import { conversationModes, contacts, contactProfiles } from "@/server/db/schema";
 import {
   DEFAULT_CONVERSATION_MODES,
@@ -72,7 +72,7 @@ export const conversationModesRouter = createTRPCRouter({
     }));
   }),
 
-  upsert: protectedProcedure
+  upsert: managerProcedure
     .input(
       z.object({
         modeType: z.enum(["BASE", "POTENCIAL_PREMIUM", "CONVERSION", "VIP", "LOW_VALUE"]),
@@ -140,7 +140,7 @@ export const conversationModesRouter = createTRPCRouter({
       return created;
     }),
 
-  initDefaults: protectedProcedure.mutation(async ({ ctx }) => {
+  initDefaults: managerProcedure.mutation(async ({ ctx }) => {
     const existing = await ctx.db.query.conversationModes.findMany({
       where: eq(conversationModes.creatorId, ctx.creatorId),
     });
@@ -173,7 +173,7 @@ export const conversationModesRouter = createTRPCRouter({
     return { success: true };
   }),
 
-  toggleActive: protectedProcedure
+  toggleActive: managerProcedure
     .input(
       z.object({
         modeType: z.enum(["BASE", "POTENCIAL_PREMIUM", "CONVERSION", "VIP", "LOW_VALUE"]),

@@ -175,6 +175,9 @@ export const socialCommentsRouter = createTRPCRouter({
         postId: z.string().uuid(),
         onlyUnhandled: z.boolean().default(false),
         includeHidden: z.boolean().default(false),
+        // TEN-13: cap del árbol de comentarios (un post viral podía traer miles).
+        limit: z.number().min(1).max(500).default(200),
+        offset: z.number().min(0).default(0),
       })
     )
     .query(async ({ ctx, input }) => {
@@ -207,6 +210,8 @@ export const socialCommentsRouter = createTRPCRouter({
           authorContact: { with: { profile: true } },
         },
         orderBy: (c, { asc }) => [asc(c.createdAt)],
+        limit: input.limit,
+        offset: input.offset,
       });
     }),
 
@@ -292,33 +297,37 @@ export const socialCommentsRouter = createTRPCRouter({
         }
       );
 
-      const [comment] = await ctx.db
-        .insert(socialComments)
-        .values({
-          creatorId: ctx.creatorId,
-          postId: input.postId,
-          parentCommentId: input.parentCommentId,
-          platformType: post.platformType,
-          externalCommentId: input.externalCommentId,
-          authorContactId,
-          authorUsername: input.authorUsername,
-          authorDisplayName: input.authorDisplayName,
-          authorAvatarUrl: input.authorAvatarUrl,
-          content: input.content,
-          publishedAt: input.publishedAt,
-          role: "fan",
-        })
-        .returning();
+      // TEN-12: insert del comentario + contadores del post en una transacción.
+      const comment = await ctx.db.transaction(async (tx) => {
+        const [inserted] = await tx
+          .insert(socialComments)
+          .values({
+            creatorId: ctx.creatorId,
+            postId: input.postId,
+            parentCommentId: input.parentCommentId,
+            platformType: post.platformType,
+            externalCommentId: input.externalCommentId,
+            authorContactId,
+            authorUsername: input.authorUsername,
+            authorDisplayName: input.authorDisplayName,
+            authorAvatarUrl: input.authorAvatarUrl,
+            content: input.content,
+            publishedAt: input.publishedAt,
+            role: "fan",
+          })
+          .returning();
 
-      // Update post counters + lastCommentAt
-      await ctx.db
-        .update(socialPosts)
-        .set({
-          commentsCount: sql`${socialPosts.commentsCount} + 1`,
-          unhandledCount: sql`${socialPosts.unhandledCount} + 1`,
-          lastCommentAt: new Date(),
-        })
-        .where(eq(socialPosts.id, input.postId));
+        await tx
+          .update(socialPosts)
+          .set({
+            commentsCount: sql`${socialPosts.commentsCount} + 1`,
+            unhandledCount: sql`${socialPosts.unhandledCount} + 1`,
+            lastCommentAt: new Date(),
+          })
+          .where(eq(socialPosts.id, input.postId));
+
+        return inserted;
+      });
 
       // Dispatch webhook
       dispatchWebhookEvent(ctx.db, ctx.creatorId, "comment.received", {
@@ -371,27 +380,31 @@ export const socialCommentsRouter = createTRPCRouter({
         throw new TRPCError({ code: "NOT_FOUND", message: "Comentario no encontrado" });
       }
 
-      const [updated] = await ctx.db
-        .update(socialComments)
-        .set({
-          isHandled: input.isHandled,
-          handledAt: input.isHandled ? new Date() : null,
-          handledById: input.isHandled ? ctx.actingUserId : null,
-        })
-        .where(eq(socialComments.id, input.id))
-        .returning();
-
-      // Adjust post unhandledCount delta
+      // TEN-12: update del comentario + ajuste del contador del post en una
+      // transacción para que no queden desincronizados si algo falla en medio.
       const delta =
         existing.isHandled === input.isHandled ? 0 : input.isHandled ? -1 : 1;
-      if (delta !== 0) {
-        await ctx.db
-          .update(socialPosts)
+      const updated = await ctx.db.transaction(async (tx) => {
+        const [row] = await tx
+          .update(socialComments)
           .set({
-            unhandledCount: sql`GREATEST(0, ${socialPosts.unhandledCount} + ${delta})`,
+            isHandled: input.isHandled,
+            handledAt: input.isHandled ? new Date() : null,
+            handledById: input.isHandled ? ctx.actingUserId : null,
           })
-          .where(eq(socialPosts.id, existing.postId));
-      }
+          .where(eq(socialComments.id, input.id))
+          .returning();
+
+        if (delta !== 0) {
+          await tx
+            .update(socialPosts)
+            .set({
+              unhandledCount: sql`GREATEST(0, ${socialPosts.unhandledCount} + ${delta})`,
+            })
+            .where(eq(socialPosts.id, existing.postId));
+        }
+        return row;
+      });
 
       publishEvent(ctx.creatorId, {
         type: "comment_handled",
@@ -438,44 +451,50 @@ export const socialCommentsRouter = createTRPCRouter({
         throw new TRPCError({ code: "NOT_FOUND", message: "Comentario no encontrado" });
       }
 
-      const [reply] = await ctx.db
-        .insert(socialComments)
-        .values({
-          creatorId: ctx.creatorId,
-          postId: parent.postId,
-          parentCommentId: parent.id,
-          platformType: parent.platformType,
-          authorUsername: "creator",
-          content: input.content,
-          role: "creator",
-          source: "manual",
-        })
-        .returning();
+      // TEN-12: insert de la respuesta + marcado del padre + contador del post
+      // en una transacción, para que no deriven si algo falla entre medias.
+      const reply = await ctx.db.transaction(async (tx) => {
+        const [inserted] = await tx
+          .insert(socialComments)
+          .values({
+            creatorId: ctx.creatorId,
+            postId: parent.postId,
+            parentCommentId: parent.id,
+            platformType: parent.platformType,
+            authorUsername: "creator",
+            content: input.content,
+            role: "creator",
+            source: "manual",
+          })
+          .returning();
 
-      const updates: Partial<typeof socialComments.$inferInsert> = {
-        creatorReplyId: reply!.id,
-      };
-      let delta = 0;
-      if (!parent.isHandled) {
-        updates.isHandled = true;
-        updates.handledAt = new Date();
-        updates.handledById = ctx.actingUserId;
-        delta = -1;
-      }
+        const updates: Partial<typeof socialComments.$inferInsert> = {
+          creatorReplyId: inserted!.id,
+        };
+        let delta = 0;
+        if (!parent.isHandled) {
+          updates.isHandled = true;
+          updates.handledAt = new Date();
+          updates.handledById = ctx.actingUserId;
+          delta = -1;
+        }
 
-      await ctx.db
-        .update(socialComments)
-        .set(updates)
-        .where(eq(socialComments.id, parent.id));
+        await tx
+          .update(socialComments)
+          .set(updates)
+          .where(eq(socialComments.id, parent.id));
 
-      await ctx.db
-        .update(socialPosts)
-        .set({
-          commentsCount: sql`${socialPosts.commentsCount} + 1`,
-          unhandledCount: sql`GREATEST(0, ${socialPosts.unhandledCount} + ${delta})`,
-          lastCommentAt: new Date(),
-        })
-        .where(eq(socialPosts.id, parent.postId));
+        await tx
+          .update(socialPosts)
+          .set({
+            commentsCount: sql`${socialPosts.commentsCount} + 1`,
+            unhandledCount: sql`GREATEST(0, ${socialPosts.unhandledCount} + ${delta})`,
+            lastCommentAt: new Date(),
+          })
+          .where(eq(socialPosts.id, parent.postId));
+
+        return inserted;
+      });
 
       publishEvent(ctx.creatorId, {
         type: "new_comment",
@@ -787,32 +806,37 @@ export const socialCommentsRouter = createTRPCRouter({
         platformError = platformResult.error;
       }
 
-      const [updated] = await ctx.db
-        .update(socialComments)
-        .set({
-          moderationStatus: input.status,
-          moderatedAt: input.status === "visible" ? null : new Date(),
-          moderatedById:
-            input.status === "visible" ? null : ctx.actingUserId,
-          moderationReason:
-            input.status === "visible" ? null : input.reason ?? null,
-          platformModerationApplied: platformApplied,
-          platformModerationError: platformError,
-        })
-        .where(eq(socialComments.id, input.id))
-        .returning();
-
-      // Hidden + reported pending comments do not count as unhandled either,
-      // so adjust the post's unhandledCount when the visibility flips.
-      if (wasHiddenLike !== willBeHiddenLike && !existing.isHandled) {
-        const delta = willBeHiddenLike ? -1 : 1;
-        await ctx.db
-          .update(socialPosts)
+      // TEN-12: update del comentario + ajuste del contador en una transacción.
+      // La acción en la plataforma (applyPlatformModeration) queda FUERA por ser
+      // una llamada externa lenta que no debe retener la transacción.
+      const updated = await ctx.db.transaction(async (tx) => {
+        const [row] = await tx
+          .update(socialComments)
           .set({
-            unhandledCount: sql`GREATEST(0, ${socialPosts.unhandledCount} + ${delta})`,
+            moderationStatus: input.status,
+            moderatedAt: input.status === "visible" ? null : new Date(),
+            moderatedById:
+              input.status === "visible" ? null : ctx.actingUserId,
+            moderationReason:
+              input.status === "visible" ? null : input.reason ?? null,
+            platformModerationApplied: platformApplied,
+            platformModerationError: platformError,
           })
-          .where(eq(socialPosts.id, existing.postId));
-      }
+          .where(eq(socialComments.id, input.id))
+          .returning();
+
+        // Hidden/reported pending comments dejan de contar como unhandled.
+        if (wasHiddenLike !== willBeHiddenLike && !existing.isHandled) {
+          const delta = willBeHiddenLike ? -1 : 1;
+          await tx
+            .update(socialPosts)
+            .set({
+              unhandledCount: sql`GREATEST(0, ${socialPosts.unhandledCount} + ${delta})`,
+            })
+            .where(eq(socialPosts.id, existing.postId));
+        }
+        return row;
+      });
 
       publishEvent(ctx.creatorId, {
         type: "comment_handled",

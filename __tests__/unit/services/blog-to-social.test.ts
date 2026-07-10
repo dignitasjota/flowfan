@@ -1,4 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+// TEN-10: extractContent valida el destino anti-SSRF (resuelve DNS). En los
+// tests mockeamos la validación para no depender de red y probar solo el parseo.
+vi.mock("@/lib/ssrf", () => ({
+  assertPublicHttpUrl: vi.fn().mockResolvedValue(undefined),
+}));
+
 import { extractContent } from "@/server/services/blog-to-social";
 
 describe("blog-to-social extractContent", () => {

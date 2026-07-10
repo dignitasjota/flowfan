@@ -183,10 +183,10 @@ Backlog de hallazgos de la auditoría en profundidad del proyecto. Cada item tie
 
 ### Multi-tenancy / routers
 
-- [ ] **TEN-10 · SSRF en `blog-to-social.extract`** `src/server/api/routers/blog-to-social.ts:17-37` + `extractContent` — acepta cualquier URL y hace `fetch` server-side (aunque es `managerProcedure`). **Fix:** bloquear IPs privadas/link-local/loopback, forzar http(s), no seguir redirects a rangos internos.
-- [ ] **TEN-11 · `conversation-modes.upsert/toggleActive/initDefaults` en `protectedProcedure`** `src/server/api/routers/conversation-modes.ts:75,143,176` — config global que afecta cómo responde la IA a todos los fans; un chatter puede reescribir tono/restricciones. **Fix:** elevar a `managerProcedure`/`ownerProcedure` (como `platforms`/`scoring-config`).
-- [ ] **TEN-12 · Contadores `unhandledCount`/`commentsCount` desincronizables (sin transacción)** `src/server/api/routers/social-comments.ts:295-321,356-419,441-478,743-815` — en `createComment`/`markHandled`/`replyToComment`/`setModerationStatus`, insert/update del comentario y update del contador son writes separados. Un fallo intermedio o concurrencia deja deriva. **Fix:** envolver comentario + contador en `ctx.db.transaction(...)`.
-- [ ] **TEN-13 · Paginación sin límite en varios listados** — `conversations.list` (carga TODAS + contact + profile), `sequences.list`, `segments.list`, `social-comments.listComments` (árbol sin límite). **Fix:** `limit`/`offset` con cap (max 100) como en `contacts.list`.
+- [x] **TEN-10 · SSRF en `blog-to-social.extract`** `src/server/api/routers/blog-to-social.ts:17-37` + `extractContent` — acepta cualquier URL y hace `fetch` server-side (aunque es `managerProcedure`). **Fix:** bloquear IPs privadas/link-local/loopback, forzar http(s), no seguir redirects a rangos internos.
+- [x] **TEN-11 · `conversation-modes.upsert/toggleActive/initDefaults` en `protectedProcedure`** `src/server/api/routers/conversation-modes.ts:75,143,176` — config global que afecta cómo responde la IA a todos los fans; un chatter puede reescribir tono/restricciones. **Fix:** elevar a `managerProcedure`/`ownerProcedure` (como `platforms`/`scoring-config`).
+- [x] **TEN-12 · Contadores `unhandledCount`/`commentsCount` desincronizables (sin transacción)** `src/server/api/routers/social-comments.ts:295-321,356-419,441-478,743-815` — en `createComment`/`markHandled`/`replyToComment`/`setModerationStatus`, insert/update del comentario y update del contador son writes separados. Un fallo intermedio o concurrencia deja deriva. **Fix:** envolver comentario + contador en `ctx.db.transaction(...)`.
+- [x] **TEN-13 · Paginación sin límite en varios listados** — `conversations.list` (carga TODAS + contact + profile), `sequences.list`, `segments.list`, `social-comments.listComments` (árbol sin límite). **Fix:** `limit`/`offset` con cap (max 100) como en `contacts.list`.
 
 ### Workers / colas
 
