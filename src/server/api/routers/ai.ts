@@ -599,7 +599,7 @@ export const aiRouter = createTRPCRouter({
 
       await ctx.db.insert(aiUsageLog).values({
         creatorId: ctx.creatorId,
-        requestType: "analysis",
+        requestType: "report", // AI-2: tipo dedicado, no contamina el cupo de reportes vía "analysis"
         tokensUsed: result.tokensUsed,
         modelUsed,
       });
@@ -716,7 +716,7 @@ export const aiRouter = createTRPCRouter({
 
       await ctx.db.insert(aiUsageLog).values({
         creatorId: ctx.creatorId,
-        requestType: "analysis",
+        requestType: "price_advice", // AI-2: tipo dedicado
         tokensUsed: result.tokensUsed,
         modelUsed: `${config.provider}/${config.model}`,
       });

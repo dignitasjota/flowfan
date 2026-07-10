@@ -313,7 +313,13 @@ function buildConversationMessages(input: SuggestionInput) {
 
 export function stripThinkingBlocks(text: string): string {
   // Remove <think>...</think> blocks from reasoning models (MiniMax, DeepSeek, etc.)
-  return text.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+  // AI-4: también eliminar un <think> SIN cerrar — ocurre cuando la respuesta se
+  // trunca (finish_reason=length) dentro del bloque de razonamiento; si no se
+  // elimina, el parser no encuentra JSON y cae a un fallback neutral silencioso.
+  return text
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .replace(/<think>[\s\S]*$/i, "")
+    .trim();
 }
 
 function parseSuggestionVariants(text: string): SuggestionVariant[] {

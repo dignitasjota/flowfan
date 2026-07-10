@@ -88,6 +88,8 @@ export const aiRequestTypeEnum = pgEnum("ai_request_type", [
   "summary",
   "coaching",
   "content_gap",
+  "report",
+  "price_advice",
 ]);
 
 export const aiProviderEnum = pgEnum("ai_provider", [

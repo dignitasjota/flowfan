@@ -118,6 +118,14 @@ describe("stripThinkingBlocks", () => {
       stripThinkingBlocks("<think>\nLine 1\nLine 2\n</think>Output")
     ).toBe("Output");
   });
+
+  it("AI-4: elimina un <think> sin cerrar (respuesta truncada)", () => {
+    // Un modelo razonador truncado deja el bloque abierto; debe quedar vacío
+    // en vez de dejar basura que rompe el parser JSON.
+    expect(stripThinkingBlocks("<think>razonando y me corto")).toBe("");
+    // Texto antes del <think> truncado se conserva.
+    expect(stripThinkingBlocks("Output<think>truncado...")).toBe("Output");
+  });
 });
 
 describe("generateSuggestion", () => {

@@ -211,12 +211,16 @@ export async function checkAIMessageLimit(db: Db, creatorId: string) {
   if (limits.aiMessagesPerMonth === -1) return;
 
   const monthStart = startOfMonth();
+  // AI-3: contar solo las sugerencias generadas. Antes contaba TODAS las filas
+  // (cada suggest inserta suggestion + analysis, y summaries/reportes/coaching
+  // también), consumiendo el cupo al doble o más de lo anunciado.
   const [result] = await db
     .select({ count: count() })
     .from(aiUsageLog)
     .where(
       and(
         eq(aiUsageLog.creatorId, creatorId),
+        eq(aiUsageLog.requestType, "suggestion"),
         gte(aiUsageLog.createdAt, monthStart)
       )
     );
@@ -278,13 +282,15 @@ export async function checkReportLimit(db: Db, creatorId: string) {
   }
 
   const monthStart = startOfMonth();
+  // AI-2: contar solo reportes reales. Antes contaba "analysis", que también
+  // genera cada suggest y getPriceAdvice → agotaba el cupo sin generar reportes.
   const [result] = await db
     .select({ count: count() })
     .from(aiUsageLog)
     .where(
       and(
         eq(aiUsageLog.creatorId, creatorId),
-        eq(aiUsageLog.requestType, "analysis"),
+        eq(aiUsageLog.requestType, "report"),
         gte(aiUsageLog.createdAt, monthStart)
       )
     );
