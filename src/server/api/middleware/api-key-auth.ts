@@ -4,6 +4,7 @@ import { validateApiKey } from "@/server/services/api-keys";
 import { eq } from "drizzle-orm";
 import { creators } from "@/server/db/schema";
 import { createChildLogger } from "@/lib/logger";
+import { rateLimit } from "@/lib/rate-limit";
 
 const log = createChildLogger("api-key-auth");
 
@@ -14,27 +15,6 @@ type AuthResult = {
   keyId: string;
   accessLevel: ApiAccessLevel;
 };
-
-const RATE_LIMIT_WINDOW = 60_000; // 1 minute
-const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
-
-function checkRateLimit(keyId: string, limit: number): { allowed: boolean; remaining: number; resetAt: number } {
-  const now = Date.now();
-  let entry = rateLimitMap.get(keyId);
-
-  if (!entry || now >= entry.resetAt) {
-    entry = { count: 0, resetAt: now + RATE_LIMIT_WINDOW };
-    rateLimitMap.set(keyId, entry);
-  }
-
-  entry.count++;
-
-  return {
-    allowed: entry.count <= limit,
-    remaining: Math.max(0, limit - entry.count),
-    resetAt: entry.resetAt,
-  };
-}
 
 export async function authenticateApiKey(
   request: NextRequest
@@ -75,43 +55,32 @@ export async function authenticateApiKey(
 
   const accessLevel: ApiAccessLevel = plan === "business" ? "full" : "readonly";
 
-  // Rate limiting
-  const rateLimit = plan === "business" ? 60 : 30;
-  const { allowed, remaining, resetAt } = checkRateLimit(result.keyId, rateLimit);
+  // SEC-3: rate limiting en Redis (compartido entre réplicas, con TTL) en vez
+  // de un Map por proceso que se saltaba con >1 instancia y crecía sin límite.
+  const limit = plan === "business" ? 60 : 30;
+  const rl = await rateLimit(`apikey:${result.keyId}`, {
+    limit,
+    windowSeconds: 60,
+  });
 
-  if (!allowed) {
+  if (!rl.success) {
     return NextResponse.json(
       { error: "Rate limit exceeded" },
       {
         status: 429,
         headers: {
-          "X-RateLimit-Limit": String(rateLimit),
+          "X-RateLimit-Limit": String(limit),
           "X-RateLimit-Remaining": "0",
-          "X-RateLimit-Reset": String(Math.ceil(resetAt / 1000)),
+          "X-RateLimit-Reset": String(rl.resetAt),
+          "Retry-After": String(Math.max(1, rl.resetAt - Math.floor(Date.now() / 1000))),
         },
       }
     );
   }
 
-  // Attach rate limit headers to be used by caller
-  // (we store them in a custom way since we return the auth result)
   return {
     creatorId: result.creatorId,
     keyId: result.keyId,
     accessLevel,
   };
-}
-
-export function withRateLimitHeaders(
-  response: NextResponse,
-  keyId: string,
-  limit: number
-): NextResponse {
-  const entry = rateLimitMap.get(keyId);
-  if (entry) {
-    response.headers.set("X-RateLimit-Limit", String(limit));
-    response.headers.set("X-RateLimit-Remaining", String(Math.max(0, limit - entry.count)));
-    response.headers.set("X-RateLimit-Reset", String(Math.ceil(entry.resetAt / 1000)));
-  }
-  return response;
 }

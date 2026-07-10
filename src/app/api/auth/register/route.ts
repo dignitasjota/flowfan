@@ -6,6 +6,7 @@ import { db } from "@/server/db";
 import { creators } from "@/server/db/schema";
 import { z } from "zod";
 import { rateLimit, RATE_LIMITS } from "@/lib/rate-limit";
+import { getClientIp } from "@/lib/request-ip";
 import { createChildLogger } from "@/lib/logger";
 
 const log = createChildLogger("auth-register");
@@ -41,8 +42,7 @@ export async function POST(req: Request) {
   }
 
   // --- Rate limiting by IP ---
-  const forwarded = req.headers.get("x-forwarded-for");
-  const ip = forwarded?.split(",")[0]?.trim() ?? "unknown";
+  const ip = getClientIp(req);
   const rateLimitResult = await rateLimit(
     `register:${ip}`,
     RATE_LIMITS.register
@@ -80,10 +80,12 @@ export async function POST(req: Request) {
   });
 
   if (existing) {
-    return NextResponse.json(
-      { error: "Este email ya está registrado" },
-      { status: 409 }
-    );
+    // SEC-6: no revelar que el email existe (el 409 permitía enumerar cuentas).
+    // Devolvemos la MISMA respuesta que un registro exitoso, sin crear nada.
+    // El auto-login del cliente fallará y lo llevará a /login. (Mejora futura:
+    // enviar al dueño un email "alguien intentó registrarse con tu email".)
+    log.info({ email }, "Registration attempt for existing email (SEC-6)");
+    return NextResponse.json({ success: true }, { status: 201 });
   }
 
   // Resolver código de referido (si viene) a un referrer.

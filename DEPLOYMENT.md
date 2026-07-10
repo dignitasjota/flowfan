@@ -185,13 +185,19 @@ En tu Nginx Proxy Manager existente (http://tu-vps-ip:81):
 4. **Advanced (opcional):**
    ```
    proxy_set_header X-Real-IP $remote_addr;
-   proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+   # SEC-4: SOBRESCRIBIR (no anexar) X-Forwarded-For. Con $proxy_add_x_forwarded_for
+   # el cliente puede inyectar el primer valor y evadir el rate limit de fuerza
+   # bruta. Usa $remote_addr para que el primer valor sea siempre la IP real.
+   proxy_set_header X-Forwarded-For $remote_addr;
    proxy_set_header X-Forwarded-Proto $scheme;
    proxy_set_header Host $host;
    proxy_http_version 1.1;
    proxy_set_header Upgrade $http_upgrade;
    proxy_set_header Connection "upgrade";
    ```
+   > Si tienes una cadena de proxies de confianza que **deben** anexar al XFF,
+   > mantén `$proxy_add_x_forwarded_for` y define la env `TRUSTED_PROXY_HOPS=N`
+   > (número de proxies de confianza) para que la app cuente la IP desde la derecha.
 5. **Save**
 
 Verificar en: `https://fanflow.example.com` → debería mostrar la landing page

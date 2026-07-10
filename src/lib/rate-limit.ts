@@ -20,6 +20,12 @@ type RateLimitConfig = {
   limit: number;
   /** Window duration in seconds */
   windowSeconds: number;
+  /**
+   * SEC-5: si es true, ante un fallo de Redis se DENIEGA (fail-closed) en vez de
+   * permitir. Úsalo en endpoints de auth (login/registro/reset) para que tumbar
+   * Redis no elimine la protección de fuerza bruta.
+   */
+  failClosed?: boolean;
 };
 
 type RateLimitResult = {
@@ -71,7 +77,14 @@ export async function rateLimit(
       resetAt: now + config.windowSeconds,
     };
   } catch {
-    // If Redis fails, allow the request (fail-open)
+    // SEC-5: fail-closed para endpoints sensibles; fail-open para el resto.
+    if (config.failClosed) {
+      return {
+        success: false,
+        remaining: 0,
+        resetAt: Math.floor(Date.now() / 1000) + config.windowSeconds,
+      };
+    }
     return {
       success: true,
       remaining: config.limit,
@@ -82,10 +95,10 @@ export async function rateLimit(
 
 /** Rate limit presets */
 export const RATE_LIMITS = {
-  /** Auth endpoints: 5 requests per 60 seconds per IP */
-  auth: { limit: 5, windowSeconds: 60 },
-  /** Registration: 3 requests per 300 seconds per IP */
-  register: { limit: 3, windowSeconds: 300 },
+  /** Auth endpoints: 5 requests per 60 seconds per IP (fail-closed, SEC-5) */
+  auth: { limit: 5, windowSeconds: 60, failClosed: true },
+  /** Registration: 3 requests per 300 seconds per IP (fail-closed, SEC-5) */
+  register: { limit: 3, windowSeconds: 300, failClosed: true },
   /** AI mutations: 30 requests per 60 seconds per user */
   aiMutation: { limit: 30, windowSeconds: 60 },
   /** General API: 100 requests per 60 seconds per user */

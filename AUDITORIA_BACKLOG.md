@@ -168,10 +168,10 @@ Backlog de hallazgos de la auditoría en profundidad del proyecto. Cada item tie
 
 ### Seguridad
 
-- [ ] **SEC-3 · Rate limiting de la API pública en memoria** `src/server/api/middleware/api-key-auth.ts:18-37` — `Map` por proceso: con >1 réplica el límite real es N×; el `Map` nunca purga (crecimiento no acotado). **Fix:** migrar `checkRateLimit` al limiter Redis (`@/lib/rate-limit`) como ya hace comments-ingest.
-- [ ] **SEC-4 · Bypass de rate limit por spoofing de `X-Forwarded-For`** `register/route.ts:43-44`, `forgot-password/route.ts:18-19`, `reset-password/route.ts:24-25`, `server/auth.ts:48-49` — toman `x-forwarded-for.split(",")[0]` (valor más a la izquierda, controlable). Si NPM añade en vez de reemplazar XFF, se evade la protección de fuerza bruta. **Fix:** confiar solo en la IP del proxy de confianza; documentar que NPM debe sobrescribir XFF.
-- [ ] **SEC-5 · Rate limiting fail-open ante caída de Redis** `src/lib/rate-limit.ts:73-80` — cualquier error de Redis retorna `success:true`. **Escenario:** tumbando Redis desaparecen las protecciones de fuerza bruta de login/registro/reset. **Fix:** fail-closed (o fallback local conservador) para login/reset; alertar al degradar.
-- [ ] **SEC-6 · Enumeración de cuentas en registro** `src/app/api/auth/register/route.ts:81-86` — responde `409 "Este email ya está registrado"` (forgot-password sí está protegido). **Fix:** respuesta genérica + diferenciar por email.
+- [x] **SEC-3 · Rate limiting de la API pública en memoria** `src/server/api/middleware/api-key-auth.ts:18-37` — `Map` por proceso: con >1 réplica el límite real es N×; el `Map` nunca purga (crecimiento no acotado). **Fix:** migrar `checkRateLimit` al limiter Redis (`@/lib/rate-limit`) como ya hace comments-ingest.
+- [x] **SEC-4 · Bypass de rate limit por spoofing de `X-Forwarded-For`** `register/route.ts:43-44`, `forgot-password/route.ts:18-19`, `reset-password/route.ts:24-25`, `server/auth.ts:48-49` — toman `x-forwarded-for.split(",")[0]` (valor más a la izquierda, controlable). Si NPM añade en vez de reemplazar XFF, se evade la protección de fuerza bruta. **Fix:** confiar solo en la IP del proxy de confianza; documentar que NPM debe sobrescribir XFF.
+- [x] **SEC-5 · Rate limiting fail-open ante caída de Redis** `src/lib/rate-limit.ts:73-80` — cualquier error de Redis retorna `success:true`. **Escenario:** tumbando Redis desaparecen las protecciones de fuerza bruta de login/registro/reset. **Fix:** fail-closed (o fallback local conservador) para login/reset; alertar al degradar.
+- [x] **SEC-6 · Enumeración de cuentas en registro** `src/app/api/auth/register/route.ts:81-86` — responde `409 "Este email ya está registrado"` (forgot-password sí está protegido). **Fix:** respuesta genérica + diferenciar por email.
 
 ### Servicios IA
 

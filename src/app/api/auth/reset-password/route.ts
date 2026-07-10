@@ -5,6 +5,7 @@ import { db } from "@/server/db";
 import { creators, passwordResetTokens } from "@/server/db/schema";
 import { z } from "zod";
 import { rateLimit, RATE_LIMITS } from "@/lib/rate-limit";
+import { getClientIp } from "@/lib/request-ip";
 
 const passwordSchema = z
   .string()
@@ -21,8 +22,7 @@ const schema = z.object({
 
 export async function POST(req: Request) {
   // Rate limit
-  const forwarded = req.headers.get("x-forwarded-for");
-  const ip = forwarded?.split(",")[0]?.trim() ?? "unknown";
+  const ip = getClientIp(req);
   const rateLimitResult = await rateLimit(`reset:${ip}`, RATE_LIMITS.auth);
 
   if (!rateLimitResult.success) {
