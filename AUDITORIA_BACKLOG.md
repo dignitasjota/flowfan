@@ -44,7 +44,7 @@ Backlog de hallazgos de la auditoría en profundidad del proyecto. Cada item tie
   - **Escenario:** un atacante inscribe un contacto de otro tenant en una secuencia → `processSequenceStep` **envía mensajes automatizados a conversaciones de otro tenant**.
   - **Fix:** verificar `sequences.creatorId` y `contacts.creatorId` contra `ctx.creatorId` en el router.
 
-- [ ] **TEN-4 · IDOR en `intelligence.getContactChurnDetails`** `src/server/api/routers/intelligence.ts:695-701`
+- [x] **TEN-4 · IDOR en `intelligence.getContactChurnDetails`** `src/server/api/routers/intelligence.ts:695-701`
   - **Problema:** `contactProfiles.findFirst({ where: eq(contactProfiles.contactId, input.contactId) })` sin verificar `contacts.creatorId`.
   - **Escenario:** cualquier tenant lee `churnScore`, `churnFactors` y `funnelStage` de contactos ajenos (contrasta con `getContactScoring`/`getContactSignals` que sí verifican).
   - **Fix:** cargar el contacto con `and(eq(contacts.id), eq(contacts.creatorId, ctx.creatorId))` primero.

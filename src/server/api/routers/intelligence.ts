@@ -697,6 +697,18 @@ export const intelligenceRouter = createTRPCRouter({
     .query(async ({ ctx, input }) => {
       const { getSuggestedActions } = await import("@/server/services/churn-prediction");
 
+      // TEN-4: verificar que el contacto es del tenant antes de leer su churn.
+      const contact = await ctx.db.query.contacts.findFirst({
+        where: and(
+          eq(contacts.id, input.contactId),
+          eq(contacts.creatorId, ctx.creatorId)
+        ),
+        columns: { id: true },
+      });
+      if (!contact) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Contacto no encontrado" });
+      }
+
       const profile = await ctx.db.query.contactProfiles.findFirst({
         where: eq(contactProfiles.contactId, input.contactId),
         columns: {
