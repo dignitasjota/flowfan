@@ -4,6 +4,7 @@ import { TRPCError } from "@trpc/server";
 import { createTRPCRouter, protectedProcedure } from "../trpc";
 import { conversations, contacts, conversationAssignments } from "@/server/db/schema";
 import { platformTypeSchema } from "@/lib/constants";
+import { canAccessConversation } from "../access";
 
 export const conversationsRouter = createTRPCRouter({
   list: protectedProcedure
@@ -74,6 +75,11 @@ export const conversationsRouter = createTRPCRouter({
       });
 
       if (!conversation) return null;
+
+      // TEN-6: los chatters solo acceden a conversaciones asignadas.
+      if (!(await canAccessConversation(ctx, input.id))) {
+        return null;
+      }
 
       // Load messages with limit (most recent first, then reverse for display)
       const { messages: messagesTable } = await import("@/server/db/schema");

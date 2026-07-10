@@ -63,7 +63,7 @@ Backlog de hallazgos de la auditoría en profundidad del proyecto. Cada item tie
   - **Problema:** (a) con `recurrenceRule` y éxito parcial, el worker fija `status="scheduled"`, encola la siguiente ocurrencia **y luego lanza** (baseStatus `partial`) → BullMQ reintenta → republica en TODAS las plataformas ya publicadas + duplica la cadena de recurrencia. (b) En `publishToTwitter`, si el tweet principal sale bien pero falla un tweet del hilo, devuelve `success:false` con el principal ya publicado → retry duplica el tweet principal.
   - **Fix:** no relanzar cuando hay recurrencia programada; persistir `externalPostIds` por plataforma **antes** de decidir estado y saltar plataformas ya publicadas en cada retry; en Twitter devolver `success:true` con `threadIds` parciales + error de hilo aparte.
 
-- [ ] **TEN-6 / WK-2 · Chatters ven y escriben en cualquier conversación** `src/server/api/routers/contacts.ts:17-85`, `conversations.getById:58-99`, `messages.*`, `ai.suggest`
+- [x] **TEN-6 / WK-2 · Chatters ven y escriben en cualquier conversación** `src/server/api/routers/contacts.ts:17-85`, `conversations.getById:58-99`, `messages.*`, `ai.suggest`
   - **Problema:** CLAUDE.md dice "chatters solo ven contactos asignados", pero `contacts.list/getById` y las mutaciones de mensajes no comprueban asignación (a diferencia de `conversations.list:28-35` y `search.ts:39`).
   - **Escenario:** un chatter puede leer y **responder en cualquier conversación** del workspace por id, saltándose el sistema de asignaciones.
   - **Fix:** aplicar el subquery de `conversationAssignments` en `contacts.list/getById`, `conversations.getById` y `messages.addFanMessage/addCreatorMessage`.

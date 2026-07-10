@@ -11,6 +11,7 @@ import { analysisQueue, telegramOutgoingQueue } from "@/server/queues";
 import { logTeamAction } from "@/server/services/team-audit";
 import { markExperimentReplyForContact } from "@/server/services/message-experiment";
 import { sendPushToCreator } from "@/server/services/push-notifications";
+import { canAccessConversation } from "../access";
 
 export const messagesRouter = createTRPCRouter({
   list: protectedProcedure
@@ -32,6 +33,14 @@ export const messagesRouter = createTRPCRouter({
 
       if (!conversation) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Conversation not found" });
+      }
+
+      // TEN-6: los chatters solo pueden leer/escribir en conversaciones asignadas.
+      if (!(await canAccessConversation(ctx, input.conversationId))) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "No tienes acceso a esta conversación",
+        });
       }
 
       return ctx.db.query.messages.findMany({
@@ -60,6 +69,14 @@ export const messagesRouter = createTRPCRouter({
 
       if (!conversation) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Conversation not found" });
+      }
+
+      // TEN-6: los chatters solo pueden leer/escribir en conversaciones asignadas.
+      if (!(await canAccessConversation(ctx, input.conversationId))) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "No tienes acceso a esta conversación",
+        });
       }
 
       const [message] = await ctx.db
@@ -163,6 +180,14 @@ export const messagesRouter = createTRPCRouter({
 
       if (!conversation) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Conversation not found" });
+      }
+
+      // TEN-6: los chatters solo pueden leer/escribir en conversaciones asignadas.
+      if (!(await canAccessConversation(ctx, input.conversationId))) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "No tienes acceso a esta conversación",
+        });
       }
 
       const [message] = await ctx.db

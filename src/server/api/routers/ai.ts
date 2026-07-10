@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { eq, and } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
+import { canAccessConversation } from "../access";
 import { createTRPCRouter, protectedProcedure } from "../trpc";
 import { createChildLogger } from "@/lib/logger";
 
@@ -75,6 +76,14 @@ export const aiRouter = createTRPCRouter({
 
       if (!conversation) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Conversation not found" });
+      }
+
+      // TEN-6: los chatters solo generan sugerencias para conversaciones asignadas.
+      if (!(await canAccessConversation(ctx, input.conversationId))) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "No tienes acceso a esta conversación",
+        });
       }
 
       // Get platform personality + creator settings in parallel
@@ -299,6 +308,14 @@ export const aiRouter = createTRPCRouter({
 
       if (!conversation) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Conversation not found" });
+      }
+
+      // TEN-6: los chatters solo generan sugerencias para conversaciones asignadas.
+      if (!(await canAccessConversation(ctx, input.conversationId))) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "No tienes acceso a esta conversación",
+        });
       }
 
       // Find the last fan message to regenerate from

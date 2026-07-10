@@ -10,6 +10,7 @@ import { scrapeInstagramProfile } from "@/server/services/instagram-scraper";
 import { createChildLogger } from "@/lib/logger";
 import { dispatchWebhookEvent } from "@/server/services/webhook-dispatcher";
 import { logTeamAction } from "@/server/services/team-audit";
+import { chatterContactFilter } from "../access";
 
 const log = createChildLogger("contacts-router");
 
@@ -27,6 +28,11 @@ export const contactsRouter = createTRPCRouter({
     )
     .query(async ({ ctx, input }) => {
       const conditions = [eq(contacts.creatorId, ctx.creatorId)];
+
+      // TEN-6: los chatters solo ven contactos con conversación asignada.
+      if (ctx.teamRole === "chatter") {
+        conditions.push(chatterContactFilter(ctx.actingUserId));
+      }
 
       if (input?.platformType) {
         conditions.push(eq(contacts.platformType, input.platformType));
@@ -71,11 +77,17 @@ export const contactsRouter = createTRPCRouter({
   getById: protectedProcedure
     .input(z.object({ id: z.string().uuid() }))
     .query(async ({ ctx, input }) => {
+      const conditions = [
+        eq(contacts.id, input.id),
+        eq(contacts.creatorId, ctx.creatorId),
+      ];
+      // TEN-6: un chatter solo accede al contacto si tiene alguna conversación
+      // asignada con él.
+      if (ctx.teamRole === "chatter") {
+        conditions.push(chatterContactFilter(ctx.actingUserId));
+      }
       return ctx.db.query.contacts.findFirst({
-        where: and(
-          eq(contacts.id, input.id),
-          eq(contacts.creatorId, ctx.creatorId)
-        ),
+        where: and(...conditions),
         with: {
           profile: true,
           conversations: true,
