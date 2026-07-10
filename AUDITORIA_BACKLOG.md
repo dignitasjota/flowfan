@@ -49,7 +49,7 @@ Backlog de hallazgos de la auditoría en profundidad del proyecto. Cada item tie
   - **Escenario:** cualquier tenant lee `churnScore`, `churnFactors` y `funnelStage` de contactos ajenos (contrasta con `getContactScoring`/`getContactSignals` que sí verifican).
   - **Fix:** cargar el contacto con `and(eq(contacts.id), eq(contacts.creatorId, ctx.creatorId))` primero.
 
-- [ ] **TEN-5 · Fuga de emails en `team.getAssignments`** `src/server/api/routers/team.ts:366-390`
+- [x] **TEN-5 · Fuga de emails en `team.getAssignments`** `src/server/api/routers/team.ts:366-390`
   - **Problema:** con `input.conversationId` filtra solo por `conversationAssignments.conversationId` y hace join con `creators` devolviendo `assigneeName` y `assigneeEmail`, sin comprobar que la conversación sea de `ctx.creatorId`.
   - **Escenario:** leak cross-tenant de nombres y **emails** de miembros de equipo de otro tenant.
   - **Fix:** verificar la conversación contra `ctx.creatorId` antes (como `messages.list`).

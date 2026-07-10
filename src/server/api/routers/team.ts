@@ -371,7 +371,9 @@ export const teamRouter = createTRPCRouter({
     )
     .query(async ({ ctx, input }) => {
       if (input?.conversationId) {
-        // Get assignments for a specific conversation
+        // Get assignments for a specific conversation.
+        // TEN-5: join a conversations + filtro por creatorId para no filtrar
+        // nombres/emails de miembros de equipo de otro tenant.
         const assignments = await ctx.db
           .select({
             id: conversationAssignments.id,
@@ -384,7 +386,13 @@ export const teamRouter = createTRPCRouter({
           })
           .from(conversationAssignments)
           .innerJoin(creators, eq(conversationAssignments.assignedToUserId, creators.id))
-          .where(eq(conversationAssignments.conversationId, input.conversationId));
+          .innerJoin(conversations, eq(conversationAssignments.conversationId, conversations.id))
+          .where(
+            and(
+              eq(conversationAssignments.conversationId, input.conversationId),
+              eq(conversations.creatorId, ctx.creatorId)
+            )
+          );
 
         return assignments;
       }
