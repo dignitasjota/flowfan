@@ -54,7 +54,7 @@ Backlog de hallazgos de la auditoría en profundidad del proyecto. Cada item tie
   - **Escenario:** leak cross-tenant de nombres y **emails** de miembros de equipo de otro tenant.
   - **Fix:** verificar la conversación contra `ctx.creatorId` antes (como `messages.list`).
 
-- [ ] **FE-1 · Fuga de conexiones Redis por cada cliente SSE desconectado** `src/app/api/events/route.ts:44-64` + `src/lib/redis-pubsub.ts:49-76`
+- [x] **FE-1 · Fuga de conexiones Redis por cada cliente SSE desconectado** `src/app/api/events/route.ts:44-64` + `src/lib/redis-pubsub.ts:49-76`
   - **Problema:** `subscribeToCreator()` crea una conexión ioredis por request SSE. La limpieza está rota: `cancel() {}` está **vacío**, el listener `(controller as ...).signal?.addEventListener("abort", cleanup)` es un **no-op** (`ReadableStreamDefaultController` no tiene `signal`), y el catch del heartbeat solo hace `clearInterval` sin `unsubscribe()`.
   - **Escenario:** el usuario cierra la pestaña → la conexión Redis suscrita queda viva (para un creator inactivo, **para siempre**). Combinado con FE-3, el servidor acumula conexiones hasta agotar `maxclients`.
   - **Fix:** firmar `GET(req: Request)`, mover `cleanup()` completo a `cancel()` y a `req.signal.addEventListener("abort", cleanup)`; en el catch del heartbeat llamar a `cleanup()`.
