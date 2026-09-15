@@ -1,4 +1,7 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "crypto";
+import { createChildLogger } from "./logger";
+
+const log = createChildLogger("crypto");
 
 const ALGORITHM = "aes-256-gcm";
 const IV_LENGTH = 16;
@@ -39,7 +42,11 @@ export function decrypt(encryptedText: string): string {
   const parts = encryptedText.split(":");
 
   if (parts.length !== 3) {
-    // Likely a plaintext key (legacy, pre-encryption)
+    // SEC-9: antes esto era completamente silencioso — un secreto sin cifrar
+    // (legado, pre-encriptación) pasaba desapercibido. Lo dejamos pasar por
+    // compatibilidad hacia atrás (no hay forma de confirmar aquí que ya no
+    // quedan valores legado en producción), pero al menos queda logueado.
+    log.warn("decrypt() recibió un valor sin el formato iv:tag:ct — devuelto tal cual (posible secreto legado sin cifrar)");
     return encryptedText;
   }
 
@@ -50,6 +57,7 @@ export function decrypt(encryptedText: string): string {
   // Validate lengths
   if (iv.length !== IV_LENGTH || authTag.length !== AUTH_TAG_LENGTH) {
     // Not an encrypted value — return as-is (backward compatibility)
+    log.warn("decrypt() recibió un valor con formato iv:tag:ct pero longitudes inválidas — devuelto tal cual");
     return encryptedText;
   }
 

@@ -156,7 +156,9 @@ export function calculateChurnScore(
 export async function computeAllChurnScores(db: DB): Promise<void> {
   const allContacts = await (db as any).query.contacts.findMany({
     where: eq(contacts.isArchived, false),
-    columns: { id: true, creatorId: true, lastInteractionAt: true },
+    // WK-15: sin estas dos columnas, `displayName`/`username` siempre eran
+    // `undefined` y todas las alertas de churn decían "Contacto en riesgo".
+    columns: { id: true, creatorId: true, lastInteractionAt: true, displayName: true, username: true },
     with: {
       profile: {
         columns: {

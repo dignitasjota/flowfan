@@ -113,11 +113,18 @@ export async function GET(
     return redirectWithError(request, (err as Error).message);
   }
 
+  // SEC-7: `redirectAfter` no se rellena hoy desde ningún input externo, pero
+  // si en el futuro se alimenta de querystring, validamos que sea una ruta
+  // interna (`/foo`, nunca `//evil.com` ni `https://evil.com`) antes de usarla.
+  const safeRedirect =
+    pending.redirectAfter &&
+    pending.redirectAfter.startsWith("/") &&
+    !pending.redirectAfter.startsWith("//")
+      ? pending.redirectAfter
+      : "/scheduler";
+
   return NextResponse.redirect(
-    new URL(
-      `${pending.redirectAfter ?? "/scheduler"}?oauth_connected=${provider}`,
-      request.url
-    ),
+    new URL(`${safeRedirect}?oauth_connected=${provider}`, request.url),
     303
   );
 }

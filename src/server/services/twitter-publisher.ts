@@ -1,59 +1,137 @@
+import { eq } from "drizzle-orm";
 import { decrypt, encrypt } from "@/lib/crypto";
 import { refreshTwitterToken } from "./oauth-twitter";
 import { isVideoUrl } from "@/lib/media";
+import { acquireLock, releaseLock } from "@/lib/rate-limit";
+import { socialAccounts } from "@/server/db/schema";
+import { createChildLogger } from "@/lib/logger";
+
+const log = createChildLogger("twitter-publisher");
 
 export type TwitterPublishResult =
   | { success: true; externalId: string; externalUrl: string; threadIds: string[] }
   | { success: false; error: string };
 
+type TwitterAccountTokenRow = {
+  id: string;
+  encryptedOauthAccessToken: string | null;
+  encryptedOauthRefreshToken: string | null;
+  oauthExpiresAt: Date | null;
+};
+
+const TWITTER_REFRESH_LOCK_TTL_MS = 20_000;
+const TWITTER_REFRESH_WAIT_MS = 8_000;
+const TWITTER_REFRESH_POLL_INTERVAL_MS = 400;
+
+function tokenExpiresSoon(row: TwitterAccountTokenRow): boolean {
+  return !row.oauthExpiresAt || row.oauthExpiresAt.getTime() - Date.now() < 60_000;
+}
+
+async function readAccountTokenRow(
+  db: any,
+  accountId: string
+): Promise<TwitterAccountTokenRow | null> {
+  const row = await db.query.socialAccounts.findFirst({
+    where: eq(socialAccounts.id, accountId),
+    columns: {
+      id: true,
+      encryptedOauthAccessToken: true,
+      encryptedOauthRefreshToken: true,
+      oauthExpiresAt: true,
+    },
+  });
+  return row ?? null;
+}
+
+async function persistRefreshedTokens(
+  db: any,
+  accountId: string,
+  tokens: { encryptedOauthAccessToken: string; encryptedOauthRefreshToken: string | null; oauthExpiresAt: Date }
+): Promise<void> {
+  await db
+    .update(socialAccounts)
+    .set({ ...tokens, updatedAt: new Date() })
+    .where(eq(socialAccounts.id, accountId));
+}
+
 /**
- * Returns a fresh access_token, refreshing it via the stored refresh_token
- * if expired. Returns the new tokens so the caller can persist them.
+ * WK-8: punto único para obtener un access token de Twitter fresco,
+ * serializado con un lock distribuido en Redis por `accountId`.
+ *
+ * Twitter rota el refresh_token en cada uso: si el poller y un scheduled
+ * post (u otro caller cualquiera) refrescan a la vez con el mismo
+ * refresh_token, Twitter invalida toda la familia y la cuenta queda
+ * desconectada hasta re-hacer el OAuth. Un lock por sí solo no basta si cada
+ * caller sigue usando el `account` que ya tenía en mano (obsoleto) — por eso,
+ * una vez dentro del lock, se relee la fila de `socialAccounts` desde `db`:
+ * si otro proceso ya refrescó mientras esperábamos, usamos ese resultado en
+ * vez de refrescar (e invalidar) de nuevo.
+ *
+ * `db` es el cliente de Drizzle (o una transacción) — tipado laxo a
+ * propósito, igual que el resto de servicios de este módulo que reciben `db`
+ * genérico.
  */
-export async function ensureFreshTwitterToken(args: {
-  encryptedAccess: string;
-  encryptedRefresh: string | null;
-  expiresAt: Date | null;
-}): Promise<{
-  accessToken: string;
-  refreshed: boolean;
-  newAccessEncrypted?: string;
-  newRefreshEncrypted?: string | null;
-  newExpiresAt?: Date;
-}> {
-  let access: string;
+export async function getFreshTwitterAccessToken(
+  db: any,
+  accountSnapshot: TwitterAccountTokenRow
+): Promise<string> {
+  if (!tokenExpiresSoon(accountSnapshot)) {
+    return decrypt(accountSnapshot.encryptedOauthAccessToken!);
+  }
+
+  const lockKey = `twitter_refresh:${accountSnapshot.id}`;
+  const lockToken = await acquireLock(lockKey, TWITTER_REFRESH_LOCK_TTL_MS);
+
+  if (!lockToken) {
+    // Otro proceso está refrescando esta cuenta ahora mismo: esperamos a que
+    // termine y releemos, en vez de refrescar en paralelo con el mismo
+    // refresh_token (eso es justo lo que rompe la cuenta).
+    const deadline = Date.now() + TWITTER_REFRESH_WAIT_MS;
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, TWITTER_REFRESH_POLL_INTERVAL_MS));
+      const fresh = await readAccountTokenRow(db, accountSnapshot.id);
+      if (fresh && !tokenExpiresSoon(fresh)) {
+        return decrypt(fresh.encryptedOauthAccessToken!);
+      }
+    }
+    log.warn(
+      { accountId: accountSnapshot.id },
+      "Timed out waiting for concurrent Twitter token refresh — using stale token, expect a possible 401"
+    );
+    return decrypt(accountSnapshot.encryptedOauthAccessToken!);
+  }
+
   try {
-    access = decrypt(args.encryptedAccess);
-  } catch (err) {
-    throw new Error(`Stored access token is invalid: ${(err as Error).message}`);
-  }
+    // Relectura: puede que otro proceso ya haya refrescado justo antes de
+    // que consiguiéramos el lock.
+    const fresh = (await readAccountTokenRow(db, accountSnapshot.id)) ?? accountSnapshot;
+    if (!tokenExpiresSoon(fresh)) {
+      return decrypt(fresh.encryptedOauthAccessToken!);
+    }
+    if (!fresh.encryptedOauthRefreshToken) {
+      // Sin refresh token: devolvemos lo que hay y dejamos que el caller
+      // descubra el 401 para que surja el aviso de "hay que reconectar".
+      return decrypt(fresh.encryptedOauthAccessToken!);
+    }
 
-  const expiresSoon =
-    args.expiresAt && args.expiresAt.getTime() - Date.now() < 60_000;
-  if (!expiresSoon) {
-    return { accessToken: access, refreshed: false };
-  }
+    const refreshDecrypted = decrypt(fresh.encryptedOauthRefreshToken);
+    const tokens = await refreshTwitterToken(refreshDecrypted);
+    const newAccessEncrypted = encrypt(tokens.accessToken);
+    const newRefreshEncrypted = tokens.refreshToken
+      ? encrypt(tokens.refreshToken)
+      : fresh.encryptedOauthRefreshToken;
+    const newExpiresAt = new Date(Date.now() + tokens.expiresInSec * 1000);
 
-  if (!args.encryptedRefresh) {
-    // No refresh token stored — return whatever we have and let the caller
-    // discover the 401 to surface a reconnect-needed error.
-    return { accessToken: access, refreshed: false };
-  }
+    await persistRefreshedTokens(db, accountSnapshot.id, {
+      encryptedOauthAccessToken: newAccessEncrypted,
+      encryptedOauthRefreshToken: newRefreshEncrypted,
+      oauthExpiresAt: newExpiresAt,
+    });
 
-  const refreshDecrypted = decrypt(args.encryptedRefresh);
-  const tokens = await refreshTwitterToken(refreshDecrypted);
-  const newAccessEncrypted = encrypt(tokens.accessToken);
-  const newRefreshEncrypted = tokens.refreshToken
-    ? encrypt(tokens.refreshToken)
-    : args.encryptedRefresh;
-  const newExpiresAt = new Date(Date.now() + tokens.expiresInSec * 1000);
-  return {
-    accessToken: tokens.accessToken,
-    refreshed: true,
-    newAccessEncrypted,
-    newRefreshEncrypted,
-    newExpiresAt,
-  };
+    return tokens.accessToken;
+  } finally {
+    await releaseLock(lockKey, lockToken);
+  }
 }
 
 async function postTweet(

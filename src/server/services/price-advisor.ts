@@ -1,4 +1,5 @@
-import { type AIConfig, callAIProvider, stripThinkingBlocks } from "./ai";
+import { type AIConfig, callAIProvider } from "./ai";
+import { parseTolerantJSON } from "./ai-json-parser";
 import type { BehavioralSignals } from "./scoring";
 import { getLanguageInstruction } from "./language-utils";
 
@@ -59,28 +60,20 @@ Responde UNICAMENTE con el JSON.`;
 // ============================================================
 
 function parsePriceJSON(text: string): Omit<PriceAdvice, "tokensUsed"> | null {
-  let cleaned = stripThinkingBlocks(text);
-  cleaned = cleaned.replace(/```json\s*/gi, "").replace(/```\s*/gi, "");
+  const parsed = parseTolerantJSON<Record<string, any>>(text);
+  if (!parsed) return null;
 
-  const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) return null;
-
-  try {
-    const parsed = JSON.parse(jsonMatch[0]);
-    return {
-      recommendedPrice: Math.max(0, Number(parsed.recommendedPrice) || 0),
-      priceRange: {
-        min: Math.max(0, Number(parsed.priceRange?.min) || 0),
-        max: Math.max(0, Number(parsed.priceRange?.max) || 0),
-      },
-      confidence: Math.max(0, Math.min(1, Number(parsed.confidence) || 0)),
-      timing: ["now", "wait", "soon"].includes(parsed.timing) ? parsed.timing : "wait",
-      timingReason: String(parsed.timingReason || "Sin datos suficientes"),
-      strategy: String(parsed.strategy || "Necesita mas interaccion"),
-    };
-  } catch {
-    return null;
-  }
+  return {
+    recommendedPrice: Math.max(0, Number(parsed.recommendedPrice) || 0),
+    priceRange: {
+      min: Math.max(0, Number(parsed.priceRange?.min) || 0),
+      max: Math.max(0, Number(parsed.priceRange?.max) || 0),
+    },
+    confidence: Math.max(0, Math.min(1, Number(parsed.confidence) || 0)),
+    timing: ["now", "wait", "soon"].includes(parsed.timing) ? parsed.timing : "wait",
+    timingReason: String(parsed.timingReason || "Sin datos suficientes"),
+    strategy: String(parsed.strategy || "Necesita mas interaccion"),
+  };
 }
 
 // ============================================================

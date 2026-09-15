@@ -31,7 +31,7 @@ import {
   applyTwitterModeration,
   applyInstagramModeration,
 } from "@/server/services/platform-moderation";
-import { ensureFreshTwitterToken } from "@/server/services/twitter-publisher";
+import { getFreshTwitterAccessToken } from "@/server/services/twitter-publisher";
 
 /**
  * Translate a moderation status into a platform-specific action and apply it.
@@ -60,26 +60,19 @@ async function applyPlatformModeration(args: {
 
   if (args.platformType === "twitter") {
     try {
-      const refreshed = await ensureFreshTwitterToken({
-        encryptedAccess: account.encryptedOauthAccessToken,
-        encryptedRefresh: account.encryptedOauthRefreshToken,
-        expiresAt: account.oauthExpiresAt,
+      // WK-8: lock distribuido + relectura antes de refrescar (ver
+      // getFreshTwitterAccessToken) — evita refrescar el mismo refresh_token
+      // en paralelo con el poller/scheduler.
+      const accessToken = await getFreshTwitterAccessToken(args.ctx.db, {
+        id: account.id,
+        encryptedOauthAccessToken: account.encryptedOauthAccessToken,
+        encryptedOauthRefreshToken: account.encryptedOauthRefreshToken,
+        oauthExpiresAt: account.oauthExpiresAt,
       });
-      if (refreshed.refreshed) {
-        await args.ctx.db
-          .update(socialAccounts)
-          .set({
-            encryptedOauthAccessToken: refreshed.newAccessEncrypted,
-            encryptedOauthRefreshToken: refreshed.newRefreshEncrypted,
-            oauthExpiresAt: refreshed.newExpiresAt,
-            updatedAt: new Date(),
-          })
-          .where(eq(socialAccounts.id, account.id));
-      }
       const action =
         args.status === "visible" ? "unhide" : "hide";
       const result = await applyTwitterModeration({
-        accessToken: refreshed.accessToken,
+        accessToken,
         externalCommentId: args.externalCommentId,
         action,
       });

@@ -14,7 +14,22 @@ type Signature = {
   offset: number;
   /** Patrón de bytes. `null` = wildcard (cualquier byte). */
   bytes: (number | null)[];
+  /** Validación adicional sobre el buffer completo (además del patrón). */
+  extraCheck?: (buffer: Buffer) => boolean;
 };
+
+// SEC-10: el "major brand" de un contenedor ftyp (offset 8-11) es siempre
+// ASCII imprimible (p.ej. "isom", "mp42", "qt  ", "M4V "). No es una firma
+// fuerte, pero descarta buffers arbitrarios que solo coincidan por azar con
+// los 4 bytes de "ftyp" en offset 4.
+function hasPlausibleFtypBrand(buffer: Buffer): boolean {
+  if (buffer.length < 12) return false;
+  for (let i = 8; i < 12; i++) {
+    const b = buffer[i]!;
+    if (b < 0x20 || b > 0x7e) return false;
+  }
+  return true;
+}
 
 const SIGNATURES: Signature[] = [
   { mime: "image/jpeg", offset: 0, bytes: [0xff, 0xd8, 0xff] },
@@ -49,11 +64,13 @@ const SIGNATURES: Signature[] = [
     mime: "video/mp4",
     offset: 4,
     bytes: [0x66, 0x74, 0x79, 0x70],
+    extraCheck: hasPlausibleFtypBrand,
   },
   {
     mime: "video/quicktime",
     offset: 4,
     bytes: [0x66, 0x74, 0x79, 0x70],
+    extraCheck: hasPlausibleFtypBrand,
   },
   // WebM / Matroska — EBML header
   {
@@ -70,7 +87,7 @@ function matches(buffer: Buffer, sig: Signature): boolean {
     if (expected === null) continue;
     if (buffer[sig.offset + i] !== expected) return false;
   }
-  return true;
+  return sig.extraCheck ? sig.extraCheck(buffer) : true;
 }
 
 /**

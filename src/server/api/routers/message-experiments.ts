@@ -23,7 +23,10 @@ const variantSchema = z.object({
 });
 
 /** Carga un experimento verificando ownership del tenant. */
-async function loadOwnedExperiment(ctx: any, id: string) {
+async function loadOwnedExperiment(
+  ctx: { db: typeof import("@/server/db").db; creatorId: string },
+  id: string
+) {
   const exp = await ctx.db.query.messageExperiments.findFirst({
     where: and(
       eq(messageExperiments.id, id),
@@ -66,7 +69,7 @@ export const messageExperimentsRouter = createTRPCRouter({
       });
       // Filtro de plataforma en memoria: null = aplica a cualquiera.
       return rows.filter(
-        (r: any) =>
+        (r) =>
           !input?.platformType ||
           !r.platformType ||
           r.platformType === input.platformType

@@ -1,4 +1,5 @@
-import { type AIConfig, callAIProvider, stripThinkingBlocks } from "./ai";
+import { type AIConfig, callAIProvider } from "./ai";
+import { parseTolerantJSON } from "./ai-json-parser";
 import { getLanguageInstruction } from "./language-utils";
 
 export type PublicCoachingTactic = {
@@ -91,21 +92,9 @@ function buildUserMessage(input: PublicCoachingInput): string {
 }
 
 function tryParseCoaching(text: string): PublicCoachingResult | null {
-  const cleaned = stripThinkingBlocks(text);
-  const fenced = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  const raw = (fenced ? fenced[1] : cleaned).trim();
-  const firstBrace = raw.indexOf("{");
-  const lastBrace = raw.lastIndexOf("}");
-  if (firstBrace === -1 || lastBrace === -1) return null;
-  const slice = raw.slice(firstBrace, lastBrace + 1);
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(slice);
-  } catch {
-    return null;
-  }
+  const parsed = parseTolerantJSON<Record<string, unknown>>(text);
   if (!parsed || typeof parsed !== "object") return null;
-  const obj = parsed as Record<string, unknown>;
+  const obj = parsed;
 
   const tactics = Array.isArray(obj.tactics)
     ? (obj.tactics as Record<string, unknown>[])

@@ -1116,6 +1116,20 @@ const scheduledPostWorker = new Worker<ScheduledPostJobData>(
     const errors: Record<string, string> = {};
     let successCount = 0;
 
+    // ARCH-1: idempotencia por diseño — persistir `externalPostIds` en la fila
+    // inmediatamente tras CADA éxito, no solo al final del job. Sin esto, el
+    // guard de WK-1 (`externalIds[platform]?.id`) solo protege dentro de la
+    // misma ejecución: si el proceso muere entre dos plataformas (p.ej. tras
+    // publicar en Reddit pero antes de terminar con Twitter), el retry de
+    // BullMQ vuelve a leer `post.externalPostIds` vacío de DB y republica en
+    // Reddit también.
+    const persistExternalIds = async () => {
+      await db
+        .update(scheduledPosts)
+        .set({ externalPostIds: externalIds, updatedAt: new Date() })
+        .where(eq(scheduledPosts.id, scheduledPostId));
+    };
+
     for (const platform of post.targetPlatforms) {
       // WK-1: idempotencia en reintentos. Si esta plataforma ya se publicó en
       // un intento anterior (externalId persistido en externalPostIds), no
@@ -1170,6 +1184,7 @@ const scheduledPostWorker = new Worker<ScheduledPostJobData>(
         });
         externalIds[platform] = { id: "webhook-dispatched" };
         successCount++;
+        await persistExternalIds();
         continue;
       }
 
@@ -1214,6 +1229,7 @@ const scheduledPostWorker = new Worker<ScheduledPostJobData>(
             url: result.externalUrl,
           };
           successCount++;
+          await persistExternalIds();
 
           // Sync to socialPosts so the comment poller picks up replies on
           // this submission. Skip silently if duplicate (unique index).
@@ -1261,28 +1277,19 @@ const scheduledPostWorker = new Worker<ScheduledPostJobData>(
           errors[platform] = "Twitter account not connected via OAuth";
           continue;
         }
-        const { publishToTwitter, ensureFreshTwitterToken } = await import(
+        const { publishToTwitter, getFreshTwitterAccessToken } = await import(
           "./services/twitter-publisher"
         );
         try {
-          const refreshed = await ensureFreshTwitterToken({
-            encryptedAccess: account.encryptedOauthAccessToken,
-            encryptedRefresh: account.encryptedOauthRefreshToken,
-            expiresAt: account.oauthExpiresAt,
+          // WK-8: lock distribuido + relectura de la fila antes de refrescar
+          // (ver getFreshTwitterAccessToken) — evita refrescar el mismo
+          // refresh_token en paralelo con el poller/otros publishers.
+          const accessToken = await getFreshTwitterAccessToken(db, {
+            id: account.id,
+            encryptedOauthAccessToken: account.encryptedOauthAccessToken,
+            encryptedOauthRefreshToken: account.encryptedOauthRefreshToken,
+            oauthExpiresAt: account.oauthExpiresAt,
           });
-          if (refreshed.refreshed) {
-            // Persist refreshed tokens
-            const { socialAccounts: saTable } = await import("./db/schema");
-            await db
-              .update(saTable)
-              .set({
-                encryptedOauthAccessToken: refreshed.newAccessEncrypted,
-                encryptedOauthRefreshToken: refreshed.newRefreshEncrypted,
-                oauthExpiresAt: refreshed.newExpiresAt,
-                updatedAt: new Date(),
-              })
-              .where(eq(saTable.id, account.id));
-          }
 
           const twitterCfg = ((post.platformConfigs as Record<string, unknown>)?.twitter ?? {}) as {
             tweet?: string;
@@ -1297,7 +1304,7 @@ const scheduledPostWorker = new Worker<ScheduledPostJobData>(
             .slice(0, 4);
 
           const result = await publishToTwitter({
-            accessToken: refreshed.accessToken,
+            accessToken,
             tweet: tweetText.slice(0, 270),
             thread: thread.map((t) => t.slice(0, 270)),
             username: account.accountUsername ?? undefined,
@@ -1309,6 +1316,7 @@ const scheduledPostWorker = new Worker<ScheduledPostJobData>(
               url: result.externalUrl,
             };
             successCount++;
+            await persistExternalIds();
 
             // Mirror to socialPosts so the Twitter comment poller monitors
             // this tweet for replies. Unique index dedupes on retries.
@@ -1421,6 +1429,7 @@ const scheduledPostWorker = new Worker<ScheduledPostJobData>(
               url: result.externalUrl,
             };
             successCount++;
+            await persistExternalIds();
             dispatchWebhookEvent(db, creatorId, "post.published", {
               scheduledPostId,
               platform,
@@ -1504,7 +1513,10 @@ const scheduledPostWorker = new Worker<ScheduledPostJobData>(
           ? (post.recurrenceCount ?? 0) + 1
           : post.recurrenceCount,
         jobId: nextJobId ?? post.jobId,
-        attempts: nextScheduleAt ? 0 : post.attempts + 0,
+        // WK-15: `post` es el snapshot leído al inicio del job (antes del
+        // +1 de la línea 1108); sin el +1 aquí este update sobrescribía el
+        // contador con el valor previo al intento actual.
+        attempts: nextScheduleAt ? 0 : post.attempts + 1,
         updatedAt: new Date(),
       })
       .where(eq(scheduledPosts.id, scheduledPostId));

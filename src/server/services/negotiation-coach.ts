@@ -1,4 +1,5 @@
-import { type AIConfig, callAIProvider, stripThinkingBlocks } from "./ai";
+import { type AIConfig, callAIProvider } from "./ai";
+import { parseTolerantJSON } from "./ai-json-parser";
 import { getLanguageInstruction } from "./language-utils";
 
 // ============================================================
@@ -89,38 +90,29 @@ Responde UNICAMENTE con el JSON.`;
 // ============================================================
 
 function parseCoachingJSON(text: string): Omit<CoachingResult, "tokensUsed"> | null {
-  let cleaned = stripThinkingBlocks(text);
-  cleaned = cleaned.replace(/```json\s*/gi, "").replace(/```\s*/gi, "");
+  const parsed = parseTolerantJSON<Record<string, any>>(text);
+  if (!parsed) return null;
 
-  const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) return null;
+  const tactics: CoachingTactic[] = Array.isArray(parsed.tactics)
+    ? parsed.tactics.slice(0, 5).map((t: any) => ({
+        name: String(t.name || ""),
+        description: String(t.description || ""),
+        example: String(t.example || ""),
+        riskLevel: ["low", "medium", "high"].includes(t.riskLevel)
+          ? t.riskLevel
+          : "medium",
+      }))
+    : [];
 
-  try {
-    const parsed = JSON.parse(jsonMatch[0]);
-
-    const tactics: CoachingTactic[] = Array.isArray(parsed.tactics)
-      ? parsed.tactics.slice(0, 5).map((t: any) => ({
-          name: String(t.name || ""),
-          description: String(t.description || ""),
-          example: String(t.example || ""),
-          riskLevel: ["low", "medium", "high"].includes(t.riskLevel)
-            ? t.riskLevel
-            : "medium",
-        }))
-      : [];
-
-    return {
-      situationAssessment: String(parsed.situationAssessment || "Sin datos suficientes"),
-      fanProfile: String(parsed.fanProfile || "Perfil no determinado"),
-      currentLeverage: String(parsed.currentLeverage || "Sin apalancamiento claro"),
-      risks: Array.isArray(parsed.risks) ? parsed.risks.map(String).slice(0, 3) : [],
-      tactics,
-      suggestedNextMove: String(parsed.suggestedNextMove || "Continuar observando"),
-      avoidList: Array.isArray(parsed.avoidList) ? parsed.avoidList.map(String).slice(0, 5) : [],
-    };
-  } catch {
-    return null;
-  }
+  return {
+    situationAssessment: String(parsed.situationAssessment || "Sin datos suficientes"),
+    fanProfile: String(parsed.fanProfile || "Perfil no determinado"),
+    currentLeverage: String(parsed.currentLeverage || "Sin apalancamiento claro"),
+    risks: Array.isArray(parsed.risks) ? parsed.risks.map(String).slice(0, 3) : [],
+    tactics,
+    suggestedNextMove: String(parsed.suggestedNextMove || "Continuar observando"),
+    avoidList: Array.isArray(parsed.avoidList) ? parsed.avoidList.map(String).slice(0, 5) : [],
+  };
 }
 
 // ============================================================

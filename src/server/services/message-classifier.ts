@@ -1,20 +1,8 @@
-import { callAIProvider, stripThinkingBlocks, type AIConfig } from "./ai";
+import { callAIProvider, type AIConfig } from "./ai";
+import { parseTolerantJSON } from "./ai-json-parser";
 import { createChildLogger } from "@/lib/logger";
 
 const log = createChildLogger("message-classifier");
-
-/**
- * AI-10: parser tolerante (igual que el resto de servicios de IA). Antes hacía
- * JSON.parse(result.text) crudo → con modelos que envuelven en ```json o emiten
- * <think>, fallaba siempre y caía a general/0.5 en silencio.
- */
-function tolerantParse(text: string): { category?: string; confidence?: number } {
-  let cleaned = stripThinkingBlocks(text).replace(/```(?:json)?/gi, "").trim();
-  const start = cleaned.indexOf("{");
-  const end = cleaned.lastIndexOf("}");
-  if (start !== -1 && end > start) cleaned = cleaned.slice(start, end + 1);
-  return JSON.parse(cleaned);
-}
 
 export type MessageCategory = "urgent" | "price_inquiry" | "spam" | "general";
 
@@ -96,13 +84,14 @@ No incluyas nada mas. Plataforma: ${platformType}`;
       100
     );
 
-    const parsed = tolerantParse(result.text);
-    const category = parsed.category as string;
-    const confidence = Number(parsed.confidence) || 0.5;
+    const parsed = parseTolerantJSON<{ category?: string; confidence?: number }>(result.text);
+    const category = parsed?.category as string | undefined;
+    const confidence = Number(parsed?.confidence) || 0.5;
 
-    if (["urgent", "price_inquiry", "spam", "general"].includes(category)) {
+    if (category && ["urgent", "price_inquiry", "spam", "general"].includes(category)) {
       return { category: category as MessageCategory, confidence };
     }
+    log.warn({ text: result.text.slice(0, 200) }, "Could not parse AI classification, falling back to general");
   } catch (err) {
     log.warn({ err }, "AI classification failed, falling back to general");
   }

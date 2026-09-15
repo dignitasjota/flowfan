@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // Mock the actual SDK clients
 const mockAnthropicCreate = vi.fn();
@@ -26,6 +26,8 @@ import {
   generateSuggestion,
   stripThinkingBlocks,
   PROVIDER_MODELS,
+  MODEL_REGISTRY,
+  isReasonerModel,
 } from "@/server/services/ai";
 import type { SuggestionInput } from "@/server/services/ai";
 
@@ -95,6 +97,182 @@ describe("callAIProvider", () => {
         [{ role: "user", content: "hi" }]
       )
     ).rejects.toThrow("Unsupported AI provider");
+  });
+
+  describe("ARCH-3: stopReason normalization", () => {
+    it("normalizes Anthropic's stop_reason=max_tokens to 'length'", async () => {
+      mockAnthropicCreate.mockResolvedValueOnce({
+        content: [{ type: "text", text: "cut off" }],
+        usage: { input_tokens: 10, output_tokens: 5 },
+        stop_reason: "max_tokens",
+      });
+
+      const result = await callAIProvider(
+        { provider: "anthropic", model: "claude-sonnet-4-6", apiKey: "k" },
+        "sys",
+        [{ role: "user", content: "hi" }]
+      );
+
+      expect(result.stopReason).toBe("length");
+    });
+
+    it("normalizes Anthropic's stop_reason=end_turn to 'stop'", async () => {
+      mockAnthropicCreate.mockResolvedValueOnce({
+        content: [{ type: "text", text: "done" }],
+        usage: { input_tokens: 10, output_tokens: 5 },
+        stop_reason: "end_turn",
+      });
+
+      const result = await callAIProvider(
+        { provider: "anthropic", model: "claude-sonnet-4-6", apiKey: "k" },
+        "sys",
+        [{ role: "user", content: "hi" }]
+      );
+
+      expect(result.stopReason).toBe("stop");
+    });
+
+    it("normalizes OpenAI's finish_reason=length to 'length'", async () => {
+      mockOpenAICreate.mockResolvedValueOnce({
+        choices: [{ message: { content: "cut off" }, finish_reason: "length" }],
+        usage: { prompt_tokens: 10, completion_tokens: 5 },
+      });
+
+      const result = await callAIProvider(
+        { provider: "openai", model: "gpt-4o", apiKey: "k" },
+        "sys",
+        [{ role: "user", content: "hi" }]
+      );
+
+      expect(result.stopReason).toBe("length");
+    });
+  });
+
+  describe("ARCH-11: reasoner min budget", () => {
+    it("bumps maxTokens for a reasoner model (MiniMax-M1) when the caller asked for less", async () => {
+      mockOpenAICreate.mockResolvedValueOnce({
+        choices: [{ message: { content: "ok" }, finish_reason: "stop" }],
+        usage: { prompt_tokens: 10, completion_tokens: 5 },
+      });
+
+      await callAIProvider(
+        { provider: "minimax", model: "MiniMax-M1", apiKey: "k" },
+        "sys",
+        [{ role: "user", content: "hi" }],
+        100 // el classifier real pide esto — se truncaría sin el bump
+      );
+
+      expect(mockOpenAICreate).toHaveBeenCalledWith(
+        expect.objectContaining({ max_tokens: 2000 })
+      );
+    });
+
+    it("does NOT bump maxTokens for a non-reasoner model", async () => {
+      mockOpenAICreate.mockResolvedValueOnce({
+        choices: [{ message: { content: "ok" }, finish_reason: "stop" }],
+        usage: { prompt_tokens: 10, completion_tokens: 5 },
+      });
+
+      await callAIProvider(
+        { provider: "minimax", model: "minimax-m2.5", apiKey: "k" },
+        "sys",
+        [{ role: "user", content: "hi" }],
+        100
+      );
+
+      expect(mockOpenAICreate).toHaveBeenCalledWith(
+        expect.objectContaining({ max_tokens: 100 })
+      );
+    });
+  });
+
+  describe("ARCH-3: Google provider (fetch-based, retry on 429/5xx)", () => {
+    const originalFetch = global.fetch;
+
+    afterEach(() => {
+      global.fetch = originalFetch;
+    });
+
+    it("succeeds on the first try and normalizes finishReason", async () => {
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          candidates: [{ content: { parts: [{ text: "hola" }] }, finishReason: "STOP" }],
+          usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5 },
+        }),
+      });
+      global.fetch = mockFetch as any;
+
+      const result = await callAIProvider(
+        { provider: "google", model: "gemini-2.5-flash", apiKey: "k" },
+        "sys",
+        [{ role: "user", content: "hi" }]
+      );
+
+      expect(result.text).toBe("hola");
+      expect(result.stopReason).toBe("stop");
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+
+    it("retries on a 503 and succeeds on the second attempt", async () => {
+      const mockFetch = vi
+        .fn()
+        .mockResolvedValueOnce({ ok: false, status: 503, text: async () => "overloaded" })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            candidates: [{ content: { parts: [{ text: "hola" }] }, finishReason: "STOP" }],
+            usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5 },
+          }),
+        });
+      global.fetch = mockFetch as any;
+
+      const result = await callAIProvider(
+        { provider: "google", model: "gemini-2.5-flash", apiKey: "k" },
+        "sys",
+        [{ role: "user", content: "hi" }]
+      );
+
+      expect(result.text).toBe("hola");
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
+
+    it("does NOT retry on a 400 (non-retryable) and throws immediately", async () => {
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        text: async () => "bad request",
+      });
+      global.fetch = mockFetch as any;
+
+      await expect(
+        callAIProvider(
+          { provider: "google", model: "gemini-2.5-flash", apiKey: "k" },
+          "sys",
+          [{ role: "user", content: "hi" }]
+        )
+      ).rejects.toThrow("Google AI error (400)");
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+
+    it("gives up after exhausting retries on persistent 429s", async () => {
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 429,
+        text: async () => "rate limited",
+      });
+      global.fetch = mockFetch as any;
+
+      await expect(
+        callAIProvider(
+          { provider: "google", model: "gemini-2.5-flash", apiKey: "k" },
+          "sys",
+          [{ role: "user", content: "hi" }]
+        )
+      ).rejects.toThrow("Google AI error (429)");
+      // 1 intento inicial + 2 reintentos = 3 llamadas
+      expect(mockFetch).toHaveBeenCalledTimes(3);
+    }, 10_000);
   });
 });
 
@@ -182,6 +360,61 @@ describe("generateSuggestion", () => {
     expect(result.suggestions.length).toBeGreaterThanOrEqual(1);
     expect(result.variants[0]!.type).toBe("casual"); // fallback type
   });
+
+  it("ARCH-5: marks the stable prefix with cache_control for Anthropic, and keeps the contact-specific part uncached", async () => {
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [{ type: "text", text: "[CASUAL] hola" }],
+      usage: { input_tokens: 100, output_tokens: 20 },
+    });
+
+    await generateSuggestion(
+      { provider: "anthropic", model: "claude-sonnet-4-6", apiKey: "test-key" },
+      {
+        platformType: "instagram",
+        personality: { tone: "friendly" },
+        globalInstructions: "Nunca prometas descuentos.",
+        contactProfile: { engagementLevel: 80, funnelStage: "vip", communicationStyle: {}, paymentProbability: 90 },
+        conversationHistory: [],
+        contactNotes: ["Le gustan los gatos"],
+        fanMessage: "Hola!",
+      }
+    );
+
+    const callArgs = mockAnthropicCreate.mock.calls[0]![0];
+    expect(Array.isArray(callArgs.system)).toBe(true);
+    const [stableBlock, restBlock] = callArgs.system;
+    expect(stableBlock.cache_control).toEqual({ type: "ephemeral" });
+    expect(stableBlock.text).toContain("INSTRUCCIONES GLOBALES");
+    expect(stableBlock.text).not.toContain("PERFIL DEL CONTACTO");
+    expect(restBlock.cache_control).toBeUndefined();
+    expect(restBlock.text).toContain("PERFIL DEL CONTACTO");
+    expect(restBlock.text).toContain("Le gustan los gatos");
+  });
+
+  it("ARCH-5: does not touch the request shape for non-Anthropic providers (flattened string)", async () => {
+    mockOpenAICreate.mockResolvedValueOnce({
+      choices: [{ message: { content: "[CASUAL] hola" }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 50, completion_tokens: 10 },
+    });
+
+    await generateSuggestion(
+      { provider: "openai", model: "gpt-4o", apiKey: "test-key" },
+      {
+        platformType: "instagram",
+        personality: {},
+        contactProfile: { engagementLevel: 10, funnelStage: "cold", communicationStyle: {}, paymentProbability: 5 },
+        conversationHistory: [],
+        contactNotes: [],
+        fanMessage: "Hola",
+      }
+    );
+
+    const callArgs = mockOpenAICreate.mock.calls[0]![0];
+    const systemMessage = callArgs.messages[0];
+    expect(systemMessage.role).toBe("system");
+    expect(typeof systemMessage.content).toBe("string");
+    expect(systemMessage.content).toContain("PERFIL DEL CONTACTO");
+  });
 });
 
 describe("PROVIDER_MODELS", () => {
@@ -200,5 +433,36 @@ describe("PROVIDER_MODELS", () => {
         expect(model.label).toBeTruthy();
       }
     }
+  });
+
+  it("is derived from MODEL_REGISTRY (same values, without the metadata)", () => {
+    for (const [provider, models] of Object.entries(MODEL_REGISTRY)) {
+      expect(PROVIDER_MODELS[provider as keyof typeof PROVIDER_MODELS]).toEqual(
+        models.map(({ value, label }) => ({ value, label }))
+      );
+    }
+  });
+});
+
+describe("ARCH-11: MODEL_REGISTRY / isReasonerModel", () => {
+  it("every model has a positive contextWindow", () => {
+    for (const models of Object.values(MODEL_REGISTRY)) {
+      for (const model of models) {
+        expect(model.contextWindow).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it("flags MiniMax-M1 as a reasoner", () => {
+    expect(isReasonerModel("minimax", "MiniMax-M1")).toBe(true);
+  });
+
+  it("does not flag a regular chat model as a reasoner", () => {
+    expect(isReasonerModel("minimax", "minimax-m2.5")).toBe(false);
+    expect(isReasonerModel("anthropic", "claude-sonnet-4-6")).toBe(false);
+  });
+
+  it("defaults to false for an unknown model string", () => {
+    expect(isReasonerModel("anthropic", "some-future-model")).toBe(false);
   });
 });

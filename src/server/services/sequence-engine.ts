@@ -32,23 +32,6 @@ export async function enrollContact(
   contactId: string,
   creatorId: string,
 ): Promise<{ enrolled: boolean; enrollmentId?: string; reason?: string }> {
-  // Check if already enrolled in this sequence (active or paused)
-  const existing = await (db as any)
-    .select({ id: sequenceEnrollments.id })
-    .from(sequenceEnrollments)
-    .where(
-      and(
-        eq(sequenceEnrollments.sequenceId, sequenceId),
-        eq(sequenceEnrollments.contactId, contactId),
-        sql`${sequenceEnrollments.status} IN ('active', 'paused')`
-      )
-    )
-    .limit(1);
-
-  if (existing.length > 0) {
-    return { enrolled: false, reason: "already_enrolled" };
-  }
-
   // Load sequence to get first step delay
   const [sequence] = await (db as any)
     .select()
@@ -68,6 +51,12 @@ export async function enrollContact(
   const firstStep = steps[0]!;
   const nextStepAt = new Date(Date.now() + firstStep.delayDays * 24 * 60 * 60 * 1000);
 
+  // WK-13: check-then-insert reemplazado por un insert atómico con
+  // `onConflictDoNothing` sobre el índice único parcial
+  // `sequence_enrollments_active_unique_idx` (sequenceId, contactId WHERE
+  // status IN ('active','paused')). Dos llamadas concurrentes ya no pueden
+  // matricular dos veces al mismo contacto en la misma secuencia — Postgres
+  // resuelve la carrera, no una lectura previa en JS.
   const [enrollment] = await (db as any)
     .insert(sequenceEnrollments)
     .values({
@@ -79,7 +68,15 @@ export async function enrollContact(
       nextStepAt,
       metadata: {},
     })
+    .onConflictDoNothing({
+      target: [sequenceEnrollments.sequenceId, sequenceEnrollments.contactId],
+      where: sql`status IN ('active', 'paused')`,
+    })
     .returning({ id: sequenceEnrollments.id });
+
+  if (!enrollment) {
+    return { enrolled: false, reason: "already_enrolled" };
+  }
 
   // Increment totalEnrolled
   await (db as any)

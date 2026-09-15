@@ -37,6 +37,10 @@ vi.mock("@/server/services/ab-experiment", () => ({
   recordExperimentMetric: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock("@/server/services/message-experiment", () => ({
+  markExperimentConversionForContact: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock("@/server/services/scoring", () => ({
   updateSignals: vi.fn().mockReturnValue({
     messageCount: 5,
@@ -83,41 +87,64 @@ function makeAnalysis(overrides: Partial<SentimentResult> = {}): SentimentResult
   };
 }
 
-function createMockDb(profile: Record<string, unknown> | null = null, contact: Record<string, unknown> | null = null) {
-  const updateSet = vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) });
-  const insertValues = vi.fn().mockResolvedValue(undefined);
+const DEFAULT_PROFILE = {
+  contactId: "contact-1",
+  engagementLevel: 30,
+  paymentProbability: 20,
+  funnelStage: "cold",
+  behavioralSignals: null,
+  scoringHistory: [],
+};
 
-  return {
+const DEFAULT_CONTACT = {
+  id: "contact-1",
+  creatorId: "creator-1",
+  username: "fan_user",
+  displayName: "Fan User",
+  totalConversations: 2,
+};
+
+/**
+ * WK-10: `updateContactProfile` ahora lee y escribe el profile dentro de
+ * `db.transaction(async (tx) => { ... tx.select()...for("update") ... })`.
+ * El mock simula esa transacción: `db.transaction` invoca el callback con un
+ * `tx` propio (select con lock + query.contacts/platformScoringConfigs +
+ * update), separado del `db` exterior (que solo se usa para el update del
+ * mensaje/comentario y el insert de notificaciones, fuera del lock).
+ */
+function createMockDb(
+  profileRow: Record<string, unknown> | null = DEFAULT_PROFILE,
+  contact: Record<string, unknown> | null = DEFAULT_CONTACT
+) {
+  const forUpdateMock = vi.fn().mockResolvedValue(profileRow ? [profileRow] : []);
+  const selectWhereMock = vi.fn().mockReturnValue({ for: forUpdateMock });
+  const selectFromMock = vi.fn().mockReturnValue({ where: selectWhereMock });
+  const txSelectMock = vi.fn().mockReturnValue({ from: selectFromMock });
+
+  const txUpdateSet = vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) });
+  const txUpdateMock = vi.fn().mockReturnValue({ set: txUpdateSet });
+
+  const tx = {
+    select: txSelectMock,
     query: {
-      contactProfiles: {
-        findFirst: vi.fn().mockResolvedValue(profile ?? {
-          contactId: "contact-1",
-          engagementLevel: 30,
-          paymentProbability: 20,
-          funnelStage: "cold",
-          behavioralSignals: null,
-          scoringHistory: [],
-        }),
-      },
-      contacts: {
-        findFirst: vi.fn().mockResolvedValue(contact ?? {
-          id: "contact-1",
-          creatorId: "creator-1",
-          username: "fan_user",
-          displayName: "Fan User",
-          totalConversations: 2,
-        }),
-      },
-      // Only consulted when the contact has `platformType` set. The default
-      // contact above does not, so this path is normally skipped. The mock
-      // is here for forward-compatibility if a test populates platformType.
-      platformScoringConfigs: {
-        findFirst: vi.fn().mockResolvedValue(null),
-      },
+      contacts: { findFirst: vi.fn().mockResolvedValue(contact) },
+      platformScoringConfigs: { findFirst: vi.fn().mockResolvedValue(null) },
     },
-    update: vi.fn().mockReturnValue({ set: updateSet }),
-    insert: vi.fn().mockReturnValue({ values: insertValues }),
-  } as any;
+    update: txUpdateMock,
+  };
+
+  const outerUpdateSet = vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) });
+  const outerInsertValues = vi.fn().mockResolvedValue(undefined);
+
+  const db = {
+    transaction: vi.fn().mockImplementation(async (cb: (tx: unknown) => Promise<unknown>) => cb(tx)),
+    update: vi.fn().mockReturnValue({ set: outerUpdateSet }),
+    insert: vi.fn().mockReturnValue({ values: outerInsertValues }),
+    _tx: tx,
+    _forUpdateMock: forUpdateMock,
+  };
+
+  return db as any;
 }
 
 beforeEach(() => {
@@ -125,12 +152,13 @@ beforeEach(() => {
 });
 
 describe("updateContactProfile", () => {
-  it("reads current profile and contact", async () => {
+  it("locks the profile row with SELECT ... FOR UPDATE inside a transaction", async () => {
     const db = createMockDb();
     await updateContactProfile(db, "contact-1", "msg-1", makeAnalysis());
 
-    expect(db.query.contactProfiles.findFirst).toHaveBeenCalled();
-    expect(db.query.contacts.findFirst).toHaveBeenCalled();
+    expect(db.transaction).toHaveBeenCalledTimes(1);
+    expect(db._forUpdateMock).toHaveBeenCalledWith("update");
+    expect(db._tx.query.contacts.findFirst).toHaveBeenCalled();
   });
 
   it("calls updateSignals with analysis data", async () => {
@@ -147,21 +175,24 @@ describe("updateContactProfile", () => {
     expect(mockCalculateScores).toHaveBeenCalled();
   });
 
-  it("updates contact profile in DB", async () => {
+  it("updates contact profile inside the transaction and the message outside it", async () => {
     const db = createMockDb();
     await updateContactProfile(db, "contact-1", "msg-1", makeAnalysis());
 
-    // Should call update twice: profile + message sentiment
-    expect(db.update).toHaveBeenCalledTimes(2);
+    // El profile se actualiza dentro de la transacción (bajo el lock)...
+    expect(db._tx.update).toHaveBeenCalledTimes(1);
+    // ...y el mensaje se actualiza fuera, sobre el `db` exterior.
+    expect(db.update).toHaveBeenCalledTimes(1);
   });
 
-  it("does nothing if profile not found", async () => {
+  it("does nothing if profile not found (no row to lock)", async () => {
     const db = createMockDb(null);
-    db.query.contactProfiles.findFirst.mockResolvedValue(null);
 
     await updateContactProfile(db, "contact-1", "msg-1", makeAnalysis());
 
+    expect(db._tx.update).not.toHaveBeenCalled();
     expect(db.update).not.toHaveBeenCalled();
+    expect(db.insert).not.toHaveBeenCalled();
   });
 
   it("creates notification on funnel advance", async () => {
@@ -219,13 +250,14 @@ describe("updateContactProfile", () => {
 
     await updateContactProfile(db, "contact-1", "msg-1", makeAnalysis());
 
-    // Verify update was called, and the history would be capped
-    expect(db.update).toHaveBeenCalled();
+    // Verify the profile update (inside the tx) was called, and the history
+    // would be capped.
+    expect(db._tx.update).toHaveBeenCalled();
   });
 
   it("rethrows errors after logging", async () => {
     const db = createMockDb();
-    db.query.contactProfiles.findFirst.mockRejectedValue(new Error("DB error"));
+    db.transaction.mockRejectedValue(new Error("DB error"));
 
     await expect(
       updateContactProfile(db, "contact-1", "msg-1", makeAnalysis())

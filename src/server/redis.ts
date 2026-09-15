@@ -1,5 +1,3 @@
-import Redis from "ioredis";
+import { createRedisClient, LONG_LIVED_REDIS_OPTIONS } from "@/lib/redis-client";
 
-export const redis = new Redis(process.env.REDIS_URL!, {
-  maxRetriesPerRequest: null,
-});
+export const redis = createRedisClient(LONG_LIVED_REDIS_OPTIONS);

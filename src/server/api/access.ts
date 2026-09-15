@@ -2,7 +2,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { conversations, conversationAssignments, contacts } from "@/server/db/schema";
 
 type AccessCtx = {
-  db: any;
+  db: typeof import("@/server/db").db;
   teamRole: string | null;
   actingUserId: string;
 };

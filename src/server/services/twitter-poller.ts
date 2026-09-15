@@ -4,7 +4,7 @@ import {
   socialPosts,
   socialComments,
 } from "@/server/db/schema";
-import { ensureFreshTwitterToken } from "./twitter-publisher";
+import { getFreshTwitterAccessToken } from "./twitter-publisher";
 import {
   linkOrCreateCommentAuthor,
   enqueueCommentAnalysis,
@@ -15,9 +15,7 @@ import { createChildLogger } from "@/lib/logger";
 
 const log = createChildLogger("twitter-poller");
 
-type DB =
-  | Parameters<Parameters<typeof import("@/server/db").db.transaction>[0]>[0]
-  | typeof import("@/server/db").db;
+type DB = typeof import("@/server/db").db;
 
 const POSTS_PER_ACCOUNT = 20;
 const REQUEST_DELAY_MS = 1500; // ~40 req/min — Twitter v2 recent search has tight quotas
@@ -94,29 +92,20 @@ export async function pollTwitterCommentsForCreator(
     return { inserted: 0, processedPosts: 0, errors: 0 };
   }
 
-  // Ensure fresh token + persist if rotated
+  // WK-8: lock distribuido + relectura antes de refrescar (ver
+  // getFreshTwitterAccessToken) — evita refrescar el mismo refresh_token en
+  // paralelo con el publisher/otros callers.
   let accessToken: string;
   try {
-    const refreshed = await ensureFreshTwitterToken({
-      encryptedAccess: account.encryptedOauthAccessToken,
-      encryptedRefresh: account.encryptedOauthRefreshToken,
-      expiresAt: account.oauthExpiresAt,
+    accessToken = await getFreshTwitterAccessToken(db, {
+      id: account.id,
+      encryptedOauthAccessToken: account.encryptedOauthAccessToken,
+      encryptedOauthRefreshToken: account.encryptedOauthRefreshToken,
+      oauthExpiresAt: account.oauthExpiresAt,
     });
-    if (refreshed.refreshed) {
-      await (db as any)
-        .update(socialAccounts)
-        .set({
-          encryptedOauthAccessToken: refreshed.newAccessEncrypted,
-          encryptedOauthRefreshToken: refreshed.newRefreshEncrypted,
-          oauthExpiresAt: refreshed.newExpiresAt,
-          updatedAt: new Date(),
-        })
-        .where(eq(socialAccounts.id, account.id));
-    }
-    accessToken = refreshed.accessToken;
   } catch (err) {
     log.warn({ err, creatorId: account.creatorId }, "Twitter token refresh failed");
-    await (db as any)
+    await db
       .update(socialAccounts)
       .set({
         lastErrorMessage: (err as Error).message.slice(0, 500),
@@ -127,7 +116,7 @@ export async function pollTwitterCommentsForCreator(
   }
 
   // Tweets we've published from FanFlow and want to monitor
-  const posts = await (db as any).query.socialPosts.findMany({
+  const posts = await db.query.socialPosts.findMany({
     where: and(
       eq(socialPosts.creatorId, account.creatorId),
       eq(socialPosts.platformType, "twitter"),
@@ -154,7 +143,7 @@ export async function pollTwitterCommentsForCreator(
       );
       if (replies.length === 0) continue;
 
-      const existing = await (db as any).query.socialComments.findMany({
+      const existing = await db.query.socialComments.findMany({
         where: and(
           eq(socialComments.creatorId, account.creatorId),
           eq(socialComments.postId, post.id)
@@ -185,7 +174,7 @@ export async function pollTwitterCommentsForCreator(
           { username: user.username, platformUserId: user.id }
         );
 
-        const [insertedRow] = await (db as any)
+        const [insertedRow] = await db
           .insert(socialComments)
           .values({
             creatorId: account.creatorId,
@@ -241,7 +230,7 @@ export async function pollTwitterCommentsForCreator(
       }
 
       if (insertedForPost > 0) {
-        await (db as any).execute(
+        await db.execute(
           (await import("drizzle-orm")).sql`
             UPDATE social_posts
             SET comments_count = (
@@ -269,7 +258,7 @@ export async function pollTwitterCommentsForCreator(
     await sleep(REQUEST_DELAY_MS);
   }
 
-  await (db as any)
+  await db
     .update(socialAccounts)
     .set({
       lastVerifiedAt: new Date(),
@@ -282,7 +271,7 @@ export async function pollTwitterCommentsForCreator(
 }
 
 export async function pollTwitterComments(db: DB): Promise<void> {
-  const accounts = await (db as any).query.socialAccounts.findMany({
+  const accounts = await db.query.socialAccounts.findMany({
     where: and(
       eq(socialAccounts.platformType, "twitter"),
       eq(socialAccounts.connectionType, "native"),

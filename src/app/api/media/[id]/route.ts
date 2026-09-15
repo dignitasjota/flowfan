@@ -66,6 +66,10 @@ export async function GET(
         "Content-Type": contentType,
         "Content-Length": String(buffer.length),
         "Cache-Control": "private, max-age=86400",
+        // SEC-10: evita que el navegador reinterprete el contenido si el
+        // MIME declarado no coincide con lo que realmente se sirve.
+        "X-Content-Type-Options": "nosniff",
+        "Content-Disposition": `inline; filename="${item.id}"`,
       },
     });
   } catch {

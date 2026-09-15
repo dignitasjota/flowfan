@@ -12,7 +12,7 @@ import {
   index,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 
 // ============================================================
 // ENUMS
@@ -1561,6 +1561,13 @@ export const sequenceEnrollments = pgTable(
     index("sequence_enrollments_sequence_status_idx").on(table.sequenceId, table.status),
     index("sequence_enrollments_contact_idx").on(table.contactId),
     index("sequence_enrollments_status_next_idx").on(table.status, table.nextStepAt),
+    // WK-13: un contacto no puede tener dos matrículas activas/pausadas en la
+    // misma secuencia. Parcial (no aplica a completed/cancelled) para permitir
+    // re-matricular tras completar. `enrollContact` usa `onConflictDoNothing`
+    // sobre este índice para que el check-then-insert sea atómico.
+    uniqueIndex("sequence_enrollments_active_unique_idx")
+      .on(table.sequenceId, table.contactId)
+      .where(sql`${table.status} IN ('active', 'paused')`),
   ]
 );
 

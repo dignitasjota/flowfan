@@ -1,4 +1,5 @@
-import Redis from "ioredis";
+import type Redis from "ioredis";
+import { createRedisClient, LONG_LIVED_REDIS_OPTIONS } from "./redis-client";
 
 export type RealtimeEventType =
   | "new_message"
@@ -28,10 +29,7 @@ let publisherClient: Redis | null = null;
 
 function getPublisher(): Redis {
   if (!publisherClient) {
-    publisherClient = new Redis(process.env.REDIS_URL!, {
-      maxRetriesPerRequest: null,
-      lazyConnect: true,
-    });
+    publisherClient = createRedisClient({ ...LONG_LIVED_REDIS_OPTIONS, lazyConnect: true });
   }
   return publisherClient;
 }
@@ -50,9 +48,7 @@ export function subscribeToCreator(
   creatorId: string,
   callback: (event: RealtimeEvent) => void
 ): () => void {
-  const subscriber = new Redis(process.env.REDIS_URL!, {
-    maxRetriesPerRequest: null,
-  });
+  const subscriber = createRedisClient(LONG_LIVED_REDIS_OPTIONS);
 
   const channel = getChannel(creatorId);
 

@@ -48,27 +48,35 @@ export const contactsRouter = createTRPCRouter({
         );
       }
 
+      // TEN-14: filtrar por funnelStage en SQL (join a contactProfiles) en vez
+      // de en memoria tras paginar — antes `total`/`hasMore` no coincidían con
+      // los resultados realmente filtrados.
+      if (input?.funnelStage) {
+        conditions.push(eq(contactProfiles.funnelStage, input.funnelStage));
+      }
+
+      const whereClause = and(...conditions);
+
       // Get total count for pagination
       const [totalResult] = await ctx.db
         .select({ count: count() })
         .from(contacts)
-        .where(and(...conditions));
+        .leftJoin(contactProfiles, eq(contactProfiles.contactId, contacts.id))
+        .where(whereClause);
 
-      const results = await ctx.db.query.contacts.findMany({
-        where: and(...conditions),
-        with: { profile: true },
-        orderBy: [desc(contacts.lastInteractionAt)],
-        limit: input?.limit ?? 50,
-        offset: input?.offset ?? 0,
-      });
+      const rows = await ctx.db
+        .select({ contact: contacts, profile: contactProfiles })
+        .from(contacts)
+        .leftJoin(contactProfiles, eq(contactProfiles.contactId, contacts.id))
+        .where(whereClause)
+        .orderBy(desc(contacts.lastInteractionAt))
+        .limit(input?.limit ?? 50)
+        .offset(input?.offset ?? 0);
 
-      // Filter by funnel stage in-memory (profile is a relation)
-      const filtered = input?.funnelStage
-        ? results.filter((c) => c.profile?.funnelStage === input.funnelStage)
-        : results;
+      const items = rows.map((r) => ({ ...r.contact, profile: r.profile }));
 
       return {
-        items: filtered,
+        items,
         total: totalResult?.count ?? 0,
         hasMore: (input?.offset ?? 0) + (input?.limit ?? 50) < (totalResult?.count ?? 0),
       };

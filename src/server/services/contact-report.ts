@@ -1,4 +1,5 @@
-import { type AIConfig, callAIProvider, stripThinkingBlocks } from "./ai";
+import { type AIConfig, callAIProvider } from "./ai";
+import { parseTolerantJSON } from "./ai-json-parser";
 import { getLanguageInstruction } from "./language-utils";
 
 // ============================================================
@@ -67,30 +68,22 @@ Responde UNICAMENTE con el JSON, todo en espanol.`;
 // ============================================================
 
 function parseReportJSON(text: string): Omit<ContactReport, "tokensUsed"> | null {
-  let cleaned = stripThinkingBlocks(text);
-  cleaned = cleaned.replace(/```json\s*/gi, "").replace(/```\s*/gi, "");
+  const parsed = parseTolerantJSON<Record<string, any>>(text);
+  if (!parsed) return null;
 
-  const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) return null;
-
-  try {
-    const parsed = JSON.parse(jsonMatch[0]);
-    return {
-      overview: String(parsed.overview || "Sin datos suficientes"),
-      patterns: Array.isArray(parsed.patterns) ? parsed.patterns.map(String).slice(0, 5) : [],
-      interests: Array.isArray(parsed.interests) ? parsed.interests.map(String).slice(0, 5) : [],
-      funnelPrediction: {
-        nextStage: String(parsed.funnelPrediction?.nextStage || "sin cambio"),
-        probability: Math.max(0, Math.min(100, Number(parsed.funnelPrediction?.probability) || 0)),
-        timeframe: String(parsed.funnelPrediction?.timeframe || "indeterminado"),
-      },
-      recommendations: Array.isArray(parsed.recommendations) ? parsed.recommendations.map(String).slice(0, 5) : [],
-      riskLevel: ["low", "medium", "high"].includes(parsed.riskLevel) ? parsed.riskLevel : "medium",
-      riskFactors: Array.isArray(parsed.riskFactors) ? parsed.riskFactors.map(String).slice(0, 3) : [],
-    };
-  } catch {
-    return null;
-  }
+  return {
+    overview: String(parsed.overview || "Sin datos suficientes"),
+    patterns: Array.isArray(parsed.patterns) ? parsed.patterns.map(String).slice(0, 5) : [],
+    interests: Array.isArray(parsed.interests) ? parsed.interests.map(String).slice(0, 5) : [],
+    funnelPrediction: {
+      nextStage: String(parsed.funnelPrediction?.nextStage || "sin cambio"),
+      probability: Math.max(0, Math.min(100, Number(parsed.funnelPrediction?.probability) || 0)),
+      timeframe: String(parsed.funnelPrediction?.timeframe || "indeterminado"),
+    },
+    recommendations: Array.isArray(parsed.recommendations) ? parsed.recommendations.map(String).slice(0, 5) : [],
+    riskLevel: ["low", "medium", "high"].includes(parsed.riskLevel) ? parsed.riskLevel : "medium",
+    riskFactors: Array.isArray(parsed.riskFactors) ? parsed.riskFactors.map(String).slice(0, 3) : [],
+  };
 }
 
 // ============================================================

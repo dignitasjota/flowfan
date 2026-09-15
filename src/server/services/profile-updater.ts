@@ -39,108 +39,126 @@ export async function updateContactProfile(
       ? { type: "message", id: messageOrTarget }
       : messageOrTarget;
   try {
-    // 1. Read current profile
-    const profile = await (db as any).query.contactProfiles.findFirst({
-      where: eq(contactProfiles.contactId, contactId),
-    });
+    // WK-10: todo el read-modify-write del profile (leer signals/historial,
+    // calcular scores, escribir) va dentro de una transacción con
+    // `SELECT ... FOR UPDATE`. Sin esto, dos análisis concurrentes del mismo
+    // contacto (el worker de análisis corre con concurrency 5) leen el mismo
+    // `profile` antes de que ninguno escriba → lost update: `messageCount`
+    // infracontado, entradas de `scoringHistory` perdidas. El lock de fila
+    // serializa las transacciones sobre el mismo `contactId`: la segunda
+    // espera a que la primera confirme y relee el estado ya actualizado.
+    const txResult = await (db as any).transaction(async (tx: any) => {
+      // 1. Read current profile (con lock de fila)
+      const [profile] = await tx
+        .select()
+        .from(contactProfiles)
+        .where(eq(contactProfiles.contactId, contactId))
+        .for("update");
 
-    if (!profile) return;
+      if (!profile) return null;
 
-    // 2. Get contact info for conversation count
-    const contact = await (db as any).query.contacts.findFirst({
-      where: eq(contacts.id, contactId),
-    });
-
-    const prevEngagement = profile.engagementLevel;
-    const prevPayment = profile.paymentProbability;
-    const prevFunnel = profile.funnelStage;
-
-    // Calculate time since last message
-    const currentSignals = profile.behavioralSignals as BehavioralSignals | null;
-    let timeSinceLastMsg: number | null = null;
-    if (currentSignals?.lastMessageAt) {
-      timeSinceLastMsg = (Date.now() - new Date(currentSignals.lastMessageAt).getTime()) / (1000 * 60);
-    }
-
-    // 3. Update signals
-    const newSignals = updateSignals(
-      currentSignals,
-      analysis,
-      analysis.keyPhrases.join(" ").length + 50,
-      timeSinceLastMsg,
-      contact?.totalConversations ?? 1
-    );
-
-    // 4. Load platform scoring config (if any)
-    let scoringConfig: ScoringConfig | undefined;
-    const resolvedCreatorId2 = creatorId ?? contact?.creatorId;
-    if (resolvedCreatorId2 && contact?.platformType) {
-      const platformConfig = await (db as any).query.platformScoringConfigs.findFirst({
-        where: and(
-          eq(platformScoringConfigs.creatorId, resolvedCreatorId2),
-          eq(platformScoringConfigs.platformType, contact.platformType)
-        ),
+      // 2. Get contact info for conversation count
+      const contact = await tx.query.contacts.findFirst({
+        where: eq(contacts.id, contactId),
       });
-      if (platformConfig) {
-        scoringConfig = {
-          engagementWeights: platformConfig.engagementWeights as ScoringConfig["engagementWeights"],
-          paymentWeights: platformConfig.paymentWeights as ScoringConfig["paymentWeights"],
-          benchmarks: platformConfig.benchmarks as ScoringConfig["benchmarks"],
-          funnelThresholds: platformConfig.funnelThresholds as ScoringConfig["funnelThresholds"],
-          contactAgeFactor: platformConfig.contactAgeFactor as ScoringConfig["contactAgeFactor"],
-        };
+
+      const prevPayment = profile.paymentProbability;
+      const prevFunnel = profile.funnelStage;
+
+      // Calculate time since last message
+      const currentSignals = profile.behavioralSignals as BehavioralSignals | null;
+      let timeSinceLastMsg: number | null = null;
+      if (currentSignals?.lastMessageAt) {
+        timeSinceLastMsg = (Date.now() - new Date(currentSignals.lastMessageAt).getTime()) / (1000 * 60);
       }
-    }
 
-    // 5. Calculate scores
-    const scores = calculateScores(
-      newSignals,
-      profile.funnelStage,
-      scoringConfig,
-      contact?.platformType,
-      contact?.firstInteractionAt ? new Date(contact.firstInteractionAt) : undefined
-    );
+      // 3. Update signals
+      const newSignals = updateSignals(
+        currentSignals,
+        analysis,
+        analysis.keyPhrases.join(" ").length + 50,
+        timeSinceLastMsg,
+        contact?.totalConversations ?? 1
+      );
 
-    // 6. Build scoring history snapshot (max 50)
-    const history = Array.isArray(profile.scoringHistory) ? [...profile.scoringHistory] : [];
-    history.push({
-      timestamp: new Date().toISOString(),
-      engagementLevel: scores.engagementLevel,
-      paymentProbability: scores.paymentProbability,
-      funnelStage: scores.funnelStage,
-      sentiment: analysis.score,
-    });
-    if (history.length > 50) {
-      history.splice(0, history.length - 50);
-    }
+      // 4. Load platform scoring config (if any)
+      let scoringConfig: ScoringConfig | undefined;
+      const resolvedCreatorId2 = creatorId ?? contact?.creatorId;
+      if (resolvedCreatorId2 && contact?.platformType) {
+        const platformConfig = await tx.query.platformScoringConfigs.findFirst({
+          where: and(
+            eq(platformScoringConfigs.creatorId, resolvedCreatorId2),
+            eq(platformScoringConfigs.platformType, contact.platformType)
+          ),
+        });
+        if (platformConfig) {
+          scoringConfig = {
+            engagementWeights: platformConfig.engagementWeights as ScoringConfig["engagementWeights"],
+            paymentWeights: platformConfig.paymentWeights as ScoringConfig["paymentWeights"],
+            benchmarks: platformConfig.benchmarks as ScoringConfig["benchmarks"],
+            funnelThresholds: platformConfig.funnelThresholds as ScoringConfig["funnelThresholds"],
+            contactAgeFactor: platformConfig.contactAgeFactor as ScoringConfig["contactAgeFactor"],
+          };
+        }
+      }
 
-    // 7. Calculate churn score
-    const churnResult = calculateChurnScore(
-      newSignals,
-      { engagementLevel: scores.engagementLevel, funnelStage: scores.funnelStage, scoringHistory: history },
-      { lastInteractionAt: new Date() } // Just received a message, so active now
-    );
+      // 5. Calculate scores
+      const scores = calculateScores(
+        newSignals,
+        profile.funnelStage,
+        scoringConfig,
+        contact?.platformType,
+        contact?.firstInteractionAt ? new Date(contact.firstInteractionAt) : undefined
+      );
 
-    // 8. Update contact profile
-    await (db as any)
-      .update(contactProfiles)
-      .set({
+      // 6. Build scoring history snapshot (max 50)
+      const history = Array.isArray(profile.scoringHistory) ? [...profile.scoringHistory] : [];
+      history.push({
+        timestamp: new Date().toISOString(),
         engagementLevel: scores.engagementLevel,
         paymentProbability: scores.paymentProbability,
         funnelStage: scores.funnelStage,
-        responseSpeed: scores.responseSpeed,
-        conversationDepth: scores.conversationDepth,
-        estimatedBudget: scores.estimatedBudget,
-        behavioralSignals: newSignals,
-        scoringHistory: history,
-        churnScore: churnResult.score,
-        churnFactors: churnResult.factors,
-        churnUpdatedAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(eq(contactProfiles.contactId, contactId));
+        sentiment: analysis.score,
+      });
+      if (history.length > 50) {
+        history.splice(0, history.length - 50);
+      }
 
-    // 9. Update sentiment on message OR comment
+      // 7. Calculate churn score
+      const churnResult = calculateChurnScore(
+        newSignals,
+        { engagementLevel: scores.engagementLevel, funnelStage: scores.funnelStage, scoringHistory: history },
+        { lastInteractionAt: new Date() } // Just received a message, so active now
+      );
+
+      // 8. Update contact profile
+      await tx
+        .update(contactProfiles)
+        .set({
+          engagementLevel: scores.engagementLevel,
+          paymentProbability: scores.paymentProbability,
+          funnelStage: scores.funnelStage,
+          responseSpeed: scores.responseSpeed,
+          conversationDepth: scores.conversationDepth,
+          estimatedBudget: scores.estimatedBudget,
+          behavioralSignals: newSignals,
+          scoringHistory: history,
+          churnScore: churnResult.score,
+          churnFactors: churnResult.factors,
+          churnUpdatedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(contactProfiles.contactId, contactId));
+
+      return { contact, prevPayment, prevFunnel, scores, currentSignals };
+    });
+
+    if (!txResult) return;
+    const { contact, prevPayment, prevFunnel, scores, currentSignals } = txResult;
+
+    // 9. Update sentiment on message OR comment (fuera de la transacción: se
+    // localiza por message/comment id, sin riesgo de lost-update sobre el
+    // profile, así que no hace falta mantener el lock de fila abierto).
     const sentimentPayload = {
       score: analysis.score,
       label: analysis.label,

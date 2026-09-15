@@ -1,4 +1,5 @@
-import { type AIConfig, callAIProvider, stripThinkingBlocks } from "./ai";
+import { type AIConfig, callAIProvider } from "./ai";
+import { parseTolerantJSON } from "./ai-json-parser";
 import { getLanguageInstruction } from "./language-utils";
 
 // ============================================================
@@ -43,25 +44,17 @@ Responde UNICAMENTE con el JSON.`;
 // ============================================================
 
 function parseSummaryJSON(text: string): Omit<ConversationSummary, "tokensUsed"> | null {
-  let cleaned = stripThinkingBlocks(text);
-  cleaned = cleaned.replace(/```json\s*/gi, "").replace(/```\s*/gi, "");
+  const parsed = parseTolerantJSON<Record<string, any>>(text);
+  if (!parsed) return null;
 
-  const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) return null;
-
-  try {
-    const parsed = JSON.parse(jsonMatch[0]);
-    return {
-      summary: String(parsed.summary || "Sin resumen disponible"),
-      mainTopic: String(parsed.mainTopic || "General"),
-      relationshipStatus: String(parsed.relationshipStatus || "inicial"),
-      nextSteps: Array.isArray(parsed.nextSteps)
-        ? parsed.nextSteps.map(String).slice(0, 3)
-        : [],
-    };
-  } catch {
-    return null;
-  }
+  return {
+    summary: String(parsed.summary || "Sin resumen disponible"),
+    mainTopic: String(parsed.mainTopic || "General"),
+    relationshipStatus: String(parsed.relationshipStatus || "inicial"),
+    nextSteps: Array.isArray(parsed.nextSteps)
+      ? parsed.nextSteps.map(String).slice(0, 3)
+      : [],
+  };
 }
 
 // ============================================================

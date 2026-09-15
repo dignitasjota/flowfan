@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { timingSafeEqual } from "crypto";
 import { eq, and } from "drizzle-orm";
 import { db } from "@/server/db";
 import {
@@ -16,15 +17,29 @@ import { createChildLogger } from "@/lib/logger";
 
 const log = createChildLogger("telegram-webhook");
 
+function constantTimeEquals(a: string, b: string): boolean {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) {
+    // Igual gastamos el timingSafeEqual sobre buffers del mismo tamaño para
+    // no filtrar la longitud vía timing (comparación contra sí mismo).
+    timingSafeEqual(bufA, bufA);
+    return false;
+  }
+  return timingSafeEqual(bufA, bufB);
+}
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ secret: string }> }
 ) {
   const { secret } = await params;
 
-  // Validate the webhook secret header
+  // Validate the webhook secret header (SEC-11: comparación en tiempo
+  // constante — el secret también viaja en la URL, pero no cuesta nada
+  // hacerlo bien aquí también).
   const secretHeader = request.headers.get("x-telegram-bot-api-secret-token");
-  if (secretHeader !== secret) {
+  if (!secretHeader || !constantTimeEquals(secretHeader, secret)) {
     log.warn("Invalid webhook secret header");
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

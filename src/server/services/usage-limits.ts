@@ -1,5 +1,6 @@
 import { eq, and, gte, ne, sql, count } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
+import { incrMonthlyCounter } from "@/lib/rate-limit";
 import type { db as DbType } from "@/server/db";
 import {
   creators,
@@ -210,22 +211,15 @@ export async function checkAIMessageLimit(db: Db, creatorId: string) {
   const limits = PLAN_LIMITS[plan];
   if (limits.aiMessagesPerMonth === -1) return;
 
-  const monthStart = startOfMonth();
-  // AI-3: contar solo las sugerencias generadas. Antes contaba TODAS las filas
-  // (cada suggest inserta suggestion + analysis, y summaries/reportes/coaching
-  // también), consumiendo el cupo al doble o más de lo anunciado.
-  const [result] = await db
-    .select({ count: count() })
-    .from(aiUsageLog)
-    .where(
-      and(
-        eq(aiUsageLog.creatorId, creatorId),
-        eq(aiUsageLog.requestType, "suggestion"),
-        gte(aiUsageLog.createdAt, monthStart)
-      )
-    );
-
-  if ((result?.count ?? 0) >= limits.aiMessagesPerMonth) {
+  // AI-8/ARCH-7: contador atómico en Redis en vez de check-then-insert contra
+  // Postgres — bajo concurrencia (varias pestañas, doble-click) el SELECT
+  // count() de antes dejaba pasar más peticiones de las permitidas porque
+  // todas leían el mismo count antes de que ninguna insertara su fila de uso.
+  const { allowed } = await incrMonthlyCounter(
+    `${creatorId}:ai_messages`,
+    limits.aiMessagesPerMonth
+  );
+  if (!allowed) {
     throw new TRPCError({
       code: "FORBIDDEN",
       message: `Has alcanzado el límite de ${limits.aiMessagesPerMonth} mensajes IA/mes en el plan ${plan}. Actualiza tu plan para más mensajes.`,
@@ -281,21 +275,12 @@ export async function checkReportLimit(db: Db, creatorId: string) {
     });
   }
 
-  const monthStart = startOfMonth();
-  // AI-2: contar solo reportes reales. Antes contaba "analysis", que también
-  // genera cada suggest y getPriceAdvice → agotaba el cupo sin generar reportes.
-  const [result] = await db
-    .select({ count: count() })
-    .from(aiUsageLog)
-    .where(
-      and(
-        eq(aiUsageLog.creatorId, creatorId),
-        eq(aiUsageLog.requestType, "report"),
-        gte(aiUsageLog.createdAt, monthStart)
-      )
-    );
-
-  if ((result?.count ?? 0) >= limits.reportsPerMonth) {
+  // AI-8/ARCH-7: contador atómico en Redis (ver checkAIMessageLimit).
+  const { allowed } = await incrMonthlyCounter(
+    `${creatorId}:reports`,
+    limits.reportsPerMonth
+  );
+  if (!allowed) {
     throw new TRPCError({
       code: "FORBIDDEN",
       message: `Has alcanzado el límite de ${limits.reportsPerMonth} reportes/mes en el plan ${plan}. Actualiza tu plan para más reportes.`,
@@ -308,19 +293,12 @@ export async function checkCoachingLimit(db: Db, creatorId: string) {
   const limits = PLAN_LIMITS[plan];
   if (limits.coachingPerMonth === -1) return;
 
-  const monthStart = startOfMonth();
-  const [result] = await db
-    .select({ count: count() })
-    .from(aiUsageLog)
-    .where(
-      and(
-        eq(aiUsageLog.creatorId, creatorId),
-        eq(aiUsageLog.requestType, "coaching"),
-        gte(aiUsageLog.createdAt, monthStart)
-      )
-    );
-
-  if ((result?.count ?? 0) >= limits.coachingPerMonth) {
+  // AI-8/ARCH-7: contador atómico en Redis (ver checkAIMessageLimit).
+  const { allowed } = await incrMonthlyCounter(
+    `${creatorId}:coaching`,
+    limits.coachingPerMonth
+  );
+  if (!allowed) {
     throw new TRPCError({
       code: "FORBIDDEN",
       message: `Has alcanzado el límite de ${limits.coachingPerMonth} sesiones de coaching/mes en el plan ${plan}.`,

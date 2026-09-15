@@ -1,6 +1,6 @@
 import { db } from "@/server/db";
 import { sql } from "drizzle-orm";
-import Redis from "ioredis";
+import { createRedisClient, FAIL_FAST_REDIS_OPTIONS } from "@/lib/redis-client";
 
 export const dynamic = "force-dynamic";
 
@@ -23,11 +23,7 @@ export async function GET() {
   // Check Redis
   const redisStart = Date.now();
   try {
-    const redis = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379", {
-      maxRetriesPerRequest: 1,
-      connectTimeout: 3000,
-      lazyConnect: true,
-    });
+    const redis = createRedisClient({ ...FAIL_FAST_REDIS_OPTIONS, connectTimeout: 3000 });
     await redis.ping();
     await redis.quit();
     checks.redis = { status: "ok", latencyMs: Date.now() - redisStart };

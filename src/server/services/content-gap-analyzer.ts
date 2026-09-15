@@ -1,5 +1,6 @@
 import { eq, and, gte, count } from "drizzle-orm";
-import { type AIConfig, callAIProvider, stripThinkingBlocks } from "./ai";
+import { type AIConfig, callAIProvider } from "./ai";
+import { parseTolerantJSON } from "./ai-json-parser";
 import { getLanguageInstruction } from "./language-utils";
 import { contacts, contactProfiles, messages, conversations } from "@/server/db/schema";
 import type { BehavioralSignals } from "./scoring";
@@ -243,60 +244,51 @@ Maximo 10 topRequestedTopics, 5 engagementDropPoints, 5 contentOpportunities.
 Responde UNICAMENTE con el JSON.`;
 
 function parseContentGapJSON(text: string): Omit<ContentGapReport, "tokensUsed"> | null {
-  let cleaned = stripThinkingBlocks(text);
-  cleaned = cleaned.replace(/```json\s*/gi, "").replace(/```\s*/gi, "");
+  const parsed = parseTolerantJSON<Record<string, any>>(text);
+  if (!parsed) return null;
 
-  const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) return null;
-
-  try {
-    const parsed = JSON.parse(jsonMatch[0]);
-
-    return {
-      topRequestedTopics: Array.isArray(parsed.topRequestedTopics)
-        ? parsed.topRequestedTopics.slice(0, 10).map((t: any) => ({
-            topic: String(t.topic || ""),
-            frequency: Number(t.frequency) || 0,
-            avgSentiment: Math.max(-1, Math.min(1, Number(t.avgSentiment) || 0)),
-            sampleQuotes: Array.isArray(t.sampleQuotes)
-              ? t.sampleQuotes.map(String).slice(0, 3)
-              : [],
-          }))
-        : [],
-      engagementDropPoints: Array.isArray(parsed.engagementDropPoints)
-        ? parsed.engagementDropPoints.slice(0, 5).map((d: any) => ({
-            pattern: String(d.pattern || ""),
-            frequency: Number(d.frequency) || 0,
-            suggestion: String(d.suggestion || ""),
-          }))
-        : [],
-      contentOpportunities: Array.isArray(parsed.contentOpportunities)
-        ? parsed.contentOpportunities.slice(0, 5).map((o: any) => ({
-            title: String(o.title || ""),
-            description: String(o.description || ""),
-            estimatedDemand: ["high", "medium", "low"].includes(o.estimatedDemand)
-              ? o.estimatedDemand
-              : "medium",
-            estimatedRevenue: ["high", "medium", "low"].includes(o.estimatedRevenue)
-              ? o.estimatedRevenue
-              : "medium",
-          }))
-        : [],
-      platformBreakdown: Array.isArray(parsed.platformBreakdown)
-        ? parsed.platformBreakdown.map((p: any) => ({
-            platform: String(p.platform || ""),
-            topTopics: Array.isArray(p.topTopics) ? p.topTopics.map(String).slice(0, 5) : [],
-            avgEngagement: Number(p.avgEngagement) || 0,
-          }))
-        : [],
-      trendingThemes: Array.isArray(parsed.trendingThemes)
-        ? parsed.trendingThemes.map(String).slice(0, 5)
-        : [],
-      summary: String(parsed.summary || "Sin datos suficientes para generar resumen."),
-    };
-  } catch {
-    return null;
-  }
+  return {
+    topRequestedTopics: Array.isArray(parsed.topRequestedTopics)
+      ? parsed.topRequestedTopics.slice(0, 10).map((t: any) => ({
+          topic: String(t.topic || ""),
+          frequency: Number(t.frequency) || 0,
+          avgSentiment: Math.max(-1, Math.min(1, Number(t.avgSentiment) || 0)),
+          sampleQuotes: Array.isArray(t.sampleQuotes)
+            ? t.sampleQuotes.map(String).slice(0, 3)
+            : [],
+        }))
+      : [],
+    engagementDropPoints: Array.isArray(parsed.engagementDropPoints)
+      ? parsed.engagementDropPoints.slice(0, 5).map((d: any) => ({
+          pattern: String(d.pattern || ""),
+          frequency: Number(d.frequency) || 0,
+          suggestion: String(d.suggestion || ""),
+        }))
+      : [],
+    contentOpportunities: Array.isArray(parsed.contentOpportunities)
+      ? parsed.contentOpportunities.slice(0, 5).map((o: any) => ({
+          title: String(o.title || ""),
+          description: String(o.description || ""),
+          estimatedDemand: ["high", "medium", "low"].includes(o.estimatedDemand)
+            ? o.estimatedDemand
+            : "medium",
+          estimatedRevenue: ["high", "medium", "low"].includes(o.estimatedRevenue)
+            ? o.estimatedRevenue
+            : "medium",
+        }))
+      : [],
+    platformBreakdown: Array.isArray(parsed.platformBreakdown)
+      ? parsed.platformBreakdown.map((p: any) => ({
+          platform: String(p.platform || ""),
+          topTopics: Array.isArray(p.topTopics) ? p.topTopics.map(String).slice(0, 5) : [],
+          avgEngagement: Number(p.avgEngagement) || 0,
+        }))
+      : [],
+    trendingThemes: Array.isArray(parsed.trendingThemes)
+      ? parsed.trendingThemes.map(String).slice(0, 5)
+      : [],
+    summary: String(parsed.summary || "Sin datos suficientes para generar resumen."),
+  };
 }
 
 export async function analyzeContentGaps(

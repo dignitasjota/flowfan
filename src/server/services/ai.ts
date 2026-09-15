@@ -1,6 +1,9 @@
 import Anthropic from "@anthropic-ai/sdk";
 import OpenAI from "openai";
 import { getLanguageInstruction } from "./language-utils";
+import { createChildLogger } from "@/lib/logger";
+
+const log = createChildLogger("ai-provider");
 
 // ============================================================
 // Types
@@ -66,39 +69,74 @@ type SuggestionResult = {
 export type AICallResult = {
   text: string;
   tokensUsed: number;
+  /** ARCH-3: razón de parada normalizada entre proveedores (ver AI-4). */
+  stopReason?: "stop" | "length" | "other";
 };
 
 // ============================================================
-// Available models per provider
+// ARCH-11: registry central de modelos (reemplaza el `PROVIDER_MODELS` plano)
 // ============================================================
 
-export const PROVIDER_MODELS: Record<AIProvider, { value: string; label: string }[]> = {
+export type ModelMetadata = {
+  value: string;
+  label: string;
+  /** Ventana de contexto aproximada, en tokens. Informativo por ahora. */
+  contextWindow: number;
+  /**
+   * Modelos razonadores (MiniMax, DeepSeek, ...) gastan parte del presupuesto
+   * de `maxTokens` en un bloque `<think>` interno antes de la respuesta real.
+   * Con un `maxTokens` bajo (p.ej. 100-512, típico de clasificación/análisis
+   * de sentimiento) la respuesta se corta a mitad del `<think>` y el parser
+   * JSON no encuentra nada que parsear (AI-4). `callAIProvider` usa este flag
+   * para subir el presupuesto mínimo automáticamente en esos casos.
+   */
+  isReasoner?: boolean;
+};
+
+export const MODEL_REGISTRY: Record<AIProvider, ModelMetadata[]> = {
   anthropic: [
-    { value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
-    { value: "claude-opus-4-6", label: "Claude Opus 4.6" },
-    { value: "claude-haiku-4-5", label: "Claude Haiku 4.5" },
+    { value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6", contextWindow: 200_000 },
+    { value: "claude-opus-4-6", label: "Claude Opus 4.6", contextWindow: 200_000 },
+    { value: "claude-haiku-4-5", label: "Claude Haiku 4.5", contextWindow: 200_000 },
   ],
   openai: [
-    { value: "gpt-4o", label: "GPT-4o" },
-    { value: "gpt-4o-mini", label: "GPT-4o Mini" },
-    { value: "gpt-4-turbo", label: "GPT-4 Turbo" },
+    { value: "gpt-4o", label: "GPT-4o", contextWindow: 128_000 },
+    { value: "gpt-4o-mini", label: "GPT-4o Mini", contextWindow: 128_000 },
+    { value: "gpt-4-turbo", label: "GPT-4 Turbo", contextWindow: 128_000 },
   ],
   google: [
-    { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
-    { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
-    { value: "gemini-2.0-flash", label: "Gemini 2.0 Flash" },
+    { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro", contextWindow: 1_000_000 },
+    { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash", contextWindow: 1_000_000 },
+    { value: "gemini-2.0-flash", label: "Gemini 2.0 Flash", contextWindow: 1_000_000 },
   ],
   minimax: [
-    { value: "MiniMax-M1", label: "MiniMax-M2.7" },
-    { value: "minimax-m2.5", label: "MiniMax-M2.5" },
-    { value: "minimax-m2.5-chat", label: "MiniMax-M2.5 Chat" },
+    { value: "MiniMax-M1", label: "MiniMax-M2.7", contextWindow: 1_000_000, isReasoner: true },
+    { value: "minimax-m2.5", label: "MiniMax-M2.5", contextWindow: 256_000 },
+    { value: "minimax-m2.5-chat", label: "MiniMax-M2.5 Chat", contextWindow: 256_000 },
   ],
   kimi: [
-    { value: "kimi-k2", label: "Kimi K2" },
-    { value: "moonshot-v1-auto", label: "Moonshot V1 Auto" },
-    { value: "moonshot-v1-32k", label: "Moonshot V1 32K" },
+    { value: "kimi-k2", label: "Kimi K2", contextWindow: 128_000 },
+    { value: "moonshot-v1-auto", label: "Moonshot V1 Auto", contextWindow: 128_000 },
+    { value: "moonshot-v1-32k", label: "Moonshot V1 32K", contextWindow: 32_000 },
   ],
 };
+
+/** Forma plana `{value,label}` que consume la UI de Settings — derivada del registry. */
+export const PROVIDER_MODELS: Record<AIProvider, { value: string; label: string }[]> =
+  Object.fromEntries(
+    Object.entries(MODEL_REGISTRY).map(([provider, models]) => [
+      provider,
+      models.map(({ value, label }) => ({ value, label })),
+    ])
+  ) as Record<AIProvider, { value: string; label: string }[]>;
+
+export function getModelMetadata(provider: AIProvider, model: string): ModelMetadata | undefined {
+  return MODEL_REGISTRY[provider]?.find((m) => m.value === model);
+}
+
+export function isReasonerModel(provider: AIProvider, model: string): boolean {
+  return getModelMetadata(provider, model)?.isReasoner ?? false;
+}
 
 // ============================================================
 // Prompt Builder (shared across providers)
@@ -231,7 +269,18 @@ Formato OBLIGATORIO - cada variante debe empezar con su etiqueta:
 [RETENTION] <mensaje>`;
 }
 
-function buildSystemPrompt(input: SuggestionInput): string {
+// ARCH-5: separamos el prompt en un prefijo ESTABLE (reglas, idioma,
+// plataforma, personalidad, modo de conversación, instrucciones globales —
+// depende solo de creator+platform, idéntico entre mensajes consecutivos del
+// mismo chat) y un sufijo VARIABLE (perfil del contacto + notas, cambia por
+// contacto). El prefijo es el candidato a `cache_control: {type:"ephemeral"}`
+// de Anthropic (~90% menos coste de input en conversaciones activas, ya que
+// el prefijo se repite en cada sugerencia dentro de la ventana de 5 min del
+// caché). Solo Anthropic soporta este mecanismo explícito hoy — el resto de
+// proveedores reciben ambas partes concatenadas, sin cambio de comportamiento.
+type SplitSystemPrompt = { cached: string; rest: string };
+
+function buildSystemPrompt(input: SuggestionInput): SplitSystemPrompt {
   const parts: string[] = [];
 
   const funnelStage = input.contactProfile?.funnelStage ?? "cold";
@@ -280,20 +329,23 @@ REGLAS IMPORTANTES:
   if (input.globalInstructions)
     parts.push(`\nINSTRUCCIONES GLOBALES DEL CREADOR (aplican siempre, en cualquier plataforma):\n${input.globalInstructions}`);
 
+  const cached = parts.join("\n");
+
+  const restParts: string[] = [];
   if (input.contactProfile) {
     const cp = input.contactProfile;
-    parts.push(`\nPERFIL DEL CONTACTO:`);
-    parts.push(`- Engagement: ${cp.engagementLevel}/100`);
-    parts.push(`- Etapa: ${cp.funnelStage}`);
-    parts.push(`- Probabilidad de pago: ${cp.paymentProbability}/100`);
+    restParts.push(`\nPERFIL DEL CONTACTO:`);
+    restParts.push(`- Engagement: ${cp.engagementLevel}/100`);
+    restParts.push(`- Etapa: ${cp.funnelStage}`);
+    restParts.push(`- Probabilidad de pago: ${cp.paymentProbability}/100`);
   }
 
   if (input.contactNotes.length > 0) {
-    parts.push(`\nNOTAS DEL CREADOR SOBRE ESTE CONTACTO:`);
-    input.contactNotes.forEach((note) => parts.push(`- ${note}`));
+    restParts.push(`\nNOTAS DEL CREADOR SOBRE ESTE CONTACTO:`);
+    input.contactNotes.forEach((note) => restParts.push(`- ${note}`));
   }
 
-  return parts.join("\n");
+  return { cached, rest: restParts.join("\n") };
 }
 
 function buildConversationMessages(input: SuggestionInput) {
@@ -366,32 +418,139 @@ const OPENAI_COMPATIBLE_BASES: Record<string, string> = {
   kimi: "https://api.moonshot.cn/v1",
 };
 
-export async function callAIProvider(
+// ARCH-3: timeout y reintentos únicos para toda llamada a un proveedor de IA.
+// Los SDK de Anthropic/OpenAI ya traen los suyos propios (~10 min, 2 retries)
+// pero son implícitos y demasiado largos para una mutación tRPC que un
+// usuario está esperando en pantalla; los hacemos explícitos aquí para que
+// los 5 proveedores se comporten igual y sea un único sitio donde ajustarlos.
+const AI_CALL_TIMEOUT_MS = 60_000;
+const AI_CALL_MAX_RETRIES = 2;
+// ARCH-11: presupuesto mínimo para modelos razonadores (ver `isReasonerModel`).
+const REASONER_MIN_BUDGET = 2000;
+
+function normalizeStopReason(raw: string | null | undefined): "stop" | "length" | "other" {
+  if (!raw) return "other";
+  const upper = raw.toUpperCase();
+  if (upper === "END_TURN" || upper === "STOP" || upper === "STOP_SEQUENCE") return "stop";
+  if (upper === "MAX_TOKENS" || upper === "LENGTH") return "length";
+  return "other";
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Google no tiene SDK propio (fetch crudo) — reintento manual en 429/5xx.
+ *
+ * El error de red (fetch rechaza: DNS, abort por timeout...) y el error de
+ * status HTTP (respuesta recibida pero no-ok) se manejan por separado a
+ * propósito: un status no-retryable (400, 401...) debe propagarse en el acto,
+ * no caer en el mismo `catch` que reintenta los fallos de red — de lo
+ * contrario un 400 se reintentaría igual (bug real, detectado por el test
+ * "no reintenta un 400").
+ */
+async function fetchGoogleWithRetry(
+  model: string,
+  apiKey: string,
+  body: unknown
+): Promise<Response> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= AI_CALL_MAX_RETRIES; attempt++) {
+    let response: Response;
+    try {
+      response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            // AI-6: API key en header, no en la query string (quedaba en logs
+            // de proxies/APM y en error.cause de fetch fallidos).
+            "x-goog-api-key": apiKey,
+          },
+          body: JSON.stringify(body),
+          // AI-6: timeout explícito (los SDK de Anthropic/OpenAI ya traen uno;
+          // Google via fetch podía colgar la mutación tRPC indefinidamente).
+          signal: AbortSignal.timeout(AI_CALL_TIMEOUT_MS),
+        }
+      );
+    } catch (err) {
+      if (attempt === AI_CALL_MAX_RETRIES) throw err;
+      lastError = err;
+      await sleep(500 * (attempt + 1));
+      continue;
+    }
+
+    if (response.ok) return response;
+
+    const retryable = response.status === 429 || response.status >= 500;
+    if (!retryable || attempt === AI_CALL_MAX_RETRIES) {
+      const error = await response.text();
+      throw new Error(`Google AI error (${response.status}): ${error}`);
+    }
+    lastError = new Error(`Google AI error (${response.status}), retrying`);
+    await sleep(500 * (attempt + 1));
+  }
+  throw lastError instanceof Error ? lastError : new Error("Google AI call failed");
+}
+
+/** Concatena la parte cacheable + variable para los proveedores que no soportan `cache_control` explícito. */
+function flattenSystemPrompt(systemPrompt: string | SplitSystemPrompt): string {
+  return typeof systemPrompt === "string"
+    ? systemPrompt
+    : [systemPrompt.cached, systemPrompt.rest].filter(Boolean).join("\n");
+}
+
+async function callProviderRaw(
   config: AIConfig,
-  systemPrompt: string,
+  systemPrompt: string | SplitSystemPrompt,
   messages: { role: "user" | "assistant"; content: string }[],
-  maxTokens: number = 1024
+  maxTokens: number
 ): Promise<AICallResult> {
   switch (config.provider) {
     case "anthropic": {
-      const client = new Anthropic({ apiKey: config.apiKey });
+      const client = new Anthropic({
+        apiKey: config.apiKey,
+        timeout: AI_CALL_TIMEOUT_MS,
+        maxRetries: AI_CALL_MAX_RETRIES,
+      });
+      // ARCH-5: si viene partido en {cached, rest}, marcamos el prefijo
+      // estable con `cache_control: {type:"ephemeral"}` — Anthropic cachea
+      // ese prefijo ~5 min y lo reutiliza en la siguiente sugerencia del
+      // mismo chat en vez de volver a facturarlo como input completo.
+      const system: string | Anthropic.Messages.TextBlockParam[] =
+        typeof systemPrompt === "string"
+          ? systemPrompt
+          : [
+              {
+                type: "text",
+                text: systemPrompt.cached,
+                cache_control: { type: "ephemeral" },
+              },
+              ...(systemPrompt.rest ? [{ type: "text" as const, text: systemPrompt.rest }] : []),
+            ];
       const response = await client.messages.create({
         model: config.model,
         max_tokens: maxTokens,
-        system: systemPrompt,
+        system,
         messages,
       });
       const text =
         response.content[0]?.type === "text" ? response.content[0].text : "";
       const tokensUsed =
         (response.usage?.input_tokens ?? 0) + (response.usage?.output_tokens ?? 0);
-      return { text, tokensUsed };
+      return { text, tokensUsed, stopReason: normalizeStopReason(response.stop_reason) };
     }
 
     case "openai": {
-      const client = new OpenAI({ apiKey: config.apiKey });
+      const client = new OpenAI({
+        apiKey: config.apiKey,
+        timeout: AI_CALL_TIMEOUT_MS,
+        maxRetries: AI_CALL_MAX_RETRIES,
+      });
       const oaiMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-        { role: "system", content: systemPrompt },
+        { role: "system", content: flattenSystemPrompt(systemPrompt) },
         ...messages,
       ];
       const response = await client.chat.completions.create({
@@ -403,7 +562,11 @@ export async function callAIProvider(
       const tokensUsed =
         (response.usage?.prompt_tokens ?? 0) +
         (response.usage?.completion_tokens ?? 0);
-      return { text, tokensUsed };
+      return {
+        text,
+        tokensUsed,
+        stopReason: normalizeStopReason(response.choices[0]?.finish_reason),
+      };
     }
 
     case "google": {
@@ -411,37 +574,22 @@ export async function callAIProvider(
         role: msg.role === "assistant" ? "model" : "user",
         parts: [{ text: msg.content }],
       }));
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${config.model}:generateContent`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            // AI-6: API key en header, no en la query string (quedaba en logs
-            // de proxies/APM y en error.cause de fetch fallidos).
-            "x-goog-api-key": config.apiKey,
-          },
-          body: JSON.stringify({
-            system_instruction: { parts: [{ text: systemPrompt }] },
-            contents,
-            generationConfig: { maxOutputTokens: maxTokens },
-          }),
-          // AI-6: timeout explícito (los SDK de Anthropic/OpenAI ya traen uno;
-          // Google via fetch podía colgar la mutación tRPC indefinidamente).
-          signal: AbortSignal.timeout(60_000),
-        }
-      );
-      if (!response.ok) {
-        const error = await response.text();
-        throw new Error(`Google AI error: ${error}`);
-      }
+      const response = await fetchGoogleWithRetry(config.model, config.apiKey, {
+        system_instruction: { parts: [{ text: flattenSystemPrompt(systemPrompt) }] },
+        contents,
+        generationConfig: { maxOutputTokens: maxTokens },
+      });
       const data = await response.json();
       const text =
         data.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
       const tokensUsed =
         (data.usageMetadata?.promptTokenCount ?? 0) +
         (data.usageMetadata?.candidatesTokenCount ?? 0);
-      return { text, tokensUsed };
+      return {
+        text,
+        tokensUsed,
+        stopReason: normalizeStopReason(data.candidates?.[0]?.finishReason),
+      };
     }
 
     case "minimax":
@@ -450,9 +598,14 @@ export async function callAIProvider(
       if (!baseURL) {
         throw new Error(`No base URL for provider: ${config.provider}`);
       }
-      const client = new OpenAI({ apiKey: config.apiKey, baseURL });
+      const client = new OpenAI({
+        apiKey: config.apiKey,
+        baseURL,
+        timeout: AI_CALL_TIMEOUT_MS,
+        maxRetries: AI_CALL_MAX_RETRIES,
+      });
       const oaiMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-        { role: "system", content: systemPrompt },
+        { role: "system", content: flattenSystemPrompt(systemPrompt) },
         ...messages,
       ];
       const response = await client.chat.completions.create({
@@ -464,11 +617,64 @@ export async function callAIProvider(
       const tokensUsed =
         (response.usage?.prompt_tokens ?? 0) +
         (response.usage?.completion_tokens ?? 0);
-      return { text, tokensUsed };
+      return {
+        text,
+        tokensUsed,
+        stopReason: normalizeStopReason(response.choices[0]?.finish_reason),
+      };
     }
 
     default:
       throw new Error(`Unsupported AI provider: ${config.provider}`);
+  }
+}
+
+export async function callAIProvider(
+  config: AIConfig,
+  systemPrompt: string | SplitSystemPrompt,
+  messages: { role: "user" | "assistant"; content: string }[],
+  maxTokens: number = 1024
+): Promise<AICallResult> {
+  // ARCH-11: subir el presupuesto mínimo para modelos razonadores — ver
+  // `REASONER_MIN_BUDGET`. No afecta a proveedores/modelos no marcados como
+  // razonadores en el registry (el `maxTokens` pedido pasa sin cambios).
+  const effectiveMaxTokens = isReasonerModel(config.provider, config.model)
+    ? Math.max(maxTokens, REASONER_MIN_BUDGET)
+    : maxTokens;
+
+  const startedAt = Date.now();
+  try {
+    const result = await callProviderRaw(config, systemPrompt, messages, effectiveMaxTokens);
+    log.info(
+      {
+        provider: config.provider,
+        model: config.model,
+        latencyMs: Date.now() - startedAt,
+        stopReason: result.stopReason,
+        tokensUsed: result.tokensUsed,
+      },
+      "AI provider call succeeded"
+    );
+    if (result.stopReason === "length") {
+      // AI-4: visibilidad — antes esto pasaba desapercibido y degradaba a un
+      // fallback neutral silencioso en el parser JSON del caller.
+      log.warn(
+        { provider: config.provider, model: config.model, maxTokens: effectiveMaxTokens },
+        "AI response truncated (stop_reason=length)"
+      );
+    }
+    return result;
+  } catch (err) {
+    log.error(
+      {
+        provider: config.provider,
+        model: config.model,
+        latencyMs: Date.now() - startedAt,
+        err,
+      },
+      "AI provider call failed"
+    );
+    throw err;
   }
 }
 

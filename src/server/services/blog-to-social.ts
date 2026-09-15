@@ -1,8 +1,8 @@
 import {
   callAIProvider,
-  stripThinkingBlocks,
   type AIConfig,
 } from "./ai";
+import { parseTolerantJSON } from "./ai-json-parser";
 import { getLanguageInstruction } from "./language-utils";
 import { assertPublicHttpUrl } from "@/lib/ssrf";
 
@@ -216,23 +216,9 @@ function buildUserMessage(content: ExtractedContent): string {
 }
 
 function tryParseDrafts(text: string): SocialDraft[] {
-  const cleaned = stripThinkingBlocks(text);
-  // Sometimes the model wraps in ```json fences
-  const fenced = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  const raw = (fenced ? fenced[1] : cleaned).trim();
-  // Find first { and last } for tolerant parsing
-  const firstBrace = raw.indexOf("{");
-  const lastBrace = raw.lastIndexOf("}");
-  if (firstBrace === -1 || lastBrace === -1) return [];
-  const slice = raw.slice(firstBrace, lastBrace + 1);
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(slice);
-  } catch {
-    return [];
-  }
+  const parsed = parseTolerantJSON<{ drafts?: unknown[] }>(text);
   if (!parsed || typeof parsed !== "object") return [];
-  const drafts = (parsed as { drafts?: unknown[] }).drafts;
+  const drafts = parsed.drafts;
   if (!Array.isArray(drafts)) return [];
 
   const out: SocialDraft[] = [];

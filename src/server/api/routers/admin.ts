@@ -22,7 +22,7 @@ function maskApiKey(key: string): string {
 // ─── Helper: registrar en audit log ─────────────────────────────────────────
 
 async function auditLog(
-  db: any,
+  db: typeof import("@/server/db").db,
   adminId: string,
   targetCreatorId: string | null,
   action: string,

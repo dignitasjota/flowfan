@@ -1,5 +1,6 @@
-import { Redis } from "ioredis";
+import type { Redis } from "ioredis";
 import { decrypt } from "@/lib/crypto";
+import { createRedisClient, FAIL_FAST_REDIS_OPTIONS } from "@/lib/redis-client";
 
 export type RedditCredentials = {
   clientId: string;
@@ -17,10 +18,7 @@ let cacheRedis: Redis | null = null;
 
 function getCacheRedis(): Redis {
   if (!cacheRedis) {
-    cacheRedis = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379", {
-      maxRetriesPerRequest: 1,
-      lazyConnect: true,
-    });
+    cacheRedis = createRedisClient(FAIL_FAST_REDIS_OPTIONS);
     cacheRedis.on("error", () => {
       // Cache failures should never break publishing — fall through to fetch
     });

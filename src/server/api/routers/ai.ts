@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { eq, and } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { canAccessConversation } from "../access";
 import { createTRPCRouter, protectedProcedure } from "../trpc";
@@ -556,17 +556,18 @@ export const aiRouter = createTRPCRouter({
         throw new TRPCError({ code: "NOT_FOUND", message: "Contacto no encontrado" });
       }
 
-      const recentMessages: { role: "fan" | "creator"; content: string }[] = [];
-      for (const conv of contact.conversations.slice(-3)) {
-        const msgs = await ctx.db.query.messages.findMany({
-          where: eq(messages.conversationId, conv.id),
-          orderBy: (m, { desc }) => [desc(m.createdAt)],
-          limit: 10,
-        });
-        recentMessages.push(
-          ...msgs.reverse().map((m) => ({ role: m.role, content: m.content }))
-        );
-      }
+      // TEN-15: una sola query en vez de un findMany por conversación.
+      const reportConvIds = contact.conversations.slice(-3).map((c) => c.id);
+      const reportMsgs = reportConvIds.length
+        ? await ctx.db.query.messages.findMany({
+            where: inArray(messages.conversationId, reportConvIds),
+            orderBy: (m, { desc }) => [desc(m.createdAt)],
+            limit: 10,
+          })
+        : [];
+      const recentMessages = reportMsgs
+        .reverse()
+        .map((m) => ({ role: m.role, content: m.content }));
 
       const signals = contact.profile?.behavioralSignals as BehavioralSignals | null;
 

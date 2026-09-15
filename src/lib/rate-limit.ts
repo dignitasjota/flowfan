@@ -1,13 +1,12 @@
-import { Redis } from "ioredis";
+import type { Redis } from "ioredis";
+import { randomUUID } from "crypto";
+import { createRedisClient, FAIL_FAST_REDIS_OPTIONS } from "./redis-client";
 
 let redis: Redis | null = null;
 
 function getRedis(): Redis {
   if (!redis) {
-    redis = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379", {
-      maxRetriesPerRequest: 1,
-      lazyConnect: true,
-    });
+    redis = createRedisClient(FAIL_FAST_REDIS_OPTIONS);
     redis.on("error", () => {
       // Silently handle Redis errors — rate limiting degrades gracefully
     });
@@ -90,6 +89,97 @@ export async function rateLimit(
       remaining: config.limit,
       resetAt: 0,
     };
+  }
+}
+
+type MonthlyCounterResult = {
+  /** `false` si este intento supera el límite. */
+  allowed: boolean;
+  /** Conteo tras este intento. `-1` si Redis no respondió (fail-open). */
+  count: number;
+};
+
+function monthBucketUTC(): string {
+  const now = new Date();
+  return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+function secondsUntilNextMonthUTC(): number {
+  const now = new Date();
+  const nextMonth = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1, 0, 0, 0)
+  );
+  return Math.ceil((nextMonth.getTime() - now.getTime()) / 1000);
+}
+
+/**
+ * ARCH-7 / AI-8: contador atómico mensual en Redis (INCR + TTL) para usarlo
+ * como gate de límites de plan, en vez del patrón check-then-insert contra
+ * Postgres (`SELECT count → llamada IA → INSERT log`), que bajo concurrencia
+ * deja pasar más peticiones de las permitidas (todas leen el mismo count
+ * antes de que ninguna inserte su fila).
+ *
+ * `INCR` es atómico en Redis: con N peticiones concurrentes, cada una recibe
+ * un valor distinto y consecutivo, así que solo las que caen dentro del
+ * límite lo pasan. No se decrementa si se supera el límite — aceptar la
+ * "reserva" evita que otra petición concurrente se cuele por debajo mientras
+ * esta decide si continuar; el contador expira solo al cambiar de mes.
+ *
+ * Fail-open ante error de Redis (igual que `rateLimit` sin `failClosed`):
+ * un límite de plan es una salvaguarda de negocio, no un boundary de
+ * seguridad — no tiene sentido tumbar el producto si Redis cae.
+ */
+export async function incrMonthlyCounter(
+  key: string,
+  limit: number
+): Promise<MonthlyCounterResult> {
+  if (limit === -1) return { allowed: true, count: 0 };
+  try {
+    const r = getRedis();
+    const redisKey = `usage_monthly:${key}:${monthBucketUTC()}`;
+    const count = await r.incr(redisKey);
+    if (count === 1) {
+      await r.expire(redisKey, secondsUntilNextMonthUTC());
+    }
+    return { allowed: count <= limit, count };
+  } catch {
+    return { allowed: true, count: -1 };
+  }
+}
+
+/**
+ * WK-8: lock distribuido simple (`SET NX PX`) para serializar una sección
+ * crítica entre procesos — p.ej. el refresco de un refresh_token OAuth
+ * rotativo (Twitter), donde dos procesos refrescando en paralelo con el
+ * mismo refresh_token invalida la familia entera y desconecta la cuenta.
+ *
+ * Devuelve un token de posesión (o `null` si no se pudo adquirir / Redis
+ * falló) que hay que pasar a `releaseLock` para liberarlo — evita que un
+ * proceso libere el lock de otro tras expirar el suyo por TTL.
+ */
+export async function acquireLock(key: string, ttlMs: number): Promise<string | null> {
+  try {
+    const r = getRedis();
+    const token = randomUUID();
+    const result = await r.set(`lock:${key}`, token, "PX", ttlMs, "NX");
+    return result === "OK" ? token : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Libera un lock de `acquireLock` solo si `token` sigue siendo el dueño actual. */
+export async function releaseLock(key: string, token: string): Promise<void> {
+  try {
+    const r = getRedis();
+    await r.eval(
+      `if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("del", KEYS[1]) else return 0 end`,
+      1,
+      `lock:${key}`,
+      token
+    );
+  } catch {
+    // Best-effort: si Redis falla al liberar, el TTL lo expira igualmente.
   }
 }
 
