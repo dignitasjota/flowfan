@@ -2,8 +2,10 @@
 
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 export function TelegramSettings() {
+  const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false);
   const utils = trpc.useUtils();
   const status = trpc.telegram.getStatus.useQuery();
   const connectMutation = trpc.telegram.connect.useMutation({
@@ -93,11 +95,7 @@ export function TelegramSettings() {
                   {testMutation.isPending ? "Verificando..." : "Test"}
                 </button>
                 <button
-                  onClick={() => {
-                    if (confirm("¿Desconectar el bot de Telegram?")) {
-                      disconnectMutation.mutate();
-                    }
-                  }}
+                  onClick={() => setShowDisconnectConfirm(true)}
                   disabled={disconnectMutation.isPending}
                   className="rounded-lg border border-red-800 px-3 py-1.5 text-xs text-red-400 hover:bg-red-900/30 disabled:opacity-50"
                 >
@@ -267,6 +265,20 @@ export function TelegramSettings() {
             <p className="text-xs text-red-400">{updateSettingsMutation.error.message}</p>
           )}
         </div>
+      )}
+
+      {showDisconnectConfirm && (
+        <ConfirmDialog
+          title="Desconectar Telegram"
+          message="¿Desconectar el bot de Telegram? Dejarás de recibir mensajes hasta reconectarlo."
+          confirmLabel="Desconectar"
+          isPending={disconnectMutation.isPending}
+          onCancel={() => setShowDisconnectConfirm(false)}
+          onConfirm={() => {
+            disconnectMutation.mutate();
+            setShowDisconnectConfirm(false);
+          }}
+        />
       )}
     </div>
   );

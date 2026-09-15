@@ -5,6 +5,7 @@ import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/lib/trpc";
 import { CoachingPublicModal } from "@/components/comments/coaching-public-modal";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 type Props = {
   postId: string;
@@ -33,6 +34,7 @@ export function CommentThreadPanel({ postId }: Props) {
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
   const [replyDraft, setReplyDraft] = useState("");
   const [alsoOnPlatform, setAlsoOnPlatform] = useState(false);
+  const [showHideConfirm, setShowHideConfirm] = useState(false);
   const [variants, setVariants] = useState<
     { type: string; label: string; content: string }[] | null
   >(null);
@@ -379,19 +381,7 @@ export function CommentThreadPanel({ postId }: Props) {
                   )}
                   {activeComment.moderationStatus !== "hidden" && (
                     <button
-                      onClick={() => {
-                        if (
-                          confirm(
-                            "¿Ocultar este comentario de la lista? Se podrá restaurar después."
-                          )
-                        ) {
-                          setModeration.mutate({
-                            id: activeComment.id,
-                            status: "hidden",
-                            alsoOnPlatform,
-                          });
-                        }
-                      }}
+                      onClick={() => setShowHideConfirm(true)}
                       disabled={setModeration.isPending}
                       className="rounded-md bg-gray-700 px-2 py-1 text-[11px] text-gray-300 hover:bg-gray-600 disabled:opacity-50"
                       title="Ocultar de la lista"
@@ -446,6 +436,24 @@ export function CommentThreadPanel({ postId }: Props) {
             setCoachingResult(null);
           }}
           onClose={() => setCoachingResult(null)}
+        />
+      )}
+
+      {showHideConfirm && activeComment && (
+        <ConfirmDialog
+          title="Ocultar comentario"
+          message="¿Ocultar este comentario de la lista? Se podrá restaurar después."
+          confirmLabel="Ocultar"
+          isPending={setModeration.isPending}
+          onCancel={() => setShowHideConfirm(false)}
+          onConfirm={() => {
+            setModeration.mutate({
+              id: activeComment.id,
+              status: "hidden",
+              alsoOnPlatform,
+            });
+            setShowHideConfirm(false);
+          }}
         />
       )}
     </div>

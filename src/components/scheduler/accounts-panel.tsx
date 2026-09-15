@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/lib/trpc";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 const PLATFORM_LABELS: Record<string, string> = {
   reddit: "Reddit",
@@ -20,6 +21,7 @@ export function AccountsPanel() {
   const utils = trpc.useUtils();
   const accounts = trpc.scheduler.listAccounts.useQuery();
   const [showRedditForm, setShowRedditForm] = useState(false);
+  const [disconnectTarget, setDisconnectTarget] = useState<{ id: string; platform: string } | null>(null);
 
   const enableWebhook = trpc.scheduler.enableWebhookConnection.useMutation({
     onSuccess: () => utils.scheduler.listAccounts.invalidate(),
@@ -97,11 +99,7 @@ export function AccountsPanel() {
               <div className="flex flex-col gap-1">
                 {account ? (
                   <button
-                    onClick={() => {
-                      if (confirm(`¿Desconectar ${PLATFORM_LABELS[p]}?`)) {
-                        disconnect.mutate({ id: account.id });
-                      }
-                    }}
+                    onClick={() => setDisconnectTarget({ id: account.id, platform: p })}
                     className="rounded-md bg-red-500/20 px-3 py-1 text-xs text-red-300 hover:bg-red-500/30"
                   >
                     Desconectar
@@ -147,6 +145,20 @@ export function AccountsPanel() {
           </div>
         );
       })}
+
+      {disconnectTarget && (
+        <ConfirmDialog
+          title="Desconectar cuenta"
+          message={`¿Desconectar ${PLATFORM_LABELS[disconnectTarget.platform]}?`}
+          confirmLabel="Desconectar"
+          isPending={disconnect.isPending}
+          onCancel={() => setDisconnectTarget(null)}
+          onConfirm={() => {
+            disconnect.mutate({ id: disconnectTarget.id });
+            setDisconnectTarget(null);
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 const triggerTypeLabels: Record<string, string> = {
   no_response_timeout: "Sin respuesta",
@@ -87,6 +88,7 @@ export default function WorkflowsPage() {
   const [showBuilder, setShowBuilder] = useState(false);
   const [editingWorkflow, setEditingWorkflow] = useState<Workflow | null>(null);
   const [showHistory, setShowHistory] = useState<{ id: string; name: string } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
 
   const workflows = trpc.workflows.list.useQuery({}, { retry: false });
   const stats = trpc.workflows.getStats.useQuery(undefined, { retry: false });
@@ -221,11 +223,7 @@ export default function WorkflowsPage() {
 
                 {/* Delete */}
                 <button
-                  onClick={() => {
-                    if (confirm(`¿Eliminar la automatización "${wf.name}"?`)) {
-                      deleteMutation.mutate({ id: wf.id });
-                    }
-                  }}
+                  onClick={() => setDeleteTarget({ id: wf.id, name: wf.name })}
                   className="rounded-lg border border-red-800 px-2.5 py-1.5 text-xs text-red-400 hover:bg-red-900/20"
                   title="Eliminar"
                 >
@@ -273,6 +271,20 @@ export default function WorkflowsPage() {
           workflowId={showHistory.id}
           workflowName={showHistory.name}
           onClose={() => setShowHistory(null)}
+        />
+      )}
+
+      {deleteTarget && (
+        <ConfirmDialog
+          title="Eliminar automatización"
+          message={<>¿Eliminar la automatización <span className="font-medium text-white">"{deleteTarget.name}"</span>?</>}
+          confirmLabel="Eliminar"
+          isPending={deleteMutation.isPending}
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={() => {
+            deleteMutation.mutate({ id: deleteTarget.id });
+            setDeleteTarget(null);
+          }}
         />
       )}
     </div>
@@ -700,7 +712,7 @@ function ExecutionHistory({
         <h2 className="text-lg font-semibold text-white">Historial: {workflowName}</h2>
 
         {executions.data && executions.data.items.length > 0 ? (
-          <div className="mt-4">
+          <div className="mt-4 overflow-x-auto">
             <table className="w-full">
               <thead>
                 <tr className="border-b border-gray-800 text-left text-xs text-gray-500">

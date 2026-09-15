@@ -3,6 +3,7 @@
 import { useState, useRef, useCallback } from "react";
 import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 const mediaTypeLabels: Record<string, string> = {
   image: "Imagen",
@@ -20,6 +21,7 @@ export default function MediaPage() {
   const [showBulkCatDropdown, setShowBulkCatDropdown] = useState(false);
   const [showBulkTagInput, setShowBulkTagInput] = useState(false);
   const [bulkTagValue, setBulkTagValue] = useState("");
+  const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
 
   const stats = trpc.media.getStats.useQuery(undefined, { retry: false });
   const categories = trpc.media.listCategories.useQuery();
@@ -346,17 +348,27 @@ export default function MediaPage() {
 
             {/* Eliminar */}
             <button
-              onClick={() => {
-                if (confirm(`¿Eliminar ${selectedIds.size} archivo${selectedIds.size !== 1 ? "s" : ""}?`)) {
-                  bulkDeleteMut.mutate({ ids: [...selectedIds] });
-                }
-              }}
+              onClick={() => setShowBulkDeleteConfirm(true)}
               className="rounded-lg border border-red-800 px-3 py-1.5 text-xs text-red-400 hover:bg-red-900/20"
             >
               Eliminar
             </button>
           </div>
         </div>
+      )}
+
+      {showBulkDeleteConfirm && (
+        <ConfirmDialog
+          title="Eliminar archivos"
+          message={`¿Eliminar ${selectedIds.size} archivo${selectedIds.size !== 1 ? "s" : ""}? Esta acción no se puede deshacer.`}
+          confirmLabel="Eliminar"
+          isPending={bulkDeleteMut.isPending}
+          onCancel={() => setShowBulkDeleteConfirm(false)}
+          onConfirm={() => {
+            bulkDeleteMut.mutate({ ids: [...selectedIds] });
+            setShowBulkDeleteConfirm(false);
+          }}
+        />
       )}
 
       {/* Upload modal */}
@@ -559,6 +571,7 @@ function DetailModal({
   const updateMutation = trpc.media.update.useMutation({ onSuccess: () => item.refetch() });
   const deleteMutation = trpc.media.delete.useMutation({ onSuccess: onClose });
   const [editTags, setEditTags] = useState<string | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   if (!item.data) {
     return (
@@ -573,6 +586,7 @@ function DetailModal({
   const data = item.data;
 
   return (
+    <>
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
       <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-xl border border-gray-700 bg-gray-900 p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
         {/* Preview */}
@@ -687,11 +701,7 @@ function DetailModal({
         {/* Actions */}
         <div className="mt-6 flex justify-between">
           <button
-            onClick={() => {
-              if (confirm("¿Eliminar este archivo?")) {
-                deleteMutation.mutate({ id: data.id });
-              }
-            }}
+            onClick={() => setShowDeleteConfirm(true)}
             className="rounded-lg border border-red-800 px-3 py-2 text-sm text-red-400 hover:bg-red-900/20"
           >
             Eliminar
@@ -702,6 +712,18 @@ function DetailModal({
         </div>
       </div>
     </div>
+
+    {showDeleteConfirm && (
+      <ConfirmDialog
+        title="Eliminar archivo"
+        message="¿Eliminar este archivo? Esta acción no se puede deshacer."
+        confirmLabel="Eliminar"
+        isPending={deleteMutation.isPending}
+        onCancel={() => setShowDeleteConfirm(false)}
+        onConfirm={() => deleteMutation.mutate({ id: data.id })}
+      />
+    )}
+    </>
   );
 }
 

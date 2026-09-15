@@ -4,6 +4,7 @@ import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
 import { PLATFORM_OPTIONS } from "@/lib/constants";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 const platformOptionsWithAll = [
   { value: "", label: "Todas las plataformas" },
@@ -18,6 +19,7 @@ export function TemplateSettings() {
   const [category, setCategory] = useState("");
   const [platformType, setPlatformType] = useState("");
   const [variablesText, setVariablesText] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
 
   const utils = trpc.useUtils();
   const { data: templates, isLoading } = trpc.templates.list.useQuery({});
@@ -267,11 +269,7 @@ export function TemplateSettings() {
                     </svg>
                   </button>
                   <button
-                    onClick={() => {
-                      if (confirm("Eliminar este template?")) {
-                        deleteTemplate.mutate({ id: template.id });
-                      }
-                    }}
+                    onClick={() => setDeleteTarget({ id: template.id, name: template.name })}
                     className="rounded p-1 text-gray-400 hover:text-red-400"
                   >
                     <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -287,6 +285,20 @@ export function TemplateSettings() {
         <p className="text-sm text-gray-500">
           No tienes templates aun. Crea uno para agilizar tus respuestas.
         </p>
+      )}
+
+      {deleteTarget && (
+        <ConfirmDialog
+          title="Eliminar template"
+          message={<>¿Eliminar el template <span className="font-medium text-white">"{deleteTarget.name}"</span>?</>}
+          confirmLabel="Eliminar"
+          isPending={deleteTemplate.isPending}
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={() => {
+            deleteTemplate.mutate({ id: deleteTarget.id });
+            setDeleteTarget(null);
+          }}
+        />
       )}
     </div>
   );

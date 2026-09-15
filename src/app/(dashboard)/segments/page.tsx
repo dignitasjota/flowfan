@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -156,6 +157,7 @@ export default function SegmentsPage() {
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(null);
   const [showBuilder, setShowBuilder] = useState(false);
   const [editingSegment, setEditingSegment] = useState<Segment | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Segment | null>(null);
 
   const segmentsList = trpc.segments.list.useQuery(undefined, { retry: false });
   const ensurePredefined = trpc.segments.ensurePredefined.useMutation({
@@ -282,11 +284,7 @@ export default function SegmentsPage() {
               setEditingSegment(selectedSegment);
               setShowBuilder(true);
             }}
-            onDelete={() => {
-              if (confirm(`Eliminar el segmento "${selectedSegment.name}"?`)) {
-                deleteMutation.mutate({ id: selectedSegment.id });
-              }
-            }}
+            onDelete={() => setDeleteTarget(selectedSegment)}
           />
         ) : (
           <div className="flex flex-1 items-center justify-center">
@@ -309,6 +307,20 @@ export default function SegmentsPage() {
             setShowBuilder(false);
             setEditingSegment(null);
             segmentsList.refetch();
+          }}
+        />
+      )}
+
+      {deleteTarget && (
+        <ConfirmDialog
+          title="Eliminar segmento"
+          message={<>¿Eliminar el segmento <span className="font-medium text-white">"{deleteTarget.name}"</span>?</>}
+          confirmLabel="Eliminar"
+          isPending={deleteMutation.isPending}
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={() => {
+            deleteMutation.mutate({ id: deleteTarget.id });
+            setDeleteTarget(null);
           }}
         />
       )}
@@ -449,7 +461,7 @@ function SegmentDetail({
       </div>
 
       {/* Contact list */}
-      <div className="flex-1 overflow-y-auto p-4">
+      <div className="flex-1 overflow-y-auto overflow-x-auto p-4">
         {isLoading ? (
           <div className="text-center">
             <p className="text-sm text-gray-500">Cargando contactos...</p>

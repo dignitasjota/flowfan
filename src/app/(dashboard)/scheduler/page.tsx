@@ -95,7 +95,11 @@ export default function SchedulerPage() {
         ))}
       </div>
 
-      {tab === "calendar" && (
+      {tab === "calendar" && list.isLoading && (
+        <p className="py-8 text-center text-sm text-gray-500">Cargando publicaciones...</p>
+      )}
+
+      {tab === "calendar" && !list.isLoading && (
         <SchedulerCalendar
           posts={(list.data ?? []).map((p) => ({
             id: p.id,
@@ -124,7 +128,13 @@ export default function SchedulerPage() {
               </tr>
             </thead>
             <tbody>
-              {list.data && list.data.length > 0 ? (
+              {list.isLoading ? (
+                <tr>
+                  <td colSpan={5} className="p-8 text-center text-sm text-gray-500">
+                    Cargando publicaciones...
+                  </td>
+                </tr>
+              ) : list.data && list.data.length > 0 ? (
                 list.data.map((p) => (
                   <tr
                     key={p.id}

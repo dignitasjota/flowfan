@@ -3,6 +3,7 @@
 import { useState, useMemo } from "react";
 import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -117,6 +118,9 @@ export default function BroadcastsPage() {
   const [selectedBroadcast, setSelectedBroadcast] = useState<Broadcast | null>(
     null
   );
+  const [confirmAction, setConfirmAction] = useState<
+    { action: "send" | "cancel" | "delete"; id: string; name: string } | null
+  >(null);
 
   const broadcastsList = trpc.broadcasts.list.useQuery(
     { limit: 50, offset: 0 },
@@ -318,15 +322,9 @@ export default function BroadcastsPage() {
                   {/* Send (only drafts) */}
                   {broadcast.status === "draft" && (
                     <button
-                      onClick={() => {
-                        if (
-                          confirm(
-                            `¿Enviar el broadcast "${broadcast.name}" ahora?`
-                          )
-                        ) {
-                          sendMutation.mutate({ id: broadcast.id });
-                        }
-                      }}
+                      onClick={() =>
+                        setConfirmAction({ action: "send", id: broadcast.id, name: broadcast.name })
+                      }
                       className="rounded-lg border border-green-800 px-2.5 py-1.5 text-xs text-green-400 hover:bg-green-900/20"
                       title="Enviar ahora"
                     >
@@ -374,15 +372,9 @@ export default function BroadcastsPage() {
                     broadcast.status === "scheduled" ||
                     broadcast.status === "processing") && (
                     <button
-                      onClick={() => {
-                        if (
-                          confirm(
-                            `¿Cancelar el broadcast "${broadcast.name}"?`
-                          )
-                        ) {
-                          cancelMutation.mutate({ id: broadcast.id });
-                        }
-                      }}
+                      onClick={() =>
+                        setConfirmAction({ action: "cancel", id: broadcast.id, name: broadcast.name })
+                      }
                       className="rounded-lg border border-yellow-800 px-2.5 py-1.5 text-xs text-yellow-400 hover:bg-yellow-900/20"
                       title="Cancelar"
                     >
@@ -408,15 +400,9 @@ export default function BroadcastsPage() {
                     broadcast.status === "failed" ||
                     broadcast.status === "cancelled") && (
                     <button
-                      onClick={() => {
-                        if (
-                          confirm(
-                            `¿Eliminar el broadcast "${broadcast.name}"?`
-                          )
-                        ) {
-                          deleteMutation.mutate({ id: broadcast.id });
-                        }
-                      }}
+                      onClick={() =>
+                        setConfirmAction({ action: "delete", id: broadcast.id, name: broadcast.name })
+                      }
                       className="rounded-lg border border-red-800 px-2.5 py-1.5 text-xs text-red-400 hover:bg-red-900/20"
                       title="Eliminar"
                     >
@@ -474,6 +460,52 @@ export default function BroadcastsPage() {
         <BroadcastDetail
           broadcast={selectedBroadcast}
           onClose={() => setSelectedBroadcast(null)}
+        />
+      )}
+
+      {confirmAction && (
+        <ConfirmDialog
+          title={
+            confirmAction.action === "send"
+              ? "Enviar broadcast"
+              : confirmAction.action === "cancel"
+                ? "Cancelar broadcast"
+                : "Eliminar broadcast"
+          }
+          message={
+            <>
+              {confirmAction.action === "send"
+                ? "¿Enviar el broadcast"
+                : confirmAction.action === "cancel"
+                  ? "¿Cancelar el broadcast"
+                  : "¿Eliminar el broadcast"}{" "}
+              <span className="font-medium text-white">"{confirmAction.name}"</span>
+              {confirmAction.action === "send" ? " ahora?" : "?"}
+            </>
+          }
+          confirmLabel={
+            confirmAction.action === "send"
+              ? "Enviar"
+              : confirmAction.action === "cancel"
+                ? "Cancelar broadcast"
+                : "Eliminar"
+          }
+          isDanger={confirmAction.action !== "send"}
+          isPending={
+            confirmAction.action === "send"
+              ? sendMutation.isPending
+              : confirmAction.action === "cancel"
+                ? cancelMutation.isPending
+                : deleteMutation.isPending
+          }
+          onCancel={() => setConfirmAction(null)}
+          onConfirm={() => {
+            const { action, id } = confirmAction;
+            if (action === "send") sendMutation.mutate({ id });
+            else if (action === "cancel") cancelMutation.mutate({ id });
+            else deleteMutation.mutate({ id });
+            setConfirmAction(null);
+          }}
         />
       )}
     </div>
@@ -980,6 +1012,7 @@ function BroadcastDetail({
             </div>
           ) : recipients.length > 0 ? (
             <>
+              <div className="overflow-x-auto">
               <table className="mt-3 w-full">
                 <thead>
                   <tr className="border-b border-gray-800 text-left text-xs text-gray-500">
@@ -1044,6 +1077,7 @@ function BroadcastDetail({
                   })}
                 </tbody>
               </table>
+              </div>
 
               {/* Pagination */}
               <div className="mt-3 flex items-center justify-between">

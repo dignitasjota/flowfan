@@ -4,10 +4,12 @@ import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { RoleForm } from "@/components/team/role-form";
 import { PermissionBadge } from "@/components/team/permission-badge";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 export default function RolesPage() {
   const [editingRoleId, setEditingRoleId] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
 
   const { data: roles, refetch } = trpc.team.getCustomRoles.useQuery();
   const createRole = trpc.team.createCustomRole.useMutation({
@@ -119,11 +121,7 @@ export default function RolesPage() {
                   </button>
                   {!role.isSystem && (
                     <button
-                      onClick={() => {
-                        if (confirm("¿Eliminar este rol?")) {
-                          deleteRole.mutate({ roleId: role.id });
-                        }
-                      }}
+                      onClick={() => setDeleteTarget({ id: role.id, name: role.name })}
                       className="text-xs text-red-400 hover:text-red-300"
                     >
                       Eliminar
@@ -135,6 +133,20 @@ export default function RolesPage() {
           </div>
         ))}
       </div>
+
+      {deleteTarget && (
+        <ConfirmDialog
+          title="Eliminar rol"
+          message={<>¿Eliminar el rol <span className="font-medium text-white">"{deleteTarget.name}"</span>?</>}
+          confirmLabel="Eliminar"
+          isPending={deleteRole.isPending}
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={() => {
+            deleteRole.mutate({ roleId: deleteTarget.id });
+            setDeleteTarget(null);
+          }}
+        />
+      )}
     </div>
   );
 }

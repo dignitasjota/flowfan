@@ -14,28 +14,30 @@ import { useRealtimeMessages } from "@/hooks/use-realtime";
 import Image from "next/image";
 
 // access: "all" = any team member, "manager" = owner+manager, "owner" = owner only
+// FE: 21 ítems en lista plana no comunicaban jerarquía — agrupados en secciones
+// visuales (mismo orden y accesos de antes, solo con headers intercalados).
 const navigation = [
-  { name: "Dashboard", href: "/dashboard", icon: "📊", access: "all" as const },
-  { name: "Conversaciones", href: "/conversations", icon: "💬", access: "all" as const },
-  { name: "Comentarios", href: "/comments", icon: "🗨️", access: "all" as const },
-  { name: "Contactos", href: "/contacts", icon: "👥", access: "all" as const },
-  { name: "Segmentos", href: "/segments", icon: "🎯", access: "manager" as const },
-  { name: "Revenue", href: "/revenue", icon: "💰", access: "manager" as const },
-  { name: "Media Vault", href: "/media", icon: "🖼️", access: "manager" as const },
-  { name: "Automatizaciones", href: "/workflows", icon: "⚡", access: "manager" as const },
-  { name: "Secuencias", href: "/sequences", icon: "🔄", access: "manager" as const },
-  { name: "Content Gaps", href: "/content-gaps", icon: "🔍", access: "manager" as const },
-  { name: "A/B Mensajes", href: "/experiments", icon: "🧪", access: "manager" as const },
-  { name: "Insights", href: "/insights", icon: "📈", access: "manager" as const },
-  { name: "Blog → Social", href: "/blog-to-social", icon: "✨", access: "manager" as const },
-  { name: "Programados", href: "/scheduled", icon: "⏰", access: "all" as const },
-  { name: "Scheduler", href: "/scheduler", icon: "📅", access: "manager" as const },
-  { name: "Calendario", href: "/calendar", icon: "🗓️", access: "manager" as const },
-  { name: "Broadcasts", href: "/broadcasts", icon: "📢", access: "manager" as const },
-  { name: "Equipo", href: "/team", icon: "👤", access: "owner" as const },
-  { name: "Billing", href: "/billing", icon: "💳", access: "owner" as const },
-  { name: "Referidos", href: "/referrals", icon: "🎁", access: "owner" as const },
-  { name: "Configuración", href: "/settings", icon: "⚙️", access: "owner" as const },
+  { name: "Dashboard", href: "/dashboard", icon: "📊", access: "all" as const, section: "Bandeja" },
+  { name: "Conversaciones", href: "/conversations", icon: "💬", access: "all" as const, section: "Bandeja" },
+  { name: "Comentarios", href: "/comments", icon: "🗨️", access: "all" as const, section: "Bandeja" },
+  { name: "Contactos", href: "/contacts", icon: "👥", access: "all" as const, section: "Bandeja" },
+  { name: "Segmentos", href: "/segments", icon: "🎯", access: "manager" as const, section: "Growth & IA" },
+  { name: "Revenue", href: "/revenue", icon: "💰", access: "manager" as const, section: "Growth & IA" },
+  { name: "Media Vault", href: "/media", icon: "🖼️", access: "manager" as const, section: "Growth & IA" },
+  { name: "Automatizaciones", href: "/workflows", icon: "⚡", access: "manager" as const, section: "Growth & IA" },
+  { name: "Secuencias", href: "/sequences", icon: "🔄", access: "manager" as const, section: "Growth & IA" },
+  { name: "Content Gaps", href: "/content-gaps", icon: "🔍", access: "manager" as const, section: "Growth & IA" },
+  { name: "A/B Mensajes", href: "/experiments", icon: "🧪", access: "manager" as const, section: "Growth & IA" },
+  { name: "Insights", href: "/insights", icon: "📈", access: "manager" as const, section: "Growth & IA" },
+  { name: "Blog → Social", href: "/blog-to-social", icon: "✨", access: "manager" as const, section: "Growth & IA" },
+  { name: "Programados", href: "/scheduled", icon: "⏰", access: "all" as const, section: "Publicación" },
+  { name: "Scheduler", href: "/scheduler", icon: "📅", access: "manager" as const, section: "Publicación" },
+  { name: "Calendario", href: "/calendar", icon: "🗓️", access: "manager" as const, section: "Publicación" },
+  { name: "Broadcasts", href: "/broadcasts", icon: "📢", access: "manager" as const, section: "Publicación" },
+  { name: "Equipo", href: "/team", icon: "👤", access: "owner" as const, section: "Administración" },
+  { name: "Billing", href: "/billing", icon: "💳", access: "owner" as const, section: "Administración" },
+  { name: "Referidos", href: "/referrals", icon: "🎁", access: "owner" as const, section: "Administración" },
+  { name: "Configuración", href: "/settings", icon: "⚙️", access: "owner" as const, section: "Administración" },
 ];
 
 type SidebarProps = {
@@ -111,21 +113,32 @@ export function Sidebar({ user }: SidebarProps) {
 
       {/* Navigation */}
       <nav className="flex-1 space-y-1 px-3 py-4">
-        {filteredNav.map((item) => (
-          <Link
-            key={item.href}
-            href={item.href}
-            className={cn(
-              "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
-              pathname.startsWith(item.href)
-                ? "bg-gray-800 text-white"
-                : "text-gray-400 hover:bg-gray-800/50 hover:text-white"
+        {filteredNav.map((item, i) => (
+          <div key={item.href}>
+            {item.section !== filteredNav[i - 1]?.section && (
+              <h3
+                className={cn(
+                  "px-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-gray-600",
+                  i > 0 && "pt-3"
+                )}
+              >
+                {item.section}
+              </h3>
             )}
-          >
-            <span>{item.icon}</span>
-            <span className="flex-1">{item.name}</span>
-            <SidebarBadge href={item.href} />
-          </Link>
+            <Link
+              href={item.href}
+              className={cn(
+                "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
+                pathname.startsWith(item.href)
+                  ? "bg-gray-800 text-white"
+                  : "text-gray-400 hover:bg-gray-800/50 hover:text-white"
+              )}
+            >
+              <span>{item.icon}</span>
+              <span className="flex-1">{item.name}</span>
+              <SidebarBadge href={item.href} />
+            </Link>
+          </div>
         ))}
         <NotificationBell />
       </nav>

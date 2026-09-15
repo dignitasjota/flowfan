@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 type Variant = { key: string; label: string; content: string };
 
@@ -204,6 +205,7 @@ function ExperimentDetail({ id }: { id: string }) {
   const del = trpc.messageExperiments.delete.useMutation({
     onSuccess: () => utils.messageExperiments.list.invalidate(),
   });
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   if (detail.isLoading || !detail.data) {
     return <div className="px-5 pb-5 text-sm text-gray-500">Cargando…</div>;
@@ -233,15 +235,27 @@ function ExperimentDetail({ id }: { id: string }) {
         )}
         {experiment.status === "draft" && (
           <button
-            onClick={() => {
-              if (confirm("¿Eliminar este experimento?")) del.mutate({ id });
-            }}
+            onClick={() => setShowDeleteConfirm(true)}
             className="rounded-lg border border-red-800 px-3 py-1.5 text-xs font-medium text-red-400 hover:bg-red-950"
           >
             Eliminar
           </button>
         )}
       </div>
+
+      {showDeleteConfirm && (
+        <ConfirmDialog
+          title="Eliminar experimento"
+          message="¿Eliminar este experimento? Esta acción no se puede deshacer."
+          confirmLabel="Eliminar"
+          isPending={del.isPending}
+          onCancel={() => setShowDeleteConfirm(false)}
+          onConfirm={() => {
+            del.mutate({ id });
+            setShowDeleteConfirm(false);
+          }}
+        />
+      )}
 
       {/* Confianza */}
       <div className="mb-3 text-xs text-gray-400">
