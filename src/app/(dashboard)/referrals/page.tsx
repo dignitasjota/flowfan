@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
+import { TableRowSkeleton } from "@/components/ui/skeleton";
 
 function euros(cents: number): string {
   return `€${(cents / 100).toFixed(2)}`;
@@ -83,8 +84,27 @@ export default function ReferralsPage() {
         {/* Rewards */}
         <div className="mt-8">
           <h2 className="mb-3 text-lg font-semibold text-white">Comisiones</h2>
-          {rewardsQuery.data && rewardsQuery.data.length > 0 ? (
-            <div className="overflow-hidden rounded-xl border border-gray-800">
+          {rewardsQuery.isLoading ? (
+            <div className="overflow-x-auto rounded-xl border border-gray-800">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-gray-900 text-xs uppercase text-gray-500">
+                    <th className="px-4 py-3 text-left">Referido</th>
+                    <th className="px-4 py-3 text-left">Plan</th>
+                    <th className="px-4 py-3 text-right">Comisión</th>
+                    <th className="px-4 py-3 text-left">Estado</th>
+                    <th className="px-4 py-3 text-right">Fecha</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-800">
+                  {Array.from({ length: 4 }).map((_, i) => (
+                    <TableRowSkeleton key={i} columns={5} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : rewardsQuery.data && rewardsQuery.data.length > 0 ? (
+            <div className="overflow-x-auto rounded-xl border border-gray-800">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-gray-900 text-xs uppercase text-gray-500">

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
+import { Skeleton } from "@/components/ui/skeleton";
 
 const PLATFORM_ICONS: Record<string, string> = {
   instagram: "📷",
@@ -95,8 +96,24 @@ export default function InsightsPage() {
       </div>
 
       {insights.isLoading ? (
-        <div className="rounded-lg border border-gray-800 bg-gray-900/40 p-12 text-center text-sm text-gray-500">
-          Cargando datos...
+        <div className="space-y-6">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="space-y-3 rounded-xl border border-gray-800 bg-gray-900 p-4">
+                <Skeleton className="h-4 w-24" />
+                <Skeleton className="h-8 w-16" />
+              </div>
+            ))}
+          </div>
+          <div className="grid gap-4 lg:grid-cols-2">
+            {Array.from({ length: 2 }).map((_, i) => (
+              <div key={i} className="space-y-3 rounded-xl border border-gray-800 bg-gray-900 p-4">
+                <Skeleton className="h-5 w-32" />
+                <Skeleton className="h-24 w-full" />
+                <Skeleton className="h-4 w-full" />
+              </div>
+            ))}
+          </div>
         </div>
       ) : !insights.data || insights.data.perPlatform.length === 0 ? (
         <div className="rounded-lg border border-gray-800 bg-gray-900/40 p-12 text-center">

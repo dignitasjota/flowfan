@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Skeleton } from "@/components/ui/skeleton";
 
 type Variant = { key: string; label: string; content: string };
 
@@ -48,7 +49,11 @@ export default function ExperimentsPage() {
 
         <div className="mt-8 space-y-3">
           {listQuery.isLoading ? (
-            <p className="text-sm text-gray-500">Cargando…</p>
+            <div className="space-y-3">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <Skeleton key={i} className="h-14 w-full rounded-xl" />
+              ))}
+            </div>
           ) : listQuery.data && listQuery.data.length > 0 ? (
             listQuery.data.map((exp) => (
               <div

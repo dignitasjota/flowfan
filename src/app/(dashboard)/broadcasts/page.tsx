@@ -4,6 +4,7 @@ import { useState, useMemo } from "react";
 import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Skeleton } from "@/components/ui/skeleton";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -224,8 +225,16 @@ export default function BroadcastsPage() {
 
       {/* Loading state */}
       {broadcastsList.isLoading && (
-        <div className="mt-12 text-center">
-          <p className="text-sm text-gray-500">Cargando broadcasts...</p>
+        <div className="mt-6 space-y-3">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="space-y-3 rounded-xl border border-gray-800 bg-gray-900 p-4">
+              <div className="flex items-center gap-3">
+                <Skeleton className="h-4 w-40" />
+                <Skeleton className="h-4 w-16 rounded-full" />
+              </div>
+              <Skeleton className="h-3 w-full max-w-md" />
+            </div>
+          ))}
         </div>
       )}
 

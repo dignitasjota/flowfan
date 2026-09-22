@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { TableRowSkeleton } from "@/components/ui/skeleton";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -463,9 +464,20 @@ function SegmentDetail({
       {/* Contact list */}
       <div className="flex-1 overflow-y-auto overflow-x-auto p-4">
         {isLoading ? (
-          <div className="text-center">
-            <p className="text-sm text-gray-500">Cargando contactos...</p>
-          </div>
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-gray-800 text-left text-xs text-gray-500">
+                <th className="pb-2 font-medium">Username</th>
+                <th className="pb-2 font-medium">Nombre</th>
+                <th className="pb-2 font-medium">Plataforma</th>
+              </tr>
+            </thead>
+            <tbody>
+              {Array.from({ length: 6 }).map((_, i) => (
+                <TableRowSkeleton key={i} columns={3} />
+              ))}
+            </tbody>
+          </table>
         ) : contacts.length > 0 ? (
           <table className="w-full">
             <thead>

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
 import { TrendChart } from "@/components/ui/trend-chart";
+import { Skeleton } from "@/components/ui/skeleton";
 
 const typeLabels: Record<string, string> = {
   tip: "Propinas",
@@ -51,6 +52,27 @@ export default function RevenuePage() {
     <div className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
       <h1 className="text-xl font-bold text-white sm:text-2xl">Revenue</h1>
       <p className="mt-1 text-sm text-gray-400">Tracking de ingresos por fan</p>
+
+      {stats.isLoading && (
+        <div className="mt-6 space-y-6">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="space-y-2 rounded-xl border border-gray-800 bg-gray-900 p-4">
+                <Skeleton className="h-3 w-16" />
+                <Skeleton className="h-6 w-20" />
+              </div>
+            ))}
+          </div>
+          <div className="grid gap-4 lg:grid-cols-2">
+            {Array.from({ length: 2 }).map((_, i) => (
+              <div key={i} className="space-y-3 rounded-xl border border-gray-800 bg-gray-900 p-4">
+                <Skeleton className="h-4 w-32" />
+                <Skeleton className="h-32 w-full" />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* KPI Cards */}
       {stats.data && (

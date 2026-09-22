@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
+import { Skeleton } from "@/components/ui/skeleton";
 
 type PeriodDays = "7" | "30" | "90";
 
@@ -172,7 +173,11 @@ export default function ContentGapsPage() {
             </div>
 
             {trendsQuery.isLoading && (
-              <p className="text-sm text-gray-500">Cargando tendencias...</p>
+              <div className="space-y-2">
+                {["w-11/12", "w-4/5", "w-3/4", "w-2/3", "w-1/2", "w-2/5"].map((w, i) => (
+                  <Skeleton key={i} className={cn("h-6", w)} />
+                ))}
+              </div>
             )}
 
             {trendsQuery.data?.length === 0 && (
@@ -442,7 +447,11 @@ export default function ContentGapsPage() {
             </h3>
 
             {reportsQuery.isLoading && (
-              <p className="text-sm text-gray-500">Cargando...</p>
+              <div className="space-y-3">
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <Skeleton key={i} className="h-16 w-full rounded-lg" />
+                ))}
+              </div>
             )}
 
             {reportsQuery.data?.length === 0 && (

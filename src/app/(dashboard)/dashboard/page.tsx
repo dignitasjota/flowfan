@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import { TrendChart } from "@/components/ui/trend-chart";
 import { ChurnPanel } from "@/components/dashboard/churn-panel";
 import { WelcomeBanner } from "@/components/dashboard/welcome-banner";
+import { DashboardSkeleton } from "@/components/ui/skeleton";
 
 const funnelLabels: Record<string, string> = {
   cold: "Frio",
@@ -84,11 +85,7 @@ export default function DashboardPage() {
   }
 
   if (isLoading) {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <p className="text-gray-500">Cargando dashboard...</p>
-      </div>
-    );
+    return <DashboardSkeleton />;
   }
 
   if (!stats) return null;
