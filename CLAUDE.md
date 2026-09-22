@@ -54,6 +54,14 @@ Supports 5 providers via a unified `callAIProvider()` function:
 
 MiniMax and Kimi use OpenAI-compatible endpoints with custom base URLs defined in `OPENAI_COMPATIBLE_BASES`.
 
+**Model registry** (`MODEL_REGISTRY`) replaces the old flat `PROVIDER_MODELS` map — each model carries metadata (`contextWindow`, `isReasoner`). `PROVIDER_MODELS` (the `{value,label}` shape the settings UI consumes) is now *derived* from the registry. `MiniMax-M1` is flagged `isReasoner: true` — reasoner models spend part of their token budget on an internal `<think>` block, so `callAIProvider` auto-bumps `maxTokens` to a 2000-token floor (`REASONER_MIN_BUDGET`) whenever the resolved model is a reasoner and the caller asked for less (fixes truncation on low-budget tasks like `message-classifier.ts` maxTokens=100 or `ai-analysis.ts` maxTokens=512). `getModelMetadata()` / `isReasonerModel()` are the lookup helpers.
+
+**`callAIProvider()` wrapper** — single entry point for all 5 providers with:
+- Explicit timeout (60s) and `maxRetries: 2` on every SDK client (Anthropic/OpenAI/MiniMax/Kimi), instead of relying on each SDK's own implicit ~10-minute default.
+- Manual retry-with-backoff (500ms/1000ms) for Google, the only provider without an SDK (raw `fetch`) and therefore with no retry of its own — retries on 429/5xx, propagates non-retryable statuses (4xx other than 429) immediately.
+- `AICallResult.stopReason: "stop" | "length" | "other"` — normalized across the 4 different raw formats (`stop_reason` from Anthropic, `finish_reason` from OpenAI-compatible, `finishReason` from Google). Logged via `log.warn` when `"length"` (truncation), so it's no longer silent.
+- Telemetry on every call (success or failure): `{provider, model, latencyMs, stopReason, tokensUsed}` via the module's own `createChildLogger("ai-provider")`.
+
 Models are listed in `PROVIDER_MODELS` and shown in the settings UI for selection.
 
 ### Multi-model per task (`src/server/services/ai-config-resolver.ts`)
@@ -78,6 +86,8 @@ Each creator can configure different models for different tasks:
 6. Global creator instructions
 7. Contact profile (engagement, funnel stage, payment probability)
 8. Creator notes about the contact
+
+**Prompt caching (Anthropic):** `buildSystemPrompt()` returns `{cached, rest}` instead of a flat string — items 1-6 above (stable per creator+platform, identical across consecutive suggestions in the same chat) go in `cached`; items 7-8 (contact-specific, changes per message) go in `rest`. `callAIProvider()` accepts `string | {cached, rest}`; only the Anthropic branch builds the `cache_control: {type:"ephemeral"}` content-block array from it (Anthropic caches the prefix ~5 min, cutting input cost on active conversations). Every other provider/caller still passes a flat string and is unaffected — `flattenSystemPrompt()` concatenates `{cached, rest}` back into one string for them.
 
 ### Suggestion variants
 
@@ -1176,3 +1186,8 @@ Utilidades reutilizables introducidas/consolidadas durante la remediación de la
 - **`src/lib/utils.ts` → `formatDateTimeLocal(d)`** — formatea una `Date` para el `value`/`min` de un `<input type="datetime-local">` usando componentes **locales** (no UTC). Usar siempre esto para `min`; `toISOString().slice(0,16)` da hora UTC y desalinea el mínimo (FE-11).
 - **`src/components/ui/modal.tsx` → `<Modal>`** — overlay de diálogo accesible reutilizable: `role="dialog"` + `aria-modal`, cierre con `Escape` y backdrop (configurable con `closeOnBackdrop`), focus trap básico y restauración del foco al cerrar. Aceptar `labelledBy`/`label` para el título. Envolver cualquier modal nuevo con esto en vez de un `<div className="fixed inset-0">` suelto (FE-12).
 - **Contexto realtime dividido** (`src/hooks/use-realtime.ts`) — en vez de un único `useRealtimeContext()`, hay dos contextos separados con hooks propios: **`useRealtimeMessages()`** (`newMessageConversations`, `markConversationSeen`, `status`) para sidebar/lista, y **`useRealtimePresence()`** (`onlineMembers`, `typingUsers`, `conversationViewers`) para el chat. Cada slice está memoizada, así un evento de typing/presence no repinta los badges del sidebar (FE-7). El provider (`providers.tsx`) anida ambos.
+- **`src/lib/redis-client.ts` → `createRedisClient(options)`** — factoría para clientes ioredis "normales" (no BullMQ, que sigue usando `redis-connection.ts`). Centraliza el parseo de `REDIS_URL` + fallback a `redis://localhost:6379`, sin forzar una única conexión física ni una config de retries compartida — `FAIL_FAST_REDIS_OPTIONS` (rate-limit, cache de tokens Reddit) y `LONG_LIVED_REDIS_OPTIONS` (pub/sub, cliente general) siguen siendo distintos a propósito.
+- **`src/lib/rate-limit.ts` → `incrMonthlyCounter(key, limit)`** — contador atómico en Redis (`INCR` + `EXPIRE` a fin de mes UTC) usado como gate de límites de plan que gatean una llamada IA real (`checkAIMessageLimit`/`checkReportLimit`/`checkCoachingLimit` en `usage-limits.ts`), en vez de `SELECT count()` contra Postgres (racy bajo concurrencia). Fail-open ante error de Redis, igual que `rateLimit()`.
+- **`src/lib/rate-limit.ts` → `acquireLock(key, ttlMs)` / `releaseLock(key, token)`** — lock distribuido simple (`SET NX PX` + compare-and-del vía Lua) para serializar una sección crítica entre procesos. Usarlo siempre con **relectura de la fila de DB dentro del lock** antes de actuar — un lock sin relectura no evita usar datos ya obsoletos que otro proceso cambió mientras se esperaba (ver `getFreshTwitterAccessToken` en `twitter-publisher.ts`).
+- **`src/server/services/ai-json-parser.ts` → `parseTolerantJSON<T>(text)`** — extrae y parsea un objeto JSON de la respuesta de un modelo de IA, tolerando `<think>` sin cerrar, fences ` ```json `, y texto extra alrededor. Único punto para esta lógica — antes estaba duplicada (con pequeñas variantes) en 8 servicios de IA.
+- **`src/components/ui/confirm-dialog.tsx` → `<ConfirmDialog>`** — diálogo de confirmación accesible sobre `<Modal>` (título, mensaje, `onConfirm`/`onCancel`, `isPending`, `isDanger`). Usar siempre en vez de `window.confirm()` para acciones destructivas — bloquea el hilo de JS, no respeta el tema oscuro y no es personalizable.
