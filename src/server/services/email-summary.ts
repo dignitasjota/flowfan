@@ -10,14 +10,16 @@ type DB = typeof import("@/server/db").db;
 
 export async function generateDailySummary(db: DB, creatorId: string): Promise<DailySummaryData> {
   const today = new Date();
-  const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  // Últimas 24 h: el resumen se envía a las 9 UTC; "desde las 00:00 de hoy"
+  // solo cubría 9 horas.
+  const startOfDay = new Date(today.getTime() - 24 * 60 * 60 * 1000);
 
   const creator = await db.query.creators.findFirst({
     where: eq(creators.id, creatorId),
     columns: { name: true },
   });
 
-  // New contacts today
+  // New contacts (últimas 24 h)
   const [newContactsResult] = await db
     .select({ count: count() })
     .from(contacts)
@@ -88,7 +90,7 @@ export async function generateWeeklySummary(db: DB, creatorId: string): Promise<
     .select({ total: sum(fanTransactions.amount) })
     .from(fanTransactions)
     .innerJoin(contacts, eq(contacts.id, fanTransactions.contactId))
-    .where(and(eq(contacts.creatorId, creatorId), gte(fanTransactions.createdAt, weekStart)));
+    .where(and(eq(contacts.creatorId, creatorId), gte(fanTransactions.transactionDate, weekStart)));
 
   // Churn rate
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);

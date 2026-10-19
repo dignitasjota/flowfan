@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { randomBytes } from "crypto";
 import { db } from "@/server/db";
 import { creators, passwordResetTokens } from "@/server/db/schema";
@@ -11,7 +11,7 @@ import { createChildLogger } from "@/lib/logger";
 const log = createChildLogger("auth-forgot-password");
 
 const schema = z.object({
-  email: z.string().email(),
+  email: z.string().trim().toLowerCase().pipe(z.string().email()),
 });
 
 export async function POST(req: Request) {
@@ -34,7 +34,7 @@ export async function POST(req: Request) {
 
   // Check if user exists
   const creator = await db.query.creators.findFirst({
-    where: eq(creators.email, email),
+    where: sql`lower(${creators.email}) = ${email}`,
   });
 
   // Always return success to prevent email enumeration
@@ -47,7 +47,8 @@ export async function POST(req: Request) {
   const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
 
   await db.insert(passwordResetTokens).values({
-    email,
+    // Email tal cual está guardado: reset-password actualiza por igualdad exacta.
+    email: creator.email,
     token,
     expiresAt,
   });
@@ -61,7 +62,7 @@ export async function POST(req: Request) {
     const { emailQueue } = await import("@/server/queues");
     await emailQueue.add("password_reset", {
       type: "password_reset" as const,
-      to: email,
+      to: creator.email,
       data: { resetUrl },
     });
   } catch (err) {

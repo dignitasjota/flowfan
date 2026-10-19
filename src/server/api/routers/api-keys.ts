@@ -1,15 +1,15 @@
 import { z } from "zod";
-import { createTRPCRouter, ownerProcedure } from "../trpc";
+import { createTRPCRouter, ownerProcedure, permissionProcedure } from "../trpc";
 import { createApiKey, revokeApiKey, listApiKeys } from "@/server/services/api-keys";
 import { checkApiAccess } from "@/server/services/usage-limits";
 
 export const apiKeysRouter = createTRPCRouter({
-  list: ownerProcedure.query(async ({ ctx }) => {
+  list: permissionProcedure("api.manage_keys").query(async ({ ctx }) => {
     await checkApiAccess(ctx.db, ctx.creatorId);
     return listApiKeys(ctx.db, ctx.creatorId);
   }),
 
-  create: ownerProcedure
+  create: permissionProcedure("api.manage_keys")
     .input(z.object({ name: z.string().min(1).max(255) }))
     .mutation(async ({ ctx, input }) => {
       await checkApiAccess(ctx.db, ctx.creatorId);
@@ -17,7 +17,7 @@ export const apiKeysRouter = createTRPCRouter({
       return result;
     }),
 
-  revoke: ownerProcedure
+  revoke: permissionProcedure("api.manage_keys")
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       await revokeApiKey(ctx.db, input.id, ctx.creatorId);

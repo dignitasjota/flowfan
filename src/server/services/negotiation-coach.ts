@@ -1,4 +1,5 @@
 import { type AIConfig, callAIProvider } from "./ai";
+import { UNTRUSTED_DATA_RULE, wrapTranscript } from "./prompt-safety";
 import { parseTolerantJSON } from "./ai-json-parser";
 import { getLanguageInstruction } from "./language-utils";
 
@@ -125,7 +126,7 @@ export async function generateCoaching(
 ): Promise<CoachingResult> {
   const basePrompt = COACHING_PROMPTS[input.coachingType];
 
-  let systemPrompt = `${basePrompt}\n${COACHING_FORMAT}`;
+  let systemPrompt = `${basePrompt}\n${UNTRUSTED_DATA_RULE}\n${COACHING_FORMAT}`;
 
   if (input.language) {
     systemPrompt += `\n\n${getLanguageInstruction(input.language)}`;
@@ -137,9 +138,7 @@ export async function generateCoaching(
     `Engagement: ${input.engagementLevel}/100`,
     `Probabilidad de pago: ${input.paymentProbability}%`,
     `\nConversacion reciente:`,
-    ...input.conversationHistory.slice(-30).map(
-      (m) => `${m.role === "fan" ? "Fan" : "Creador"}: ${m.content}`
-    ),
+    wrapTranscript(input.conversationHistory.slice(-30)),
   ];
 
   const messages: { role: "user" | "assistant"; content: string }[] = [

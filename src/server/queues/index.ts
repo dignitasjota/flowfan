@@ -37,7 +37,7 @@ export const workflowQueue = new Queue("workflow-evaluation", {
 });
 
 export type WorkflowJobData =
-  | { type: "no_response_timeout"; creatorId: string; contactId: string; conversationId: string; minutesSinceLastResponse: number }
+  | { type: "no_response_timeout"; creatorId: string; contactId: string; conversationId: string; minutesSinceLastResponse: number; thresholdMinutes?: number }
   | { type: "funnel_stage_change"; creatorId: string; contactId: string; previousStage: string; newStage: string }
   | { type: "sentiment_change"; creatorId: string; contactId: string; conversationId: string; direction: "positive" | "negative"; delta: number }
   | { type: "keyword_detected"; creatorId: string; contactId: string; conversationId: string; messageContent: string; matchedKeywords: string[] }

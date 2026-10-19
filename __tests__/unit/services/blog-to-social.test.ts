@@ -23,6 +23,7 @@ describe("blog-to-social extractContent", () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: status >= 200 && status < 300,
       status,
+      headers: new Headers(),
       body: {
         getReader() {
           let sent = false;
@@ -98,5 +99,38 @@ describe("blog-to-social extractContent", () => {
     await expect(
       extractContent("https://example.com/missing")
     ).rejects.toThrow(/404/);
+  });
+
+  it("sigue redirecciones validando cada destino", async () => {
+    const page = {
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      body: {
+        getReader() {
+          let sent = false;
+          return {
+            async read() {
+              if (sent) return { done: true, value: undefined };
+              sent = true;
+              return { done: false, value: new TextEncoder().encode("<title>Final</title>") };
+            },
+            async cancel() {},
+          };
+        },
+      },
+    };
+    global.fetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 301,
+        headers: new Headers({ location: "https://example.com/final" }),
+      })
+      .mockResolvedValueOnce(page) as unknown as typeof fetch;
+    const result = await extractContent("http://example.com/start");
+    expect(result.title).toBe("Final");
+    expect(result.url).toBe("https://example.com/final");
+    expect(global.fetch).toHaveBeenCalledTimes(2);
   });
 });

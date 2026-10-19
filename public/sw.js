@@ -33,8 +33,8 @@ self.addEventListener("push", (event) => {
   const title = payload.title || "FanFlow";
   const options = {
     body: payload.body || "",
-    icon: "/logo.png",
-    badge: "/logo.png",
+    icon: "/icon-192.png",
+    badge: "/icon-192.png",
     tag: payload.tag || undefined,
     data: { url: payload.url || "/conversations" },
     renotify: Boolean(payload.tag),

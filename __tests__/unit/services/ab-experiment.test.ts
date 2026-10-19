@@ -221,11 +221,9 @@ describe("ab-experiment", () => {
 
     it("returns null when experiment is not running", async () => {
       const db = createMockDb();
-      db.query.experimentAssignments.findFirst.mockResolvedValue({
-        experimentId: "exp-1",
-        variant: "A",
-        experiment: { status: "completed" },
-      });
+      db.query.experimentAssignments.findMany.mockResolvedValue([
+        { experimentId: "exp-1", variant: "A", experiment: { status: "completed" } },
+      ]);
 
       const result = await findContactExperiment(db, "contact-1");
 
@@ -234,15 +232,25 @@ describe("ab-experiment", () => {
 
     it("returns experiment info when assignment exists and experiment is running", async () => {
       const db = createMockDb();
-      db.query.experimentAssignments.findFirst.mockResolvedValue({
-        experimentId: "exp-1",
-        variant: "B",
-        experiment: { status: "running" },
-      });
+      db.query.experimentAssignments.findMany.mockResolvedValue([
+        { experimentId: "exp-1", variant: "B", experiment: { status: "running" } },
+      ]);
 
       const result = await findContactExperiment(db, "contact-1");
 
       expect(result).toEqual({ experimentId: "exp-1", variant: "B" });
+    });
+
+    it("elige el experimento en curso aunque haya asignaciones de otros terminados", async () => {
+      const db = createMockDb();
+      db.query.experimentAssignments.findMany.mockResolvedValue([
+        { experimentId: "old", variant: "A", experiment: { status: "completed" } },
+        { experimentId: "live", variant: "B", experiment: { status: "running" } },
+      ]);
+
+      const result = await findContactExperiment(db, "contact-1");
+
+      expect(result).toEqual({ experimentId: "live", variant: "B" });
     });
   });
 

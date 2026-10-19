@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { trpc } from "@/lib/trpc";
 import { PLATFORM_LABELS, type PlatformType } from "@/lib/constants";
 import { cn } from "@/lib/utils";
+import { splitHighlightedSnippet } from "@/lib/search-highlight";
 
 export function GlobalSearch() {
   const router = useRouter();
@@ -240,10 +241,17 @@ export function GlobalSearch() {
                           {formatDate(item.createdAt)}
                         </span>
                       </div>
-                      <p
-                        className="mt-1 text-xs leading-relaxed text-gray-400 [&_mark]:bg-yellow-600/30 [&_mark]:text-yellow-200"
-                        dangerouslySetInnerHTML={{ __html: item.snippet }}
-                      />
+                      <p className="mt-1 text-xs leading-relaxed text-gray-400">
+                        {splitHighlightedSnippet(item.snippet).map((seg, idx) =>
+                          seg.highlighted ? (
+                            <mark key={idx} className="bg-yellow-600/30 text-yellow-200">
+                              {seg.text}
+                            </mark>
+                          ) : (
+                            <span key={idx}>{seg.text}</span>
+                          )
+                        )}
+                      </p>
                     </button>
                   </li>
                 ))}

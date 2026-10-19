@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { eq, and, desc, gte, lte, inArray } from "drizzle-orm";
+import { eq, and, or, desc, gte, lte, inArray, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import {
   createTRPCRouter,
@@ -20,6 +20,9 @@ import { logTeamAction } from "@/server/services/team-audit";
 
 const SCHEDULER_PLATFORMS = ["reddit", "twitter", "instagram"] as const;
 const PLATFORM_ENUM = z.enum(SCHEDULER_PLATFORMS);
+
+/** Estados en los que un post aún puede cancelarse o reprogramarse. */
+const CANCELLABLE_STATUSES: string[] = ["scheduled", "failed", "partial"];
 
 const RECURRENCE_RULE_SCHEMA = z
   .object({
@@ -91,10 +94,21 @@ export const schedulerRouter = createTRPCRouter({
 
       const encrypted = encrypt(JSON.stringify(creds));
 
+      // Multi-cuenta: la identidad es el username de Reddit. Antes se
+      // sobrescribía la primera cuenta Reddit del creator con la nueva.
+      const externalId = verify.username.toLowerCase();
       const existing = await ctx.db.query.socialAccounts.findFirst({
         where: and(
           eq(socialAccounts.creatorId, ctx.creatorId),
-          eq(socialAccounts.platformType, "reddit")
+          eq(socialAccounts.platformType, "reddit"),
+          eq(socialAccounts.connectionType, "native"),
+          or(
+            eq(socialAccounts.externalAccountId, externalId),
+            and(
+              isNull(socialAccounts.externalAccountId),
+              sql`lower(${socialAccounts.accountUsername}) = ${externalId}`
+            )
+          )
         ),
       });
 
@@ -104,6 +118,7 @@ export const schedulerRouter = createTRPCRouter({
           .set({
             connectionType: "native",
             encryptedCredentials: encrypted,
+            externalAccountId: externalId,
             accountUsername: verify.username,
             isActive: true,
             lastVerifiedAt: new Date(),
@@ -122,6 +137,7 @@ export const schedulerRouter = createTRPCRouter({
           platformType: "reddit",
           connectionType: "native",
           encryptedCredentials: encrypted,
+          externalAccountId: externalId,
           accountUsername: verify.username,
           isActive: true,
           lastVerifiedAt: new Date(),
@@ -144,10 +160,13 @@ export const schedulerRouter = createTRPCRouter({
   enableWebhookConnection: ownerProcedure
     .input(z.object({ platformType: PLATFORM_ENUM }))
     .mutation(async ({ ctx, input }) => {
+      // Solo la conexión webhook de esa plataforma: antes se reutilizaba la
+      // primera cuenta (aunque fuera nativa) y se borraban sus credenciales.
       const existing = await ctx.db.query.socialAccounts.findFirst({
         where: and(
           eq(socialAccounts.creatorId, ctx.creatorId),
-          eq(socialAccounts.platformType, input.platformType)
+          eq(socialAccounts.platformType, input.platformType),
+          eq(socialAccounts.connectionType, "webhook")
         ),
       });
 
@@ -155,9 +174,6 @@ export const schedulerRouter = createTRPCRouter({
         const [updated] = await ctx.db
           .update(socialAccounts)
           .set({
-            connectionType: "webhook",
-            encryptedCredentials: null,
-            accountUsername: null,
             isActive: true,
             lastVerifiedAt: new Date(),
             updatedAt: new Date(),
@@ -173,6 +189,7 @@ export const schedulerRouter = createTRPCRouter({
           creatorId: ctx.creatorId,
           platformType: input.platformType,
           connectionType: "webhook",
+          externalAccountId: "webhook",
           isActive: true,
           lastVerifiedAt: new Date(),
         })
@@ -401,10 +418,10 @@ export const schedulerRouter = createTRPCRouter({
       if (!post) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Post no encontrado" });
       }
-      if (post.status !== "scheduled" && post.status !== "failed") {
+      if (!CANCELLABLE_STATUSES.includes(post.status)) {
         throw new TRPCError({
           code: "BAD_REQUEST",
-          message: "Solo se pueden cancelar posts en estado scheduled o failed.",
+          message: "Solo se pueden cancelar posts programados, fallidos o parciales.",
         });
       }
 
@@ -454,10 +471,10 @@ export const schedulerRouter = createTRPCRouter({
       if (!post) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Post no encontrado" });
       }
-      if (post.status !== "scheduled" && post.status !== "failed") {
+      if (!CANCELLABLE_STATUSES.includes(post.status)) {
         throw new TRPCError({
           code: "BAD_REQUEST",
-          message: "Solo se pueden reprogramar posts pendientes.",
+          message: "Solo se pueden reprogramar posts programados, fallidos o parciales.",
         });
       }
 

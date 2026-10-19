@@ -12,7 +12,6 @@ import {
   setWebhook,
   deleteWebhook,
   getWebhookInfo,
-  sendMessage as tgSendMessage,
 } from "@/server/services/telegram";
 
 const log = createChildLogger("telegram-router");
@@ -44,7 +43,8 @@ export const telegramRouter = createTRPCRouter({
       autoReplyDelaySec: config.autoReplyDelaySec,
       welcomeMessage: config.welcomeMessage,
       errorMessage: config.errorMessage,
-      webhookUrl: config.webhookUrl,
+      // La URL contiene el secreto del webhook: solo para el owner.
+      webhookUrl: ctx.teamRole && ctx.teamRole !== "owner" ? null : config.webhookUrl,
       updatedAt: config.updatedAt,
     };
   }),
@@ -196,7 +196,7 @@ export const telegramRouter = createTRPCRouter({
   /**
    * Test connection by sending a message to the bot's own chat or checking webhook info.
    */
-  testConnection: protectedProcedure.mutation(async ({ ctx }) => {
+  testConnection: ownerProcedure.mutation(async ({ ctx }) => {
     const config = await ctx.db.query.telegramBotConfigs.findFirst({
       where: eq(telegramBotConfigs.creatorId, ctx.creatorId),
     });
@@ -234,28 +234,4 @@ export const telegramRouter = createTRPCRouter({
     };
   }),
 
-  /**
-   * Send a message to a Telegram contact (used by addCreatorMessage flow).
-   */
-  sendToContact: protectedProcedure
-    .input(
-      z.object({
-        chatId: z.union([z.string(), z.number()]),
-        text: z.string().min(1),
-      })
-    )
-    .mutation(async ({ ctx, input }) => {
-      const config = await ctx.db.query.telegramBotConfigs.findFirst({
-        where: eq(telegramBotConfigs.creatorId, ctx.creatorId),
-      });
-
-      if (!config) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "No hay bot de Telegram conectado." });
-      }
-
-      const token = decrypt(config.botToken);
-      const result = await tgSendMessage(token, input.chatId, input.text);
-
-      return { messageId: result.message_id };
-    }),
 });

@@ -2,13 +2,33 @@
 
 import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Image from "next/image";
+
+/** Solo rutas internas (`/foo`), nunca `//evil.com` ni URLs absolutas. */
+function getSafeCallbackUrl(): string {
+  const raw = new URLSearchParams(window.location.search).get("callbackUrl");
+  if (raw && raw.startsWith("/") && !raw.startsWith("//") && !raw.startsWith("/\\")) {
+    return raw;
+  }
+  return "/conversations";
+}
 
 export default function LoginPage() {
   const router = useRouter();
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [notice, setNotice] = useState<{ tone: "ok" | "warn"; text: string } | null>(null);
+
+  // Avisos con los que redirigen verify-email y los layouts.
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    if (p.get("verified") === "true") setNotice({ tone: "ok", text: "Email verificado. Ya puedes iniciar sesión." });
+    else if (p.get("verified") === "already") setNotice({ tone: "ok", text: "Tu email ya estaba verificado." });
+    else if (p.get("error") === "token-expired") setNotice({ tone: "warn", text: "El enlace de verificación ha caducado. Inicia sesión y pide uno nuevo." });
+    else if (p.get("error") === "invalid-token") setNotice({ tone: "warn", text: "El enlace de verificación no es válido." });
+    else if (p.has("expired")) setNotice({ tone: "warn", text: "Tu sesión ha caducado. Vuelve a iniciar sesión." });
+  }, []);
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -26,7 +46,7 @@ export default function LoginPage() {
       setError("Email o contraseña incorrectos");
       setLoading(false);
     } else {
-      router.push("/conversations");
+      router.push(getSafeCallbackUrl());
     }
   }
 
@@ -42,6 +62,18 @@ export default function LoginPage() {
         <p className="mb-8 text-center text-sm text-gray-400">
           CRM inteligente para creadores
         </p>
+
+        {notice && (
+          <p
+            className={
+              notice.tone === "ok"
+                ? "mb-4 rounded-lg bg-emerald-500/10 px-3 py-2 text-sm text-emerald-400"
+                : "mb-4 rounded-lg bg-amber-500/10 px-3 py-2 text-sm text-amber-300"
+            }
+          >
+            {notice.text}
+          </p>
+        )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>

@@ -75,3 +75,13 @@ describe("Webhook Dispatcher", () => {
     });
   });
 });
+
+describe("resolveWebhookSecret", () => {
+  it("descifra un secreto cifrado y deja tal cual uno legado", async () => {
+    process.env.ENCRYPTION_KEY = process.env.ENCRYPTION_KEY ?? "0".repeat(64);
+    const { encrypt } = await import("@/lib/crypto");
+    const { resolveWebhookSecret } = await import("@/server/services/webhook-dispatcher");
+    expect(resolveWebhookSecret(encrypt("abc123"))).toBe("abc123");
+    expect(resolveWebhookSecret("legacy-plain")).toBe("legacy-plain");
+  });
+});

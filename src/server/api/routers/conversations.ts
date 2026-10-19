@@ -4,7 +4,7 @@ import { TRPCError } from "@trpc/server";
 import { createTRPCRouter, protectedProcedure } from "../trpc";
 import { conversations, contacts, conversationAssignments } from "@/server/db/schema";
 import { platformTypeSchema } from "@/lib/constants";
-import { canAccessConversation } from "../access";
+import { canAccessConversation, assertCanAccessConversation, assertCanAccessContact, conversationScopeFilter } from "../access";
 
 export const conversationsRouter = createTRPCRouter({
   list: protectedProcedure
@@ -15,7 +15,7 @@ export const conversationsRouter = createTRPCRouter({
         search: z.string().max(100).optional(),
         // TEN-13: paginación con cap para no cargar TODAS las conversaciones
         // (+ contact + profile) de un tenant grande en cada request.
-        limit: z.number().min(1).max(200).default(100),
+        limit: z.number().min(1).max(1000).default(100),
         offset: z.number().min(0).default(0),
       }).optional()
     )
@@ -29,15 +29,24 @@ export const conversationsRouter = createTRPCRouter({
         conditions.push(eq(conversations.status, input.status));
       }
 
-      // Chatters only see their assigned conversations
-      if (ctx.teamRole === "chatter") {
-        conditions.push(
-          inArray(
-            conversations.id,
-            sql`(SELECT ${conversationAssignments.conversationId} FROM ${conversationAssignments} WHERE ${conversationAssignments.assignedToUserId} = ${ctx.actingUserId})`
-          )
-        );
+      // Alcance según permisos (roles base o personalizados).
+      const scope = await conversationScopeFilter(ctx);
+      if (scope) conditions.push(scope);
+
+      // Búsqueda y exclusión de contactos archivados en SQL. Antes la búsqueda
+      // se aplicaba en memoria DESPUÉS del limit: contactos fuera de las 100
+      // conversaciones más recientes no se encontraban nunca.
+      const contactConditions = [eq(contacts.creatorId, ctx.creatorId), eq(contacts.isArchived, false)];
+      if (input?.search) {
+        const term = `%${input.search}%`;
+        contactConditions.push(or(ilike(contacts.username, term), ilike(contacts.displayName, term))!);
       }
+      conditions.push(
+        inArray(
+          conversations.contactId,
+          ctx.db.select({ id: contacts.id }).from(contacts).where(and(...contactConditions))
+        )
+      );
 
       const results = await ctx.db.query.conversations.findMany({
         where: and(...conditions),
@@ -48,16 +57,6 @@ export const conversationsRouter = createTRPCRouter({
         limit: input?.limit ?? 100,
         offset: input?.offset ?? 0,
       });
-
-      // Filter by contact search in-memory (contact is a relation)
-      if (input?.search) {
-        const term = input.search.toLowerCase();
-        return results.filter(
-          (c) =>
-            c.contact.username.toLowerCase().includes(term) ||
-            c.contact.displayName?.toLowerCase().includes(term)
-        );
-      }
 
       return results;
     }),
@@ -132,6 +131,7 @@ export const conversationsRouter = createTRPCRouter({
           message: "Contacto no encontrado",
         });
       }
+      await assertCanAccessContact(ctx, input.contactId);
 
       const [conversation] = await ctx.db
         .insert(conversations)
@@ -159,6 +159,7 @@ export const conversationsRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      await assertCanAccessConversation(ctx, input.id);
       const [updated] = await ctx.db
         .update(conversations)
         .set({ status: input.status })
@@ -175,6 +176,7 @@ export const conversationsRouter = createTRPCRouter({
   togglePin: protectedProcedure
     .input(z.object({ id: z.string().uuid(), isPinned: z.boolean() }))
     .mutation(async ({ ctx, input }) => {
+      await assertCanAccessConversation(ctx, input.id);
       const [updated] = await ctx.db
         .update(conversations)
         .set({ isPinned: input.isPinned })

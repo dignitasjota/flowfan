@@ -248,3 +248,18 @@ Backlog de hallazgos de la auditoría en profundidad del proyecto. Cada item tie
 4. **Idempotencia (ARCH-1) → WK-1, WK-3, WK-4** (dobles publicaciones/envíos a fans).
 5. **SEC-1** (tokens en logs = toma de cuentas) y **AI-2/AI-3** (límites de plan mal contados).
 6. El resto por severidad conforme haya margen.
+
+---
+
+## 🔁 Segunda auditoría (2026-10-19) — aplicada
+
+Revisión completa de `src/`, migraciones, Docker y CI. Todo lo siguiente quedó corregido el mismo día (tsc limpio, ESLint sin errores, 959 tests en verde, build OK).
+
+**Críticos:** inyección SQL en filtro `tags contains` de segmentos (y miembros de segmentos mixtos sin acotar por tenant) · XSS almacenado en snippets de búsqueda · firma de webhooks salientes hecha con el secreto cifrado · migraciones muy por detrás de `schema.ts` + `search_vector` fuera del journal (`0010_schema_sync.sql`, `npm run db:ensure-search`) · JWT sin revalidar (rol, membresía, cuenta borrada) · selector de equipo roto · `docker-compose.prod.yml` sin RESEND/OAuth/R2/VAPID.
+
+**Altos:** `recalculateProfile` con API key cifrada · modo VIP inalcanzable (`totalSpentCents`) · Telegram inflaba `totalConversations` y no creaba perfil · longitud de mensaje real en scoring · 3 llamadas IA por sugerencia y mensaje huérfano si fallaba · inyección de prompt en el resto de servicios IA · posts `partial`/`processing` no reintentables · broadcasts cancelados que se enviaban + doble procesado · follow-ups en bucle y pasos de secuencias inactivas · `no_response_timeout` sin cota · triggers sin `conversationId` · contadores del stream de Twitter · Stripe devolvía 200 ante fallos · `permissionProcedure` sin usar / roles personalizados ignorados · múltiples endpoints accesibles a chatters · IDOR en `segments.addMembers`, `removeMembers`, `unassignConversation`, plantillas/secuencias de workflows · SEC-4 pendiente en el login · validación de la API REST · inyección CSV y HTML en emails · ESLint sin configurar y pre-commit sin tests.
+
+**Medios y mejoras:** uso de Billing desde contadores reales · búsqueda/paginación de conversaciones · contactos archivados ocultos · invitaciones (email, reactivación, enlace) · `callbackUrl` y avisos en login · hora óptima por zona horaria · stats de clasificación · redirects en blog-to-social · detección de caídas en content gaps · métricas A/B de modos · tareas `coaching`/`content_gap` · multi-cuenta Reddit y webhook no destructivo · respuestas propias en webhook de IG · `testWebhook` dirigido · media en modo equipo · entrega de mensajes automáticos por Telegram · modal de upgrade solo en errores de plan · foco del `Modal` · `/api/health` · dashboards en SQL · churn por lotes · pool de Postgres · cabeceras de seguridad · Dockerfile standalone · Graph API configurable · resúmenes por email · precios MRR · moneda de facturas · iconos PWA · confirmación al archivar con atajo.
+
+**Pendiente (decisión de producto):** unificar la marca (`FanFlow` en la app vs `FlowFan` en landing, emails y dominio `flowfan.app`).
+

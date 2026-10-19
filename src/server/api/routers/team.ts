@@ -1,11 +1,10 @@
 import { z } from "zod";
-import { eq, and, isNull, gt } from "drizzle-orm";
+import { eq, and, isNull, gt, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import {
   createTRPCRouter,
   protectedProcedure,
-  ownerProcedure,
-  managerProcedure,
+  permissionProcedure,
 } from "../trpc";
 import { createChildLogger } from "@/lib/logger";
 import {
@@ -58,10 +57,10 @@ export const teamRouter = createTRPCRouter({
   }),
 
   // 2. Invite a team member
-  invite: ownerProcedure
+  invite: permissionProcedure("team.manage_members")
     .input(
       z.object({
-        email: z.string().email(),
+        email: z.string().trim().toLowerCase().pipe(z.string().email()),
         role: z.enum(["manager", "chatter"]),
       })
     )
@@ -74,7 +73,7 @@ export const teamRouter = createTRPCRouter({
         columns: { email: true },
       });
 
-      if (owner?.email === input.email) {
+      if (owner?.email.toLowerCase() === input.email) {
         throw new TRPCError({
           code: "BAD_REQUEST",
           message: "No puedes invitarte a ti mismo.",
@@ -83,7 +82,7 @@ export const teamRouter = createTRPCRouter({
 
       // Verify no active membership already exists for this email
       const existingUser = await ctx.db.query.creators.findFirst({
-        where: eq(creators.email, input.email),
+        where: sql`lower(${creators.email}) = ${input.email}`,
         columns: { id: true },
       });
 
@@ -119,12 +118,12 @@ export const teamRouter = createTRPCRouter({
 
       return {
         ...invite,
-        inviteLink: `/team/accept?token=${invite.token}`,
+        inviteLink: `/invite/${invite.token}`,
       };
     }),
 
   // 3. Revoke an invite
-  revokeInvite: ownerProcedure
+  revokeInvite: permissionProcedure("team.manage_members")
     .input(z.object({ inviteId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       await ctx.db
@@ -140,7 +139,7 @@ export const teamRouter = createTRPCRouter({
     }),
 
   // 4. List pending invites
-  getPendingInvites: ownerProcedure.query(async ({ ctx }) => {
+  getPendingInvites: permissionProcedure("team.manage_members").query(async ({ ctx }) => {
     const pending = await ctx.db
       .select()
       .from(teamInvites)
@@ -156,9 +155,15 @@ export const teamRouter = createTRPCRouter({
   }),
 
   // 5. Remove a team member
-  removeMember: ownerProcedure
+  removeMember: permissionProcedure("team.manage_members")
     .input(z.object({ userId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
+      if (input.userId === ctx.actingUserId) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "No puedes modificar tu propia membresía.",
+        });
+      }
       await removeMember(ctx.db, ctx.creatorId, input.userId);
 
       logTeamAction(ctx.db, {
@@ -174,7 +179,7 @@ export const teamRouter = createTRPCRouter({
     }),
 
   // 6. Update member role
-  updateMemberRole: ownerProcedure
+  updateMemberRole: permissionProcedure("team.manage_members")
     .input(
       z.object({
         userId: z.string().uuid(),
@@ -182,6 +187,12 @@ export const teamRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      if (input.userId === ctx.actingUserId) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "No puedes modificar tu propia membresía.",
+        });
+      }
       await ctx.db
         .update(teamMembers)
         .set({ role: input.role, updatedAt: new Date() })
@@ -255,7 +266,7 @@ export const teamRouter = createTRPCRouter({
     }),
 
   // 10. Assign conversation
-  assignConversation: managerProcedure
+  assignConversation: permissionProcedure("conversations.assign")
     .input(
       z.object({
         conversationId: z.string().uuid(),
@@ -332,7 +343,7 @@ export const teamRouter = createTRPCRouter({
     }),
 
   // 11. Unassign conversation
-  unassignConversation: managerProcedure
+  unassignConversation: permissionProcedure("conversations.assign")
     .input(
       z.object({
         conversationId: z.string().uuid(),
@@ -340,6 +351,17 @@ export const teamRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      const conversation = await ctx.db.query.conversations.findFirst({
+        where: and(
+          eq(conversations.id, input.conversationId),
+          eq(conversations.creatorId, ctx.creatorId)
+        ),
+        columns: { id: true },
+      });
+      if (!conversation) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Conversación no encontrada." });
+      }
+
       await ctx.db
         .delete(conversationAssignments)
         .where(
@@ -434,7 +456,7 @@ export const teamRouter = createTRPCRouter({
   }),
 
   // 14. Create custom role
-  createCustomRole: ownerProcedure
+  createCustomRole: permissionProcedure("team.manage_roles")
     .input(
       z.object({
         name: z.string().min(1).max(100),
@@ -484,7 +506,7 @@ export const teamRouter = createTRPCRouter({
     }),
 
   // 15. Update custom role
-  updateCustomRole: ownerProcedure
+  updateCustomRole: permissionProcedure("team.manage_roles")
     .input(
       z.object({
         roleId: z.string().uuid(),
@@ -532,7 +554,7 @@ export const teamRouter = createTRPCRouter({
     }),
 
   // 16. Delete custom role
-  deleteCustomRole: ownerProcedure
+  deleteCustomRole: permissionProcedure("team.manage_roles")
     .input(z.object({ roleId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       const existing = await ctx.db.query.customRoles.findFirst({
@@ -579,7 +601,7 @@ export const teamRouter = createTRPCRouter({
     }),
 
   // 17. Assign custom role to team member
-  assignCustomRole: ownerProcedure
+  assignCustomRole: permissionProcedure("team.manage_roles")
     .input(
       z.object({
         userId: z.string().uuid(),
@@ -587,6 +609,12 @@ export const teamRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      if (input.userId === ctx.actingUserId) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "No puedes modificar tu propia membresía.",
+        });
+      }
       if (input.customRoleId) {
         const role = await ctx.db.query.customRoles.findFirst({
           where: and(

@@ -1,6 +1,6 @@
-import { eq, and, gte, ne, sql, count } from "drizzle-orm";
+import { eq, and, gte, ne, sql, count, inArray } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
-import { incrMonthlyCounter } from "@/lib/rate-limit";
+import { incrMonthlyCounter, readMonthlyCounter } from "@/lib/rate-limit";
 import type { db as DbType } from "@/server/db";
 import {
   creators,
@@ -162,9 +162,19 @@ async function getCreatorPlan(db: Db, creatorId: string): Promise<PlanType> {
   return (creator?.subscriptionPlan as PlanType) ?? "free";
 }
 
+/** Inicio del mes en UTC (mismo bucket que los contadores de Redis). */
 function startOfMonth(): Date {
   const now = new Date();
-  return new Date(now.getFullYear(), now.getMonth(), 1);
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+}
+
+/**
+ * Uso mostrado = lo que realmente cuenta para el límite. El contador de Redis
+ * se incrementa también en intentos denegados, así que se acota al límite.
+ */
+function displayUsage(counter: number | null, fallback: number, limit: number): number {
+  const used = limit === -1 || counter === null ? fallback : counter;
+  return limit > 0 ? Math.min(used, limit) : used;
 }
 
 export async function checkContactLimit(db: Db, creatorId: string) {
@@ -641,16 +651,6 @@ export async function getUsageSummary(db: Db, creatorId: string) {
     .from(contacts)
     .where(eq(contacts.creatorId, creatorId));
 
-  const [aiMessageCount] = await db
-    .select({ count: count() })
-    .from(aiUsageLog)
-    .where(
-      and(
-        eq(aiUsageLog.creatorId, creatorId),
-        gte(aiUsageLog.createdAt, monthStart)
-      )
-    );
-
   const [platformCount] = await db
     .select({ count: count() })
     .from(platforms)
@@ -661,26 +661,60 @@ export async function getUsageSummary(db: Db, creatorId: string) {
     .from(responseTemplates)
     .where(eq(responseTemplates.creatorId, creatorId));
 
-  const [reportCount] = await db
-    .select({ count: count() })
-    .from(aiUsageLog)
-    .where(
-      and(
-        eq(aiUsageLog.creatorId, creatorId),
-        eq(aiUsageLog.requestType, "analysis"),
-        gte(aiUsageLog.createdAt, monthStart)
-      )
-    );
+  // Fuente de verdad del cupo: los contadores de Redis que usan los checks.
+  // Antes se contaban TODAS las filas de aiUsageLog como "mensajes IA" (incl.
+  // análisis del worker) y las de tipo "analysis" como "reportes".
+  const [aiCounter, reportCounter] = await Promise.all([
+    readMonthlyCounter(`${creatorId}:ai_messages`),
+    readMonthlyCounter(`${creatorId}:reports`),
+  ]);
+
+  let aiFallback = 0;
+  let reportFallback = 0;
+  // Los planes ilimitados no incrementan el contador de Redis: para ellos (o si
+  // Redis no responde) se cuenta desde aiUsageLog.
+  const needsDbCount =
+    aiCounter === null ||
+    reportCounter === null ||
+    limits.aiMessagesPerMonth === -1 ||
+    limits.reportsPerMonth === -1;
+  if (needsDbCount) {
+    const [ai] = await db
+      .select({ count: count() })
+      .from(aiUsageLog)
+      .where(
+        and(
+          eq(aiUsageLog.creatorId, creatorId),
+          inArray(aiUsageLog.requestType, ["suggestion", "summary", "price_advice"]),
+          gte(aiUsageLog.createdAt, monthStart)
+        )
+      );
+    const [rep] = await db
+      .select({ count: count() })
+      .from(aiUsageLog)
+      .where(
+        and(
+          eq(aiUsageLog.creatorId, creatorId),
+          eq(aiUsageLog.requestType, "report"),
+          gte(aiUsageLog.createdAt, monthStart)
+        )
+      );
+    aiFallback = ai?.count ?? 0;
+    reportFallback = rep?.count ?? 0;
+  }
+
+  const aiUsed = displayUsage(aiCounter, aiFallback, limits.aiMessagesPerMonth);
+  const reportsUsed = displayUsage(reportCounter, reportFallback, limits.reportsPerMonth);
 
   return {
     plan,
     limits,
     usage: {
       contacts: { used: contactCount?.count ?? 0, limit: limits.contacts },
-      aiMessages: { used: aiMessageCount?.count ?? 0, limit: limits.aiMessagesPerMonth },
+      aiMessages: { used: aiUsed, limit: limits.aiMessagesPerMonth },
       platforms: { used: platformCount?.count ?? 0, limit: limits.platforms },
       templates: { used: templateCount?.count ?? 0, limit: limits.templates },
-      reports: { used: reportCount?.count ?? 0, limit: limits.reportsPerMonth },
+      reports: { used: reportsUsed, limit: limits.reportsPerMonth },
     },
   };
 }

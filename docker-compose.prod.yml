@@ -1,4 +1,48 @@
-version: "3.8"
+# Variables compartidas por app y worker. Antes cada servicio listaba solo
+# un subconjunto y faltaban RESEND_API_KEY (verificación de email obligatoria),
+# APP_URL (redirect_uri OAuth), TWITTER_*/FB_*/META_*, R2_* y VAPID_*.
+x-app-env: &app-env
+  NODE_ENV: production
+  DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+  REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+  NEXTAUTH_URL: ${NEXTAUTH_URL}
+  NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
+  APP_URL: ${APP_URL:-${NEXTAUTH_URL}}
+  ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+  TRUSTED_PROXY_HOPS: ${TRUSTED_PROXY_HOPS:-0}
+  DB_POOL_MAX: ${DB_POOL_MAX:-10}
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  # Stripe
+  STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+  STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+  STRIPE_STARTER_PRICE_ID: ${STRIPE_STARTER_PRICE_ID:-}
+  STRIPE_PRO_PRICE_ID: ${STRIPE_PRO_PRICE_ID:-}
+  STRIPE_BUSINESS_PRICE_ID: ${STRIPE_BUSINESS_PRICE_ID:-}
+  NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY:-}
+  # Email (Resend)
+  RESEND_API_KEY: ${RESEND_API_KEY:-}
+  EMAIL_FROM: ${EMAIL_FROM:-}
+  # Integraciones sociales
+  TWITTER_CLIENT_ID: ${TWITTER_CLIENT_ID:-}
+  TWITTER_CLIENT_SECRET: ${TWITTER_CLIENT_SECRET:-}
+  TWITTER_BEARER_TOKEN: ${TWITTER_BEARER_TOKEN:-}
+  FB_CLIENT_ID: ${FB_CLIENT_ID:-}
+  FB_CLIENT_SECRET: ${FB_CLIENT_SECRET:-}
+  FB_GRAPH_VERSION: ${FB_GRAPH_VERSION:-}
+  META_WEBHOOK_VERIFY_TOKEN: ${META_WEBHOOK_VERIFY_TOKEN:-}
+  META_WEBHOOK_APP_SECRET: ${META_WEBHOOK_APP_SECRET:-}
+  # Media (Cloudflare R2)
+  R2_ENDPOINT: ${R2_ENDPOINT:-}
+  R2_BUCKET: ${R2_BUCKET:-}
+  R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-}
+  R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-}
+  R2_PUBLIC_URL: ${R2_PUBLIC_URL:-}
+  # Web Push
+  VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+  VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+  VAPID_SUBJECT: ${VAPID_SUBJECT:-}
+  # Sentry
+  NEXT_PUBLIC_SENTRY_DSN: ${NEXT_PUBLIC_SENTRY_DSN:-}
 
 services:
   app:
@@ -8,19 +52,7 @@ services:
       cache_from: []
       args:
         - NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=${NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY}
-    environment:
-      - NODE_ENV=production
-      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
-      - REDIS_URL=redis://redis:6379
-      - NEXTAUTH_URL=${NEXTAUTH_URL}
-      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
-      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
-      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
-      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}
-      - STRIPE_STARTER_PRICE_ID=${STRIPE_STARTER_PRICE_ID}
-      - STRIPE_PRO_PRICE_ID=${STRIPE_PRO_PRICE_ID}
-      - NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=${NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY}
-      - LOG_LEVEL=info
+    environment: *app-env
     volumes:
       - media_uploads:/app/uploads
     ports:
@@ -48,12 +80,7 @@ services:
       dockerfile: Dockerfile
       cache_from: []
       target: worker
-    environment:
-      - NODE_ENV=production
-      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
-      - REDIS_URL=redis://redis:6379
-      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
-      - LOG_LEVEL=info
+    environment: *app-env
     depends_on:
       postgres:
         condition: service_healthy

@@ -30,17 +30,18 @@ RUN addgroup --system --gid 1001 nodejs && adduser --system --uid 1001 nextjs
 USER nextjs
 CMD ["npx", "tsx", "src/server/worker.ts"]
 
-# Runner
+# Runner — salida `standalone` de Next (output: "standalone" en next.config).
+# Antes se copiaba todo node_modules y se arrancaba con `npm start`
+# (next start), que no está soportado con output standalone.
 FROM base AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
 
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder /app/public ./public
-COPY --from=builder --chown=nextjs:nodejs /app/.next ./.next
-COPY --from=deps /app/node_modules ./node_modules
-COPY package.json ./
 
 RUN mkdir -p /app/uploads && chown nextjs:nodejs /app/uploads
 
@@ -49,4 +50,4 @@ EXPOSE 3000
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
-CMD ["npm", "start"]
+CMD ["node", "server.js"]

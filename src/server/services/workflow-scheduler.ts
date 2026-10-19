@@ -2,8 +2,13 @@ import { eq, and, sql, desc } from "drizzle-orm";
 import { workflows, conversations, messages } from "@/server/db/schema";
 import { workflowQueue } from "@/server/queues";
 import { createChildLogger } from "@/lib/logger";
+import { setOnce } from "@/lib/rate-limit";
 
 const log = createChildLogger("workflow-scheduler");
+
+/** Margen tras el umbral máximo durante el que aún se evalúa una conversación. */
+const LOOKBACK_MINUTES = 7 * 24 * 60;
+const MAX_CONVERSATIONS_PER_CREATOR = 2000;
 
 type Db = Parameters<Parameters<typeof import("@/server/db").db.transaction>[0]>[0] | typeof import("@/server/db").db;
 
@@ -34,17 +39,23 @@ export async function checkNoResponseTimeouts(db: Db): Promise<void> {
   }
 
   for (const [creatorId, creatorWorkflows] of byCreator) {
-    // Find the minimum timeout across all workflows for this creator
-    const minMinutes = Math.min(
-      ...creatorWorkflows.map((wf: any) => {
-        const config = wf.triggerConfig as { minutes?: number };
-        return config.minutes ?? 60;
-      })
-    );
+    const thresholds = [
+      ...new Set(
+        creatorWorkflows.map((wf: any) => {
+          const config = wf.triggerConfig as { minutes?: number };
+          return Math.max(1, config.minutes ?? 60);
+        })
+      ),
+    ] as number[];
+    const minMinutes = Math.min(...thresholds);
+    const maxMinutes = Math.max(...thresholds);
 
-    // Find active conversations where last message was from a fan
-    // and it's been at least minMinutes since lastMessageAt
-    const cutoff = new Date(Date.now() - minMinutes * 60 * 1000);
+    // Ventana acotada: conversaciones cuyo último mensaje está entre el umbral
+    // mínimo y (umbral máximo + 7 días). Antes se recorrían TODAS las
+    // conversaciones antiguas en cada tick, para siempre.
+    const now = Date.now();
+    const newest = new Date(now - minMinutes * 60 * 1000);
+    const oldest = new Date(now - (maxMinutes + LOOKBACK_MINUTES) * 60 * 1000);
 
     const staleConversations = await (db as any)
       .select({
@@ -57,9 +68,11 @@ export async function checkNoResponseTimeouts(db: Db): Promise<void> {
         and(
           eq(conversations.creatorId, creatorId),
           eq(conversations.status, "active"),
-          sql`${conversations.lastMessageAt} < ${cutoff}`
+          sql`${conversations.lastMessageAt} < ${newest}`,
+          sql`${conversations.lastMessageAt} >= ${oldest}`
         )
-      );
+      )
+      .limit(MAX_CONVERSATIONS_PER_CREATOR);
 
     for (const conv of staleConversations) {
       // Check if the last message was from the fan (not creator)
@@ -72,27 +85,29 @@ export async function checkNoResponseTimeouts(db: Db): Promise<void> {
 
       if (!lastMsg || lastMsg.role !== "fan") continue;
 
-      const minutesSince = Math.round(
-        (Date.now() - new Date(conv.lastMessageAt).getTime()) / (1000 * 60)
-      );
+      const lastMessageAt = new Date(conv.lastMessageAt);
+      const minutesSince = Math.round((now - lastMessageAt.getTime()) / (1000 * 60));
 
-      // Enqueue with dedup key to prevent duplicate jobs
-      const jobId = `nrt-${conv.id}-${Math.floor(Date.now() / (5 * 60 * 1000))}`;
+      for (const threshold of thresholds) {
+        if (minutesSince < threshold) continue;
+        // Un evento por (conversación, mensaje del fan, umbral). Si el fan
+        // vuelve a escribir, lastMessageAt cambia y se puede volver a disparar.
+        const first = await setOnce(
+          `nrt:${conv.id}:${lastMessageAt.getTime()}:${threshold}`,
+          (threshold + LOOKBACK_MINUTES) * 60
+        );
+        if (!first) continue;
 
-      try {
-        await workflowQueue.add(
-          "no_response_timeout",
-          {
+        await workflowQueue
+          .add("no_response_timeout", {
             type: "no_response_timeout" as const,
             creatorId,
             contactId: conv.contactId,
             conversationId: conv.id,
             minutesSinceLastResponse: minutesSince,
-          },
-          { jobId }
-        );
-      } catch {
-        // Duplicate job ID is expected, silently skip
+            thresholdMinutes: threshold,
+          })
+          .catch((err) => log.warn({ err }, "Failed to enqueue no_response_timeout"));
       }
     }
   }
@@ -146,9 +161,20 @@ export async function checkInactivityFollowups(db: Db): Promise<void> {
           sql`${contactsTable.lastInteractionAt} < ${cutoff}`,
           funnelStages.length > 0
             ? sql`${contactProfiles.funnelStage} IN (${sql.join(funnelStages.map((s: string) => sql`${s}`), sql`, `)})`
-            : sql`1=1`
+            : sql`1=1`,
+          // No reinscribir a quien ya pasó por la secuencia desde su última
+          // interacción (completada o cancelada): antes el índice único solo
+          // cubría active/paused y el contacto recibía la cadena en bucle cada
+          // 30 min. Si el fan vuelve a escribir y luego se enfría, sí vuelve a entrar.
+          sql`NOT EXISTS (
+            SELECT 1 FROM ${sequenceEnrollments}
+            WHERE ${sequenceEnrollments.sequenceId} = ${sequence.id}
+              AND ${sequenceEnrollments.contactId} = ${contactsTable.id}
+              AND ${sequenceEnrollments.enrolledAt} >= ${contactsTable.lastInteractionAt}
+          )`
         )
-      );
+      )
+      .limit(500);
 
     for (const contact of inactiveContacts) {
       try {

@@ -43,6 +43,7 @@ export type GenerationResult = {
 };
 
 const MAX_FETCH_BYTES = 500_000;
+const MAX_REDIRECTS = 3;
 
 // ============================================================
 // HTML extraction (no extra deps)
@@ -86,18 +87,32 @@ function pickBetween(
 export async function extractContent(url: string): Promise<ExtractedContent> {
   // TEN-10: anti-SSRF — bloquear IPs privadas/metadata y forzar http(s) antes
   // del fetch server-side.
-  await assertPublicHttpUrl(url);
-  const res = await fetch(url, {
-    headers: {
-      "User-Agent":
-        "Mozilla/5.0 (compatible; FanFlow/1.0; +https://flowfan.app)",
-      Accept: "text/html",
-    },
-    redirect: "manual", // no seguir redirects a rangos internos
-    signal: AbortSignal.timeout(15_000),
-  });
-  if (!res.ok) {
-    throw new Error(`Fetch failed (${res.status})`);
+  // Redirects seguidos a mano (máx. 3) validando CADA destino: con
+  // `redirect: "manual"` sin bucle, cualquier blog con 301/302 (http→https,
+  // www, trailing slash) fallaba con "Fetch failed".
+  let currentUrl = url;
+  let res: Response | null = null;
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    await assertPublicHttpUrl(currentUrl);
+    res = await fetch(currentUrl, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (compatible; FanFlow/1.0; +https://flowfan.app)",
+        Accept: "text/html",
+      },
+      redirect: "manual",
+      signal: AbortSignal.timeout(15_000),
+    });
+    const location = res.headers.get("location");
+    if (res.status >= 300 && res.status < 400 && location) {
+      if (hop === MAX_REDIRECTS) throw new Error("Demasiadas redirecciones");
+      currentUrl = new URL(location, currentUrl).toString();
+      continue;
+    }
+    break;
+  }
+  if (!res || !res.ok) {
+    throw new Error(`Fetch failed (${res?.status ?? "sin respuesta"})`);
   }
 
   const reader = res.body?.getReader();
@@ -132,7 +147,7 @@ export async function extractContent(url: string): Promise<ExtractedContent> {
     decodeEntities(ogDesc?.[1] ?? metaDesc?.[1] ?? "").slice(0, 500) || null;
 
   // Try article > main > body in order
-  let body =
+  const body =
     pickBetween(html, /<article[^>]*>/i, /<\/article>/i) ??
     pickBetween(html, /<main[^>]*>/i, /<\/main>/i) ??
     pickBetween(html, /<body[^>]*>/i, /<\/body>/i) ??
@@ -151,7 +166,7 @@ export async function extractContent(url: string): Promise<ExtractedContent> {
     title: title ?? ogTitle?.[1] ?? null,
     excerpt,
     content,
-    url,
+    url: currentUrl,
   };
 }
 

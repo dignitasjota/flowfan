@@ -9,6 +9,7 @@ import {
   messages,
 } from "@/server/db/schema";
 import { checkScheduledMessageLimit, checkOptimalTimeSuggestion } from "@/server/services/usage-limits";
+import { assertCanAccessConversation, assertCanAccessContact, conversationScopeFilter } from "../access";
 
 export const scheduledMessagesRouter = createTRPCRouter({
   list: protectedProcedure
@@ -26,6 +27,15 @@ export const scheduledMessagesRouter = createTRPCRouter({
       }
       if (input?.status) {
         conditions.push(eq(scheduledMessages.status, input.status));
+      }
+      const scope = await conversationScopeFilter(ctx);
+      if (scope) {
+        conditions.push(
+          inArray(
+            scheduledMessages.conversationId,
+            ctx.db.select({ id: conversations.id }).from(conversations).where(scope)
+          )
+        );
       }
 
       return ctx.db.query.scheduledMessages.findMany({
@@ -57,6 +67,7 @@ export const scheduledMessagesRouter = createTRPCRouter({
       if (!msg) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Mensaje programado no encontrado" });
       }
+      await assertCanAccessConversation(ctx, msg.conversationId);
 
       return msg;
     }),
@@ -93,6 +104,7 @@ export const scheduledMessagesRouter = createTRPCRouter({
       if (!conversation) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Conversación no encontrada" });
       }
+      await assertCanAccessConversation(ctx, input.conversationId);
 
       const [scheduled] = await ctx.db
         .insert(scheduledMessages)
@@ -134,6 +146,7 @@ export const scheduledMessagesRouter = createTRPCRouter({
           message: "Mensaje programado no encontrado o no se puede editar.",
         });
       }
+      await assertCanAccessConversation(ctx, existing.conversationId);
 
       const updates: Record<string, unknown> = { updatedAt: new Date() };
       if (input.content) updates.content = input.content;
@@ -160,6 +173,15 @@ export const scheduledMessagesRouter = createTRPCRouter({
   cancel: protectedProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
+      const target = await ctx.db.query.scheduledMessages.findFirst({
+        where: and(
+          eq(scheduledMessages.id, input.id),
+          eq(scheduledMessages.creatorId, ctx.creatorId)
+        ),
+        columns: { conversationId: true },
+      });
+      if (target) await assertCanAccessConversation(ctx, target.conversationId);
+
       const [updated] = await ctx.db
         .update(scheduledMessages)
         .set({ status: "cancelled", updatedAt: new Date() })
@@ -194,9 +216,16 @@ export const scheduledMessagesRouter = createTRPCRouter({
   }),
 
   suggestOptimalTime: protectedProcedure
-    .input(z.object({ contactId: z.string().uuid() }))
+    .input(
+      z.object({
+        contactId: z.string().uuid(),
+        /** Zona IANA del navegador; la hora sugerida se expresa en ella. */
+        timezone: z.string().max(60).optional(),
+      })
+    )
     .query(async ({ ctx, input }) => {
       await checkOptimalTimeSuggestion(ctx.db, ctx.creatorId);
+      await assertCanAccessContact(ctx, input.contactId);
 
       const contactConversations = await ctx.db.query.conversations.findMany({
         where: and(
@@ -227,9 +256,21 @@ export const scheduledMessagesRouter = createTRPCRouter({
       }
 
       // Analyze hour distribution of fan messages
+      // Hora en la zona del usuario (antes getHours() usaba la del servidor,
+      // normalmente UTC en el contenedor).
+      let formatter: Intl.DateTimeFormat;
+      try {
+        formatter = new Intl.DateTimeFormat("en-US", {
+          hour: "numeric",
+          hourCycle: "h23",
+          timeZone: input.timezone || "UTC",
+        });
+      } catch {
+        formatter = new Intl.DateTimeFormat("en-US", { hour: "numeric", hourCycle: "h23", timeZone: "UTC" });
+      }
       const hourCounts = new Array(24).fill(0) as number[];
       for (const msg of allFanMessages) {
-        const hour = new Date(msg.createdAt).getHours();
+        const hour = Number(formatter.format(new Date(msg.createdAt))) % 24;
         hourCounts[hour]++;
       }
 

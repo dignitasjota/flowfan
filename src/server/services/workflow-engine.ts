@@ -10,6 +10,7 @@ import {
   responseTemplates,
 } from "@/server/db/schema";
 import { createChildLogger } from "@/lib/logger";
+import { deliverAutomatedCreatorMessage } from "./message-delivery";
 
 const logger = createChildLogger("workflow-engine");
 
@@ -26,6 +27,8 @@ export type WorkflowEvent =
       contactId: string;
       conversationId: string;
       minutesSinceLastResponse: number;
+      /** Umbral concreto que disparó el evento (ver checkNoResponseTimeouts). */
+      thresholdMinutes?: number;
     }
   | {
       type: "funnel_stage_change";
@@ -104,8 +107,9 @@ export async function evaluateWorkflows(
   for (const workflow of activeWorkflows) {
     try {
       // (a) Check trigger config
+      // Sin registro: un trigger que no coincide no es una "ejecución" y
+      // llenaba workflowExecutions de filas skipped en cada tick.
       if (!matchesTrigger(event, workflow.triggerConfig as Record<string, unknown>)) {
-        await recordExecution(db, workflow, event, null, "skipped", "Trigger config did not match");
         continue;
       }
 
@@ -186,8 +190,13 @@ export function matchesTrigger(
   triggerConfig: Record<string, unknown>,
 ): boolean {
   switch (event.type) {
-    case "no_response_timeout":
-      return event.minutesSinceLastResponse >= (triggerConfig.minutes as number ?? 0);
+    case "no_response_timeout": {
+      const minutes = (triggerConfig.minutes as number | undefined) ?? 60;
+      // Con umbral explícito, cada workflow solo reacciona al evento de SU
+      // umbral (un evento por umbral y por mensaje del fan).
+      if (event.thresholdMinutes !== undefined) return minutes === event.thresholdMinutes;
+      return event.minutesSinceLastResponse >= minutes;
+    }
 
     case "funnel_stage_change":
       return (
@@ -309,10 +318,21 @@ export async function executeAction(
 
   switch (workflow.actionType) {
     case "send_message":
-      return executeSendMessage(db, actionConfig, contact, conversationId);
+      return executeSendMessage(
+        db,
+        actionConfig,
+        contact,
+        await resolveConversationId(db, workflow.creatorId, contact.id, conversationId)
+      );
 
     case "send_template":
-      return executeSendTemplate(db, actionConfig, contact, conversationId);
+      return executeSendTemplate(
+        db,
+        actionConfig,
+        contact,
+        workflow.creatorId,
+        await resolveConversationId(db, workflow.creatorId, contact.id, conversationId)
+      );
 
     case "create_notification":
       return executeCreateNotification(db, actionConfig, contact, workflow.creatorId);
@@ -332,6 +352,36 @@ export async function executeAction(
 // Action implementations
 // ---------------------------------------------------------------------------
 
+/**
+ * Los eventos funnel_stage_change / sentiment_change / new_contact no llevan
+ * conversationId; antes send_message/send_template fallaban siempre con ellos.
+ * Se usa la conversación activa más reciente del contacto. Si el evento trae
+ * un id, se verifica que pertenezca al contacto y al tenant.
+ */
+export async function resolveConversationId(
+  db: Db,
+  creatorId: string,
+  contactId: string,
+  conversationId?: string,
+): Promise<string | undefined> {
+  const conditions = [
+    eq(conversations.creatorId, creatorId),
+    eq(conversations.contactId, contactId),
+  ];
+  if (conversationId) {
+    conditions.push(eq(conversations.id, conversationId));
+  } else {
+    conditions.push(eq(conversations.status, "active"));
+  }
+  const [row] = await db
+    .select({ id: conversations.id })
+    .from(conversations)
+    .where(and(...conditions))
+    .orderBy(desc(conversations.lastMessageAt))
+    .limit(1);
+  return row?.id;
+}
+
 async function executeSendMessage(
   db: Db,
   config: Record<string, unknown>,
@@ -350,6 +400,7 @@ async function executeSendMessage(
       conversationId,
       role: "creator",
       content,
+      source: "workflow",
     })
     .returning({ id: messages.id });
 
@@ -359,6 +410,14 @@ async function executeSendMessage(
     .set({ lastMessageAt: new Date() })
     .where(eq(conversations.id, conversationId));
 
+  await deliverAutomatedCreatorMessage(db, {
+    creatorId: contact.creatorId,
+    conversationId,
+    messageId: inserted.id,
+    content,
+    source: "workflow",
+  });
+
   return { success: true, result: { messageId: inserted.id, content } };
 }
 
@@ -366,6 +425,7 @@ async function executeSendTemplate(
   db: Db,
   config: Record<string, unknown>,
   contact: typeof contacts.$inferSelect,
+  creatorId: string,
   conversationId?: string,
 ): Promise<ActionResult> {
   if (!conversationId) {
@@ -376,7 +436,7 @@ async function executeSendTemplate(
   const [template] = await db
     .select()
     .from(responseTemplates)
-    .where(eq(responseTemplates.id, templateId))
+    .where(and(eq(responseTemplates.id, templateId), eq(responseTemplates.creatorId, creatorId)))
     .limit(1);
 
   if (!template) {
@@ -391,6 +451,7 @@ async function executeSendTemplate(
       conversationId,
       role: "creator",
       content,
+      source: "workflow",
     })
     .returning({ id: messages.id });
 
@@ -399,6 +460,14 @@ async function executeSendTemplate(
     .update(conversations)
     .set({ lastMessageAt: new Date() })
     .where(eq(conversations.id, conversationId));
+
+  await deliverAutomatedCreatorMessage(db, {
+    creatorId: contact.creatorId,
+    conversationId,
+    messageId: inserted.id,
+    content,
+    source: "workflow",
+  });
 
   // Increment template usage count
   await db
@@ -447,7 +516,7 @@ async function executeChangeTags(
   const currentTags = (contact.tags ?? []) as string[];
 
   // Remove tags first, then add new ones
-  let updatedTags = currentTags.filter((t) => !tagsToRemove.includes(t));
+  const updatedTags = currentTags.filter((t) => !tagsToRemove.includes(t));
   for (const tag of tagsToAdd) {
     if (!updatedTags.includes(tag)) {
       updatedTags.push(tag);

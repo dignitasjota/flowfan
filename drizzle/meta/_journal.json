@@ -71,6 +71,13 @@
       "when": 1779830818987,
       "tag": "0009_tiny_the_twelve",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1792366602080,
+      "tag": "0010_schema_sync",
+      "breakpoints": true
     }
   ]
 }

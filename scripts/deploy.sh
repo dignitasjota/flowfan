@@ -126,7 +126,10 @@ start() {
         log_success "Services started!"
 
         log_info "Running database migrations..."
-        docker compose -f "$COMPOSE_FILE" exec -T app npm run db:push
+        # El contenedor `app` (imagen standalone) no incluye drizzle.config.ts
+        # ni src/: el push se ejecuta desde el `worker`.
+        docker compose -f "$COMPOSE_FILE" exec -T worker npm run db:push
+        docker compose -f "$COMPOSE_FILE" exec -T worker npm run db:ensure-search
 
         log_success "Database migrations completed!"
 
@@ -199,7 +202,8 @@ update() {
     docker compose -f "$COMPOSE_FILE" up -d
 
     log_info "Running database migrations..."
-    docker compose -f "$COMPOSE_FILE" exec -T app npm run db:push || true
+    docker compose -f "$COMPOSE_FILE" exec -T worker npm run db:push
+    docker compose -f "$COMPOSE_FILE" exec -T worker npm run db:ensure-search
 
     log_success "Update completed!"
     log_info ""

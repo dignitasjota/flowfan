@@ -4,6 +4,7 @@ import { webhookConfigs, webhookDeliveryLogs } from "@/server/db/schema";
 import { webhookDeliveryQueue } from "@/server/queues";
 import { createChildLogger } from "@/lib/logger";
 import { assertPublicHttpUrl } from "@/lib/ssrf";
+import { decrypt, isEncrypted } from "@/lib/crypto";
 
 const log = createChildLogger("webhook-dispatcher");
 
@@ -53,6 +54,16 @@ export async function dispatchWebhookEvent(
   }
 }
 
+/**
+ * El secreto se guarda cifrado (AES-256-GCM) en `webhook_configs.secret` y
+ * viaja cifrado en el job de BullMQ. Hay que descifrarlo antes de firmar:
+ * firmar con el ciphertext hacía imposible verificar la firma en destino.
+ * Valores legado sin cifrar se usan tal cual.
+ */
+export function resolveWebhookSecret(stored: string): string {
+  return isEncrypted(stored) ? decrypt(stored) : stored;
+}
+
 export function generateWebhookSignature(
   payload: string,
   secret: string
@@ -70,7 +81,7 @@ export async function deliverWebhook(
   attempt: number
 ): Promise<void> {
   const body = JSON.stringify(payload);
-  const signature = generateWebhookSignature(body, secret);
+  const signature = generateWebhookSignature(body, resolveWebhookSecret(secret));
 
   // Create initial log entry
   const [logEntry] = await (db as any)

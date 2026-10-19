@@ -1,13 +1,11 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
 
 export function TeamSwitcher() {
-  const router = useRouter();
   const { data: session, update } = useSession();
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -32,7 +30,10 @@ export function TeamSwitcher() {
 
   if (!teams || teams.length === 0) return null;
 
-  const activeCreatorId = (session as any)?.activeCreatorId ?? null;
+  // `activeCreatorId` vive en session.user; igual al propio id = "Mi cuenta".
+  const ownId = session?.user?.id ?? null;
+  const rawActive = session?.user?.activeCreatorId ?? null;
+  const activeCreatorId = rawActive && rawActive !== ownId ? rawActive : null;
 
   const activeName = activeCreatorId
     ? teams.find((t) => t.creatorId === activeCreatorId)?.creatorName ??
@@ -41,8 +42,12 @@ export function TeamSwitcher() {
 
   const handleSelect = async (creatorId: string | null) => {
     setIsOpen(false);
-    await update({ activeCreatorId: creatorId });
-    router.refresh();
+    if (creatorId === activeCreatorId) return;
+    // null = volver a la cuenta propia (el callback jwt lo trata igual que el id propio).
+    await update({ activeCreatorId: creatorId ?? ownId });
+    // Recarga completa: limpia la caché de React Query del tenant anterior
+    // (router.refresh no invalida las queries tRPC del cliente).
+    window.location.assign("/conversations");
   };
 
   return (

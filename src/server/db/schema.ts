@@ -11,6 +11,7 @@ import {
   pgEnum,
   index,
   uniqueIndex,
+  customType,
 } from "drizzle-orm/pg-core";
 import { relations, sql } from "drizzle-orm";
 
@@ -136,6 +137,18 @@ export const commentModerationStatusEnum = pgEnum("comment_moderation_status", [
   "hidden",
   "reported",
 ]);
+
+// Columna tsvector gestionada por un trigger en Postgres. Al leer se descarta
+// el valor (fromDriver → null) para no arrastrar el vector a las respuestas de
+// la API cada vez que se hace `findMany` sobre messages.
+const tsvector = customType<{ data: string | null; driverData: string }>({
+  dataType() {
+    return "tsvector";
+  },
+  fromDriver() {
+    return null;
+  },
+});
 
 // ============================================================
 // TABLES
@@ -331,12 +344,17 @@ export const messages = pgTable(
     source: varchar("source", { length: 20 }).default("manual"),
     sentById: uuid("sent_by_id").references(() => creators.id),
     createdAt: timestamp("created_at").defaultNow().notNull(),
+    // Full-text search (es + en). La columna la rellena el trigger
+    // `messages_search_vector_trigger` (ver migración 0010); se declara aquí
+    // para que `db:push` no la elimine y para que exista el índice GIN.
+    searchVector: tsvector("search_vector"),
   },
   (table) => [
     index("messages_conversation_idx").on(
       table.conversationId,
       table.createdAt
     ),
+    index("messages_search_idx").using("gin", table.searchVector),
   ]
 );
 

@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { eq, and, sql, desc } from "drizzle-orm";
+import { z } from "zod";
 import { db } from "@/server/db";
 import { authenticateApiKey } from "@/server/api/middleware/api-key-auth";
 import {
@@ -15,6 +16,23 @@ import { publishEvent } from "@/lib/redis-pubsub";
 import { rateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 
 const ALLOWED_PLATFORMS = new Set(["instagram", "reddit", "twitter"]);
+
+const optStr = (max: number) => z.string().max(max).optional();
+const commentBodySchema = z.object({
+  platformType: optStr(20),
+  externalPostId: optStr(255),
+  postUrl: z.string().url().max(2000).optional(),
+  postTitle: optStr(500),
+  postContent: optStr(10_000),
+  externalCommentId: optStr(255),
+  parentExternalCommentId: optStr(255),
+  authorUsername: optStr(255),
+  authorDisplayName: optStr(255),
+  authorAvatarUrl: optStr(2000),
+  authorPlatformUserId: optStr(255),
+  content: optStr(10_000),
+  publishedAt: z.string().datetime().optional(),
+});
 
 export async function GET(request: NextRequest) {
   const auth = await authenticateApiKey(request);
@@ -108,8 +126,12 @@ export async function POST(request: NextRequest) {
   }
 
   const body = await request.json().catch(() => null);
-  if (!body || typeof body !== "object") {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  const parsedBody = commentBodySchema.safeParse(body);
+  if (!parsedBody.success) {
+    return NextResponse.json(
+      { error: "Invalid JSON body", details: parsedBody.error.flatten().fieldErrors },
+      { status: 400 }
+    );
   }
 
   const {
@@ -126,7 +148,7 @@ export async function POST(request: NextRequest) {
     authorPlatformUserId,
     content,
     publishedAt,
-  } = body as Record<string, string | undefined>;
+  } = parsedBody.data;
 
   if (!platformType || !ALLOWED_PLATFORMS.has(platformType)) {
     return NextResponse.json(
@@ -145,6 +167,21 @@ export async function POST(request: NextRequest) {
       { error: "externalPostId or postUrl is required to identify the post" },
       { status: 400 }
     );
+  }
+
+  // Idempotencia ANTES de crear post/contacto: un reintento del cliente ya no
+  // crea contactos ni posts de más.
+  if (externalCommentId) {
+    const existing = await db.query.socialComments.findFirst({
+      where: and(
+        eq(socialComments.creatorId, auth.creatorId),
+        eq(socialComments.platformType, platformType as "instagram" | "reddit" | "twitter"),
+        eq(socialComments.externalCommentId, externalCommentId)
+      ),
+    });
+    if (existing) {
+      return NextResponse.json({ data: existing, deduplicated: true }, { status: 200 });
+    }
   }
 
   // Find or create the post
@@ -205,20 +242,6 @@ export async function POST(request: NextRequest) {
       platformUserId: authorPlatformUserId,
     }
   );
-
-  // Idempotency: skip duplicate by external comment id
-  if (externalCommentId) {
-    const existing = await db.query.socialComments.findFirst({
-      where: and(
-        eq(socialComments.creatorId, auth.creatorId),
-        eq(socialComments.platformType, platformType as "instagram" | "reddit" | "twitter"),
-        eq(socialComments.externalCommentId, externalCommentId)
-      ),
-    });
-    if (existing) {
-      return NextResponse.json({ data: existing, deduplicated: true }, { status: 200 });
-    }
-  }
 
   const [comment] = await db
     .insert(socialComments)

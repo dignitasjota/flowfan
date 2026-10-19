@@ -5,3 +5,8 @@ node_modules
 *.md
 docker-compose*.yml
 .env*
+uploads
+coverage
+test-results
+playwright-report
+*.tsbuildinfo

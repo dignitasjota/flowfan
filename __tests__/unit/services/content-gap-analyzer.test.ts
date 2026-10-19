@@ -51,7 +51,7 @@ function makeContact(
   profile: {
     engagementLevel?: number;
     behavioralSignals?: Record<string, unknown>;
-    scoringHistory?: Record<string, unknown>;
+    scoringHistory?: unknown;
   } | null = null
 ) {
   return { platformType, profile };
@@ -152,12 +152,13 @@ describe("aggregateConversationData", () => {
       makeContact("telegram", {
         engagementLevel: 30,
         behavioralSignals: { topicFrequency: {} },
-        scoringHistory: { engagement: [80, 60, 40] }, // 40 < 80 * 0.7 = 56
+        // Forma real de profile-updater: array de snapshots. 40 < 80 * 0.7 = 56
+        scoringHistory: [{ engagementLevel: 80 }, { engagementLevel: 60 }, { engagementLevel: 40 }],
       }),
       makeContact("telegram", {
         engagementLevel: 70,
         behavioralSignals: { topicFrequency: {} },
-        scoringHistory: { engagement: [70, 72, 75] }, // no drop
+        scoringHistory: [{ engagementLevel: 70 }, { engagementLevel: 72 }, { engagementLevel: 75 }], // no drop
       }),
     ];
     const db = makeMockDb(contacts, 50);
@@ -362,5 +363,19 @@ describe("analyzeContentGaps", () => {
     const result = await analyzeContentGaps(aiConfig, baseData);
 
     expect(result.topRequestedTopics[0].avgSentiment).toBe(1);
+  });
+});
+
+describe("hasEngagementDrop", () => {
+  it("detecta una caída >30% en los 3 últimos snapshots", async () => {
+    const { hasEngagementDrop } = await import("@/server/services/content-gap-analyzer");
+    expect(
+      hasEngagementDrop([{ engagementLevel: 80 }, { engagementLevel: 60 }, { engagementLevel: 40 }])
+    ).toBe(true);
+    expect(
+      hasEngagementDrop([{ engagementLevel: 80 }, { engagementLevel: 78 }, { engagementLevel: 70 }])
+    ).toBe(false);
+    expect(hasEngagementDrop([{ engagementLevel: 80 }])).toBe(false);
+    expect(hasEngagementDrop({ engagement: [80, 10, 5] })).toBe(false);
   });
 });

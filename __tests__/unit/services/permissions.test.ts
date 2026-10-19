@@ -90,8 +90,8 @@ describe("permissions", () => {
   });
 
   describe("default role permissions", () => {
-    it("manager cannot delete contacts", () => {
-      expect(DEFAULT_ROLE_PERMISSIONS.manager).not.toContain("contacts.delete");
+    it("manager can delete contacts (mismo comportamiento que managerProcedure)", () => {
+      expect(DEFAULT_ROLE_PERMISSIONS.manager).toContain("contacts.delete");
     });
 
     it("manager cannot manage settings", () => {

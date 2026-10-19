@@ -123,17 +123,55 @@ export async function findContactExperiment(
   db: any,
   contactId: string
 ): Promise<{ experimentId: string; variant: "A" | "B" } | null> {
-  const assignment = await db.query.experimentAssignments.findFirst({
+  // Un contacto puede tener asignaciones de experimentos ya terminados; antes
+  // se cogía la primera (arbitraria) y si no estaba running se ignoraba el
+  // experimento activo.
+  const assignments = await db.query.experimentAssignments.findMany({
     where: eq(experimentAssignments.contactId, contactId),
     with: { experiment: true },
   });
 
-  if (!assignment || assignment.experiment.status !== "running") return null;
+  const active = assignments.find((a: any) => a.experiment?.status === "running");
+  if (!active) return null;
 
   return {
-    experimentId: assignment.experimentId,
-    variant: assignment.variant as "A" | "B",
+    experimentId: active.experimentId,
+    variant: active.variant as "A" | "B",
   };
+}
+
+/**
+ * Registra un evento del experimento activo del contacto (si lo hay).
+ * Con `once`, solo se registra la primera vez por contacto (p.ej. fan_replied:
+ * antes se sumaba uno por mensaje y replyRate superaba el 100 %).
+ */
+export async function recordExperimentEventForContact(
+  db: any,
+  contactId: string,
+  metricType: "response_sent" | "fan_replied" | "conversion" | "tip_received",
+  options: { once?: boolean; value?: number } = {}
+): Promise<void> {
+  const experiment = await findContactExperiment(db, contactId);
+  if (!experiment) return;
+  if (options.once) {
+    const existing = await db.query.experimentMetrics.findFirst({
+      where: and(
+        eq(experimentMetrics.experimentId, experiment.experimentId),
+        eq(experimentMetrics.contactId, contactId),
+        eq(experimentMetrics.metricType, metricType)
+      ),
+      columns: { id: true },
+    });
+    if (existing) return;
+  }
+  await recordExperimentMetric(
+    db,
+    experiment.experimentId,
+    contactId,
+    experiment.variant,
+    metricType,
+    options.value ?? 1
+  );
 }
 
 // ============================================================

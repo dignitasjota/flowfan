@@ -127,7 +127,7 @@ export const aiConfigRouter = createTRPCRouter({
   upsertAssignment: ownerProcedure
     .input(
       z.object({
-        taskType: z.enum(["suggestion", "analysis", "summary", "report", "price_advice"]),
+        taskType: z.enum(["suggestion", "analysis", "summary", "report", "price_advice", "coaching", "content_gap"]),
         provider: z.enum(["anthropic", "openai", "google", "minimax", "kimi"]),
         model: z.string().min(1),
         apiKey: z.string().optional(),
@@ -180,7 +180,7 @@ export const aiConfigRouter = createTRPCRouter({
 
   deleteAssignment: ownerProcedure
     .input(z.object({
-      taskType: z.enum(["suggestion", "analysis", "summary", "report", "price_advice"]),
+      taskType: z.enum(["suggestion", "analysis", "summary", "report", "price_advice", "coaching", "content_gap"]),
     }))
     .mutation(async ({ ctx, input }) => {
       await ctx.db

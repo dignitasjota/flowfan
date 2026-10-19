@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import {
   broadcasts,
   broadcastRecipients,
@@ -53,6 +53,11 @@ export async function sendBroadcastMessage(
     return;
   }
 
+  if (broadcast.status === "cancelled") {
+    log.info({ recipientId, broadcastId: broadcast.id }, "Broadcast cancelled, skipping send");
+    return;
+  }
+
   // 4. Get Telegram bot config for the creator
   const [config] = await db
     .select()
@@ -88,18 +93,22 @@ export async function sendBroadcastMessage(
     return;
   }
 
+  // Claim atómico del destinatario: dos jobs concurrentes para el mismo
+  // recipient no envían dos veces.
+  const [claimed] = await db
+    .update(broadcastRecipients)
+    .set({ status: "sent", sentAt: new Date() })
+    .where(and(eq(broadcastRecipients.id, recipientId), eq(broadcastRecipients.status, "pending")))
+    .returning({ id: broadcastRecipients.id });
+  if (!claimed) {
+    log.info({ recipientId }, "Recipient already claimed, skipping");
+    return;
+  }
+
   try {
     await sendMessage(token, chatId, recipient.resolvedContent);
 
-    // 6. Success: update recipient and increment sentCount
-    await db
-      .update(broadcastRecipients)
-      .set({
-        status: "sent",
-        sentAt: new Date(),
-      })
-      .where(eq(broadcastRecipients.id, recipientId));
-
+    // 6. Success: increment sentCount (el recipient ya quedó en "sent" al reclamarlo)
     await db
       .update(broadcasts)
       .set({

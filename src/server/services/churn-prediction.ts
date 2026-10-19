@@ -1,4 +1,4 @@
-import { eq, and } from "drizzle-orm";
+import { eq, and, gt } from "drizzle-orm";
 import { contacts, contactProfiles, notifications, creators } from "@/server/db/schema";
 import { emailQueue } from "@/server/queues";
 import { createChildLogger } from "@/lib/logger";
@@ -6,6 +6,8 @@ import { sendPushToCreator } from "./push-notifications";
 import type { BehavioralSignals } from "./scoring";
 
 const log = createChildLogger("churn-prediction");
+
+const CHURN_BATCH_SIZE = 500;
 
 type DB = Parameters<Parameters<typeof import("@/server/db").db.transaction>[0]>[0] | typeof import("@/server/db").db;
 
@@ -154,69 +156,83 @@ export function calculateChurnScore(
 // ============================================================
 
 export async function computeAllChurnScores(db: DB): Promise<void> {
-  const allContacts = await (db as any).query.contacts.findMany({
-    where: eq(contacts.isArchived, false),
-    // WK-15: sin estas dos columnas, `displayName`/`username` siempre eran
-    // `undefined` y todas las alertas de churn decían "Contacto en riesgo".
-    columns: { id: true, creatorId: true, lastInteractionAt: true, displayName: true, username: true },
-    with: {
-      profile: {
-        columns: {
-          engagementLevel: true,
-          funnelStage: true,
-          scoringHistory: true,
-          behavioralSignals: true,
-          churnScore: true,
+  const alertsByCreator = new Map<string, { name: string; score: number; stage: string }[]>();
+  let totalProcessed = 0;
+  let cursor: string | null = null;
+
+  // Por lotes con cursor sobre id: antes se cargaban TODOS los contactos de
+  // TODOS los tenants (con su perfil) en memoria de una vez.
+  for (;;) {
+    const batch: any[] = await (db as any).query.contacts.findMany({
+      where: cursor
+        ? and(eq(contacts.isArchived, false), gt(contacts.id, cursor))
+        : eq(contacts.isArchived, false),
+      orderBy: (c: any, { asc }: any) => [asc(c.id)],
+      limit: CHURN_BATCH_SIZE,
+      // WK-15: sin estas dos columnas, `displayName`/`username` siempre eran
+      // `undefined` y todas las alertas de churn decían "Contacto en riesgo".
+      columns: { id: true, creatorId: true, lastInteractionAt: true, displayName: true, username: true },
+      with: {
+        profile: {
+          columns: {
+            engagementLevel: true,
+            funnelStage: true,
+            scoringHistory: true,
+            behavioralSignals: true,
+            churnScore: true,
+          },
         },
       },
-    },
-  });
+    });
+    if (batch.length === 0) break;
+    cursor = batch[batch.length - 1].id;
+    totalProcessed += batch.length;
 
-  const alertsByCreator = new Map<string, { name: string; score: number; stage: string }[]>();
+    for (const contact of batch) {
+      if (!contact.profile) continue;
 
-  for (const contact of allContacts) {
-    if (!contact.profile) continue;
+      const prevScore = contact.profile.churnScore;
+      const result = calculateChurnScore(
+        contact.profile.behavioralSignals as BehavioralSignals | null,
+        contact.profile,
+        contact
+      );
 
-    const prevScore = contact.profile.churnScore;
-    const result = calculateChurnScore(
-      contact.profile.behavioralSignals as BehavioralSignals | null,
-      contact.profile,
-      contact
-    );
+      await (db as any)
+        .update(contactProfiles)
+        .set({
+          churnScore: result.score,
+          churnFactors: result.factors,
+          churnUpdatedAt: new Date(),
+        })
+        .where(eq(contactProfiles.contactId, contact.id));
 
-    await (db as any)
-      .update(contactProfiles)
-      .set({
-        churnScore: result.score,
-        churnFactors: result.factors,
-        churnUpdatedAt: new Date(),
-      })
-      .where(eq(contactProfiles.contactId, contact.id));
+      // Alert when VIP/buyer crosses into high or critical
+      const wasLow = prevScore < 50;
+      const isHigh = result.score >= 50;
+      if (wasLow && isHigh && ["vip", "buyer", "hot_lead"].includes(contact.profile.funnelStage)) {
+        const displayName = (contact as any).displayName || (contact as any).username || "Contacto";
 
-    // Alert when VIP/buyer crosses into high or critical
-    const wasLow = prevScore < 50;
-    const isHigh = result.score >= 50;
-    if (wasLow && isHigh && ["vip", "buyer", "hot_lead"].includes(contact.profile.funnelStage)) {
-      const displayName = (contact as any).displayName || (contact as any).username || "Contacto";
+        await (db as any).insert(notifications).values({
+          creatorId: contact.creatorId,
+          contactId: contact.id,
+          type: "churn_risk",
+          title: `${displayName} en riesgo de churn (${result.score}%)`,
+          message: `${displayName} (${contact.profile.funnelStage}) tiene un score de churn de ${result.score}%. Recomendamos contactar pronto.`,
+          data: { churnScore: result.score, riskLevel: result.riskLevel },
+        });
 
-      await (db as any).insert(notifications).values({
-        creatorId: contact.creatorId,
-        contactId: contact.id,
-        type: "churn_risk",
-        title: `${displayName} en riesgo de churn (${result.score}%)`,
-        message: `${displayName} (${contact.profile.funnelStage}) tiene un score de churn de ${result.score}%. Recomendamos contactar pronto.`,
-        data: { churnScore: result.score, riskLevel: result.riskLevel },
-      });
-
-      if (!alertsByCreator.has(contact.creatorId)) {
-        alertsByCreator.set(contact.creatorId, []);
+        if (!alertsByCreator.has(contact.creatorId)) {
+          alertsByCreator.set(contact.creatorId, []);
+        }
+        alertsByCreator.get(contact.creatorId)!.push({
+          name: displayName,
+          score: result.score,
+          stage: contact.profile.funnelStage,
+        });
       }
-      alertsByCreator.get(contact.creatorId)!.push({
-        name: displayName,
-        score: result.score,
-        stage: contact.profile.funnelStage,
-      });
     }
+    if (batch.length < CHURN_BATCH_SIZE) break;
   }
 
   // Send churn alert emails
@@ -254,7 +270,7 @@ export async function computeAllChurnScores(db: DB): Promise<void> {
     }
   }
 
-  log.info({ totalProcessed: allContacts.length, alertCreators: alertsByCreator.size }, "Batch churn scores computed");
+  log.info({ totalProcessed, alertCreators: alertsByCreator.size }, "Batch churn scores computed");
 }
 
 // ============================================================

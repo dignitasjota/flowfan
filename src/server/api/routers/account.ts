@@ -3,7 +3,7 @@ import { randomBytes } from "crypto";
 import { eq } from "drizzle-orm";
 import { compare } from "bcryptjs";
 import { TRPCError } from "@trpc/server";
-import { createTRPCRouter, protectedProcedure } from "../trpc";
+import { createTRPCRouter, protectedProcedure, managerProcedure, ownerProcedure } from "../trpc";
 import { creators } from "@/server/db/schema";
 import { getStripe } from "@/lib/stripe";
 import { rateLimit, RATE_LIMITS } from "@/lib/rate-limit";
@@ -40,7 +40,7 @@ export const accountRouter = createTRPCRouter({
   }),
 
   /** Save global instructions */
-  saveGlobalInstructions: protectedProcedure
+  saveGlobalInstructions: managerProcedure
     .input(z.object({ globalInstructions: z.string().max(2000) }))
     .mutation(async ({ ctx, input }) => {
       const creator = await ctx.db.query.creators.findFirst({
@@ -72,7 +72,7 @@ export const accountRouter = createTRPCRouter({
   }),
 
   /** Update email preferences */
-  updateEmailPreferences: protectedProcedure
+  updateEmailPreferences: ownerProcedure
     .input(
       z.object({
         emailNotificationsEnabled: z.boolean(),
@@ -173,9 +173,10 @@ export const accountRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      // Verify password
+      // Siempre la cuenta del usuario que actúa (no la del equipo activo): un
+      // miembro en modo equipo no puede borrar la cuenta del owner.
       const creator = await ctx.db.query.creators.findFirst({
-        where: eq(creators.id, ctx.creatorId),
+        where: eq(creators.id, ctx.actingUserId),
       });
 
       if (!creator) {
@@ -190,14 +191,18 @@ export const accountRouter = createTRPCRouter({
         });
       }
 
-      // Cancel Stripe subscription if active
+      // Cancel Stripe subscription if active. Si ya estaba cancelada en Stripe
+      // no debe impedir borrar la cuenta.
       if (creator.stripeSubscriptionId) {
-        const stripe = getStripe();
-        await stripe.subscriptions.cancel(creator.stripeSubscriptionId);
+        try {
+          await getStripe().subscriptions.cancel(creator.stripeSubscriptionId);
+        } catch (err) {
+          log.warn({ err }, "Stripe cancel failed during account deletion");
+        }
       }
 
       // Delete creator — cascading deletes handle all related data
-      await ctx.db.delete(creators).where(eq(creators.id, ctx.creatorId));
+      await ctx.db.delete(creators).where(eq(creators.id, creator.id));
 
       return { success: true };
     }),
@@ -217,7 +222,7 @@ export const accountRouter = createTRPCRouter({
   }),
 
   /** Save language settings */
-  saveLanguageSettings: protectedProcedure
+  saveLanguageSettings: managerProcedure
     .input(
       z.object({
         responseLanguage: z.string().min(2).max(5),

@@ -16,8 +16,8 @@ export default async function DashboardLayout({
 }) {
   const session = await getServerSession(authOptions);
 
-  if (!session) {
-    redirect("/login");
+  if (!session?.user) {
+    redirect("/login?expired=1");
   }
 
   const creator = await db.query.creators.findFirst({

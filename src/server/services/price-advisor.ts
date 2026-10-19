@@ -1,4 +1,5 @@
 import { type AIConfig, callAIProvider } from "./ai";
+import { UNTRUSTED_DATA_RULE, wrapTranscript } from "./prompt-safety";
 import { parseTolerantJSON } from "./ai-json-parser";
 import type { BehavioralSignals } from "./scoring";
 import { getLanguageInstruction } from "./language-utils";
@@ -98,10 +99,10 @@ export async function getPriceAdvice(
   }
 
   const recentContext = input.recentMessages.length > 0
-    ? `\n\nUltimos mensajes:\n${input.recentMessages.slice(-5).map((m) => `${m.role === "fan" ? "Fan" : "Creador"}: ${m.content}`).join("\n")}`
+    ? `\n\nUltimos mensajes:\n${wrapTranscript(input.recentMessages.slice(-5))}`
     : "";
 
-  let systemPrompt = PRICE_SYSTEM_PROMPT;
+  let systemPrompt = `${PRICE_SYSTEM_PROMPT}\n${UNTRUSTED_DATA_RULE}`;
   if (input.language) {
     systemPrompt += `\n\n${getLanguageInstruction(input.language)}`;
   }

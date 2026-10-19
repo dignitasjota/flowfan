@@ -1,3 +1,5 @@
+import { FB_GRAPH_URL } from "./oauth-instagram";
+
 /**
  * Real moderation actions on the source platform.
  *
@@ -72,7 +74,7 @@ export async function applyInstagramModeration(args: {
   try {
     const params = new URLSearchParams({ access_token: args.accessToken });
     const res = await fetch(
-      `https://graph.facebook.com/v19.0/${args.externalCommentId}?${params.toString()}`,
+      `${FB_GRAPH_URL}/${args.externalCommentId}?${params.toString()}`,
       {
         method: "DELETE",
         signal: AbortSignal.timeout(15_000),

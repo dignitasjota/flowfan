@@ -4,6 +4,9 @@ import { createTRPCRouter, protectedProcedure, managerProcedure } from "../trpc"
 import { fanTransactions, contacts, contactProfiles, messages, conversations } from "@/server/db/schema";
 import { checkRevenueAccess } from "@/server/services/usage-limits";
 import { dispatchWebhookEvent } from "@/server/services/webhook-dispatcher";
+import { assertCanAccessContact } from "../access";
+import { toCsv } from "@/lib/csv";
+import { recordExperimentEventForContact } from "@/server/services/ab-experiment";
 
 export const revenueRouter = createTRPCRouter({
   // Registrar transacción
@@ -46,6 +49,10 @@ export const revenueRouter = createTRPCRouter({
           transactionDate: input.transactionDate ?? new Date(),
         })
         .returning();
+
+      if (input.type === "tip") {
+        recordExperimentEventForContact(ctx.db, input.contactId, "tip_received").catch(() => {});
+      }
 
       // Dispatch webhook: transaction.created
       dispatchWebhookEvent(ctx.db, ctx.creatorId, "transaction.created", {
@@ -126,6 +133,7 @@ export const revenueRouter = createTRPCRouter({
       })
     )
     .query(async ({ ctx, input }) => {
+      await assertCanAccessContact(ctx, input.contactId);
       await checkRevenueAccess(ctx.db, ctx.creatorId, "basic");
 
       const rows = await ctx.db
@@ -151,6 +159,7 @@ export const revenueRouter = createTRPCRouter({
   getContactSummary: protectedProcedure
     .input(z.object({ contactId: z.string().uuid() }))
     .query(async ({ ctx, input }) => {
+      await assertCanAccessContact(ctx, input.contactId);
       await checkRevenueAccess(ctx.db, ctx.creatorId, "basic");
 
       const [totals] = await ctx.db
@@ -359,6 +368,7 @@ export const revenueRouter = createTRPCRouter({
   getContactROI: protectedProcedure
     .input(z.object({ contactId: z.string().uuid() }))
     .query(async ({ ctx, input }) => {
+      await assertCanAccessContact(ctx, input.contactId);
       await checkRevenueAccess(ctx.db, ctx.creatorId, "full");
 
       // Revenue total
@@ -514,13 +524,6 @@ export const revenueRouter = createTRPCRouter({
 
       // CSV
       const headers = ["fecha", "tipo", "monto_eur", "descripcion", "contacto", "plataforma"];
-      const csvRows = [
-        headers.join(","),
-        ...data.map((d) =>
-          headers.map((h) => `"${String(d[h as keyof typeof d]).replace(/"/g, '""')}"`).join(",")
-        ),
-      ];
-
-      return { format: "csv" as const, data: csvRows.join("\n") };
+      return { format: "csv" as const, data: toCsv(headers, data) };
     }),
 });

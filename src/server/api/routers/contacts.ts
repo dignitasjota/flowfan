@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { eq, and, desc, ilike, or, sql, count } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
-import { createTRPCRouter, protectedProcedure, managerProcedure } from "../trpc";
+import { createTRPCRouter, protectedProcedure, managerProcedure, permissionProcedure } from "../trpc";
 import { contacts, contactProfiles, fanTransactions } from "@/server/db/schema";
 import { checkContactLimit } from "@/server/services/usage-limits";
 import { workflowQueue } from "@/server/queues";
@@ -10,7 +10,7 @@ import { scrapeInstagramProfile } from "@/server/services/instagram-scraper";
 import { createChildLogger } from "@/lib/logger";
 import { dispatchWebhookEvent } from "@/server/services/webhook-dispatcher";
 import { logTeamAction } from "@/server/services/team-audit";
-import { chatterContactFilter } from "../access";
+import { contactScopeFilter } from "../access";
 
 const log = createChildLogger("contacts-router");
 
@@ -24,15 +24,17 @@ export const contactsRouter = createTRPCRouter({
           .optional(),
         limit: z.number().min(1).max(100).default(50),
         offset: z.number().min(0).default(0),
+        /** Los contactos con pagos se archivan en vez de borrarse; ocultos por defecto. */
+        includeArchived: z.boolean().default(false),
       }).optional()
     )
     .query(async ({ ctx, input }) => {
       const conditions = [eq(contacts.creatorId, ctx.creatorId)];
+      if (!input?.includeArchived) conditions.push(eq(contacts.isArchived, false));
 
       // TEN-6: los chatters solo ven contactos con conversación asignada.
-      if (ctx.teamRole === "chatter") {
-        conditions.push(chatterContactFilter(ctx.actingUserId));
-      }
+      const scope = await contactScopeFilter(ctx);
+      if (scope) conditions.push(scope);
 
       if (input?.platformType) {
         conditions.push(eq(contacts.platformType, input.platformType));
@@ -91,9 +93,8 @@ export const contactsRouter = createTRPCRouter({
       ];
       // TEN-6: un chatter solo accede al contacto si tiene alguna conversación
       // asignada con él.
-      if (ctx.teamRole === "chatter") {
-        conditions.push(chatterContactFilter(ctx.actingUserId));
-      }
+      const scope = await contactScopeFilter(ctx);
+      if (scope) conditions.push(scope);
       return ctx.db.query.contacts.findFirst({
         where: and(...conditions),
         with: {
@@ -104,7 +105,7 @@ export const contactsRouter = createTRPCRouter({
       });
     }),
 
-  create: managerProcedure
+  create: permissionProcedure("contacts.create")
     .input(
       z.object({
         username: z.string().min(1).max(255),
@@ -182,7 +183,7 @@ export const contactsRouter = createTRPCRouter({
       return contact;
     }),
 
-  update: managerProcedure
+  update: permissionProcedure("contacts.update")
     .input(
       z.object({
         id: z.string().uuid(),
@@ -213,7 +214,7 @@ export const contactsRouter = createTRPCRouter({
       return updated;
     }),
 
-  delete: managerProcedure
+  delete: permissionProcedure("contacts.delete")
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       const contact = await ctx.db.query.contacts.findFirst({

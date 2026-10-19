@@ -5,7 +5,7 @@ import { TRPCError } from "@trpc/server";
 import { createTRPCRouter, ownerProcedure } from "../trpc";
 import { webhookConfigs, webhookDeliveryLogs } from "@/server/db/schema";
 import { checkWebhookAccess } from "@/server/services/usage-limits";
-import { dispatchWebhookEvent } from "@/server/services/webhook-dispatcher";
+import { webhookDeliveryQueue } from "@/server/queues";
 import { encrypt } from "@/lib/crypto";
 import { assertPublicHttpUrl } from "@/lib/ssrf";
 
@@ -149,10 +149,18 @@ export const webhooksOutgoingRouter = createTRPCRouter({
 
       if (!config) return { success: false, error: "Webhook not found" };
 
-      await dispatchWebhookEvent(ctx.db, ctx.creatorId, "contact.updated", {
-        test: true,
-        message: "This is a test webhook from FanFlow",
-        timestamp: new Date().toISOString(),
+      // Solo a ESTE webhook (antes se disparaba un contact.updated real a
+      // todos los webhooks suscritos a ese evento).
+      await webhookDeliveryQueue.add("deliver", {
+        webhookConfigId: config.id,
+        event: "test",
+        payload: {
+          test: true,
+          message: "This is a test webhook from FanFlow",
+          timestamp: new Date().toISOString(),
+        },
+        url: config.url,
+        secret: config.secret,
       });
 
       return { success: true };

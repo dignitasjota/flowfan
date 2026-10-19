@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { eq, and, desc, count, sum, sql, ilike, inArray } from "drizzle-orm";
-import { createTRPCRouter, protectedProcedure } from "../trpc";
+import { createTRPCRouter, protectedProcedure, managerProcedure } from "../trpc";
 import {
   mediaItems,
   mediaCategories,
@@ -91,7 +91,7 @@ export const mediaRouter = createTRPCRouter({
     }),
 
   // Actualizar metadata
-  update: protectedProcedure
+  update: managerProcedure
     .input(
       z.object({
         id: z.string().uuid(),
@@ -121,7 +121,7 @@ export const mediaRouter = createTRPCRouter({
     }),
 
   // Eliminar
-  delete: protectedProcedure
+  delete: managerProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       const item = await ctx.db.query.mediaItems.findFirst({
@@ -278,7 +278,7 @@ export const mediaRouter = createTRPCRouter({
 
   // --- Operaciones en lote ---
 
-  bulkUpdateCategory: protectedProcedure
+  bulkUpdateCategory: managerProcedure
     .input(
       z.object({
         ids: z.array(z.string().uuid()),
@@ -300,7 +300,7 @@ export const mediaRouter = createTRPCRouter({
       return { updated: result.length };
     }),
 
-  bulkAddTags: protectedProcedure
+  bulkAddTags: managerProcedure
     .input(
       z.object({
         ids: z.array(z.string().uuid()),
@@ -332,7 +332,7 @@ export const mediaRouter = createTRPCRouter({
       return { updated };
     }),
 
-  bulkDelete: protectedProcedure
+  bulkDelete: managerProcedure
     .input(
       z.object({
         ids: z.array(z.string().uuid()),
@@ -397,7 +397,7 @@ export const mediaRouter = createTRPCRouter({
       .orderBy(mediaCategories.sortOrder);
   }),
 
-  createCategory: protectedProcedure
+  createCategory: managerProcedure
     .input(
       z.object({
         name: z.string().min(1).max(100),
@@ -416,7 +416,7 @@ export const mediaRouter = createTRPCRouter({
       return cat;
     }),
 
-  updateCategory: protectedProcedure
+  updateCategory: managerProcedure
     .input(
       z.object({
         id: z.string().uuid(),
@@ -442,7 +442,7 @@ export const mediaRouter = createTRPCRouter({
       return updated;
     }),
 
-  deleteCategory: protectedProcedure
+  deleteCategory: managerProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       await ctx.db

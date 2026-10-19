@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { eq, and, desc, gte, lte, sql, count } from "drizzle-orm";
+import { eq, and, desc, gte, lte, sql, count, inArray } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { createTRPCRouter, protectedProcedure } from "../trpc";
 import {
@@ -16,8 +16,15 @@ import { analyzeMessage } from "@/server/services/ai-analysis";
 import { updateSignals, calculateScores, type BehavioralSignals } from "@/server/services/scoring";
 import { updateContactProfile } from "@/server/services/profile-updater";
 import { generateProactiveActions } from "@/server/services/proactive-actions";
-import { PLAN_LIMITS } from "@/server/services/usage-limits";
+import { PLAN_LIMITS, checkAIMessageLimit } from "@/server/services/usage-limits";
+import { resolveAIConfig } from "@/server/services/ai-config-resolver";
+
+/** Tope de mensajes analizados al recalcular un perfil (coste de IA acotado). */
+const RECALCULATE_MAX_MESSAGES = 50;
+const PROACTIVE_MAX_CONTACTS = 2000;
 import { creators } from "@/server/db/schema";
+import { toCsv } from "@/lib/csv";
+import { assertCanAccessContact, assertCanAccessConversation } from "../access";
 
 export const intelligenceRouter = createTRPCRouter({
   getContactScoring: protectedProcedure
@@ -34,6 +41,7 @@ export const intelligenceRouter = createTRPCRouter({
       if (!contact) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Contacto no encontrado" });
       }
+      await assertCanAccessContact(ctx, input.contactId);
 
       const profile = contact.profile;
       if (!profile) {
@@ -82,6 +90,7 @@ export const intelligenceRouter = createTRPCRouter({
       if (!conversation) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Conversación no encontrada" });
       }
+      await assertCanAccessConversation(ctx, input.conversationId);
 
       const msgs = await ctx.db.query.messages.findMany({
         where: eq(messages.conversationId, input.conversationId),
@@ -117,6 +126,7 @@ export const intelligenceRouter = createTRPCRouter({
       if (!contact) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Contacto no encontrado" });
       }
+      await assertCanAccessContact(ctx, input.contactId);
 
       return (contact.profile?.behavioralSignals as BehavioralSignals) ?? null;
     }),
@@ -129,30 +139,26 @@ export const intelligenceRouter = createTRPCRouter({
       })
     )
     .query(async ({ ctx, input }) => {
-      const allContacts = await ctx.db.query.contacts.findMany({
-        where: eq(contacts.creatorId, ctx.creatorId),
-        with: { profile: true },
-      });
-
-      const withProfiles = allContacts
-        .filter((c) => c.profile)
-        .map((c) => ({
-          id: c.id,
-          username: c.username,
-          displayName: c.displayName,
-          platformType: c.platformType,
-          engagementLevel: c.profile!.engagementLevel,
-          paymentProbability: c.profile!.paymentProbability,
-          funnelStage: c.profile!.funnelStage,
-        }));
-
-      withProfiles.sort((a, b) =>
+      // Orden y límite en SQL (antes se cargaban todos los contactos).
+      const orderCol =
         input.sortBy === "engagement"
-          ? b.engagementLevel - a.engagementLevel
-          : b.paymentProbability - a.paymentProbability
-      );
-
-      return withProfiles.slice(0, input.limit);
+          ? contactProfiles.engagementLevel
+          : contactProfiles.paymentProbability;
+      return ctx.db
+        .select({
+          id: contacts.id,
+          username: contacts.username,
+          displayName: contacts.displayName,
+          platformType: contacts.platformType,
+          engagementLevel: contactProfiles.engagementLevel,
+          paymentProbability: contactProfiles.paymentProbability,
+          funnelStage: contactProfiles.funnelStage,
+        })
+        .from(contacts)
+        .innerJoin(contactProfiles, eq(contactProfiles.contactId, contacts.id))
+        .where(eq(contacts.creatorId, ctx.creatorId))
+        .orderBy(desc(orderCol))
+        .limit(input.limit);
     }),
 
   recalculateProfile: protectedProcedure
@@ -164,66 +170,68 @@ export const intelligenceRouter = createTRPCRouter({
           eq(contacts.id, input.contactId),
           eq(contacts.creatorId, ctx.creatorId)
         ),
-        with: { profile: true, conversations: true },
+        with: { conversations: { columns: { id: true } } },
       });
 
       if (!contact) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Contacto no encontrado" });
       }
+      await assertCanAccessContact(ctx, input.contactId);
 
-      const aiConfig = await ctx.db.query.aiConfigs.findFirst({
-        where: eq(aiConfigs.creatorId, ctx.creatorId),
-      });
-
-      if (!aiConfig) {
+      // Config resuelta y DESCIFRADA (antes se pasaba la apiKey cifrada al
+      // proveedor y toda llamada fallaba con 401).
+      const config = await resolveAIConfig(ctx.db, ctx.creatorId, "analysis");
+      if (!config) {
         throw new TRPCError({
           code: "PRECONDITION_FAILED",
           message: "No has configurado tu proveedor de IA.",
         });
       }
 
-      // Get all fan messages across conversations
-      const allMessages: { id: string; content: string; role: string; createdAt: Date; conversationId: string }[] = [];
-      for (const conv of contact.conversations) {
-        const msgs = await ctx.db.query.messages.findMany({
-          where: eq(messages.conversationId, conv.id),
-          orderBy: (m, { asc }) => [asc(m.createdAt)],
-        });
-        allMessages.push(...msgs);
-      }
-
-      const fanMessages = allMessages
-        .filter((m) => m.role === "fan")
-        .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+      const convIds = contact.conversations.map((c) => c.id);
+      const fanMessages = convIds.length
+        ? (
+            await ctx.db.query.messages.findMany({
+              where: and(inArray(messages.conversationId, convIds), eq(messages.role, "fan")),
+              orderBy: (m, { desc }) => [desc(m.createdAt)],
+              limit: RECALCULATE_MAX_MESSAGES,
+              columns: { id: true, content: true },
+            })
+          ).reverse()
+        : [];
 
       if (fanMessages.length === 0) {
         return { message: "No hay mensajes de fan para analizar." };
       }
 
-      // Analyze each fan message and accumulate signals
-      let totalTokens = 0;
-      const config = {
-        provider: aiConfig.provider,
-        model: aiConfig.model,
-        apiKey: aiConfig.apiKey,
-      };
+      // Una sola unidad de cupo por recálculo (cada mensaje es una llamada).
+      await checkAIMessageLimit(ctx.db, ctx.creatorId);
 
-      for (const msg of fanMessages) {
+      // Recalcular DESDE CERO: el primer mensaje parte de señales vacías; los
+      // siguientes acumulan sobre esas. Antes se sumaba sobre las señales ya
+      // existentes y cada recálculo duplicaba contadores y temas.
+      let totalTokens = 0;
+      for (const [idx, msg] of fanMessages.entries()) {
         const analysis = await analyzeMessage(config, {
           message: msg.content,
           platformType: contact.platformType,
         });
-
         totalTokens += analysis.tokensUsed;
-        await updateContactProfile(ctx.db, input.contactId, msg.id, analysis);
+        await updateContactProfile(
+          ctx.db,
+          input.contactId,
+          msg.id,
+          analysis,
+          ctx.creatorId,
+          { messageLength: msg.content.length, resetSignals: idx === 0 }
+        );
       }
 
-      // Log AI usage
       await ctx.db.insert(aiUsageLog).values({
         creatorId: ctx.creatorId,
         requestType: "analysis",
         tokensUsed: totalTokens,
-        modelUsed: `${aiConfig.provider}/${aiConfig.model}`,
+        modelUsed: `${config.provider}/${config.model}`,
       });
 
       return {
@@ -234,14 +242,25 @@ export const intelligenceRouter = createTRPCRouter({
     }),
 
   getDashboardStats: protectedProcedure.query(async ({ ctx }) => {
-    const allContacts = await ctx.db.query.contacts.findMany({
-      where: eq(contacts.creatorId, ctx.creatorId),
-      with: { profile: true },
-    });
+    // Agregados en SQL (antes: todos los contactos + perfiles en memoria).
+    const [totals] = await ctx.db
+      .select({
+        totalContacts: count(),
+        analyzedContacts: count(contactProfiles.id),
+        avgEngagement: sql<number>`COALESCE(AVG(${contactProfiles.engagementLevel}), 0)`,
+        avgPayment: sql<number>`COALESCE(AVG(${contactProfiles.paymentProbability}), 0)`,
+      })
+      .from(contacts)
+      .leftJoin(contactProfiles, eq(contactProfiles.contactId, contacts.id))
+      .where(eq(contacts.creatorId, ctx.creatorId));
 
-    const withProfiles = allContacts.filter((c) => c.profile);
+    const funnelRows = await ctx.db
+      .select({ stage: contactProfiles.funnelStage, count: count() })
+      .from(contacts)
+      .innerJoin(contactProfiles, eq(contactProfiles.contactId, contacts.id))
+      .where(eq(contacts.creatorId, ctx.creatorId))
+      .groupBy(contactProfiles.funnelStage);
 
-    // Funnel distribution
     const funnelDist: Record<string, number> = {
       cold: 0,
       curious: 0,
@@ -250,31 +269,23 @@ export const intelligenceRouter = createTRPCRouter({
       buyer: 0,
       vip: 0,
     };
-    let totalEngagement = 0;
-    let totalPayment = 0;
+    for (const r of funnelRows) funnelDist[r.stage] = r.count;
 
-    for (const c of withProfiles) {
-      const stage = c.profile!.funnelStage;
-      funnelDist[stage] = (funnelDist[stage] ?? 0) + 1;
-      totalEngagement += c.profile!.engagementLevel;
-      totalPayment += c.profile!.paymentProbability;
-    }
-
-    const count = withProfiles.length || 1;
-
-    // Top contacts by payment probability
-    const topByPayment = withProfiles
-      .sort((a, b) => b.profile!.paymentProbability - a.profile!.paymentProbability)
-      .slice(0, 5)
-      .map((c) => ({
-        id: c.id,
-        username: c.username,
-        displayName: c.displayName,
-        platformType: c.platformType,
-        paymentProbability: c.profile!.paymentProbability,
-        funnelStage: c.profile!.funnelStage,
-        engagementLevel: c.profile!.engagementLevel,
-      }));
+    const topByPayment = await ctx.db
+      .select({
+        id: contacts.id,
+        username: contacts.username,
+        displayName: contacts.displayName,
+        platformType: contacts.platformType,
+        paymentProbability: contactProfiles.paymentProbability,
+        funnelStage: contactProfiles.funnelStage,
+        engagementLevel: contactProfiles.engagementLevel,
+      })
+      .from(contacts)
+      .innerJoin(contactProfiles, eq(contactProfiles.contactId, contacts.id))
+      .where(eq(contacts.creatorId, ctx.creatorId))
+      .orderBy(desc(contactProfiles.paymentProbability))
+      .limit(5);
 
     // Recent notifications
     const recentNotifs = await ctx.db.query.notifications.findMany({
@@ -284,10 +295,10 @@ export const intelligenceRouter = createTRPCRouter({
     });
 
     return {
-      totalContacts: allContacts.length,
-      analyzedContacts: withProfiles.length,
-      avgEngagement: Math.round(totalEngagement / count),
-      avgPaymentProbability: Math.round(totalPayment / count),
+      totalContacts: totals?.totalContacts ?? 0,
+      analyzedContacts: totals?.analyzedContacts ?? 0,
+      avgEngagement: Math.round(Number(totals?.avgEngagement ?? 0)),
+      avgPaymentProbability: Math.round(Number(totals?.avgPayment ?? 0)),
       funnelDistribution: funnelDist,
       topByPayment,
       recentNotifications: recentNotifs,
@@ -353,12 +364,15 @@ export const intelligenceRouter = createTRPCRouter({
   }),
 
   getProactiveActions: protectedProcedure.query(async ({ ctx }) => {
+    // Acotado a los contactos con actividad más reciente (antes sin límite).
     const allContacts = await ctx.db.query.contacts.findMany({
       where: and(
         eq(contacts.creatorId, ctx.creatorId),
         eq(contacts.isArchived, false)
       ),
       with: { profile: true },
+      orderBy: (c, { desc }) => [desc(c.lastInteractionAt)],
+      limit: PROACTIVE_MAX_CONTACTS,
     });
 
     return generateProactiveActions(
@@ -437,23 +451,35 @@ export const intelligenceRouter = createTRPCRouter({
         prevTotal > 0 ? Math.round(((currentTotal - prevTotal) / prevTotal) * 100) : currentTotal > 0 ? 100 : 0;
 
       // --- Funnel conversion (snapshot) ---
-      const allContacts = await ctx.db.query.contacts.findMany({
-        where: and(eq(contacts.creatorId, ctx.creatorId), eq(contacts.isArchived, false)),
-        with: { profile: true },
-      });
+      // Agregado en SQL (antes se cargaban todos los contactos con su perfil).
       const stages = ["cold", "curious", "interested", "hot_lead", "buyer", "vip"] as const;
+      const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      const activeContactWhere = and(
+        eq(contacts.creatorId, ctx.creatorId),
+        eq(contacts.isArchived, false)
+      );
+      const funnelRows = await ctx.db
+        .select({
+          stage: sql<string>`COALESCE(${contactProfiles.funnelStage}::text, 'cold')`,
+          count: count(),
+        })
+        .from(contacts)
+        .leftJoin(contactProfiles, eq(contactProfiles.contactId, contacts.id))
+        .where(activeContactWhere)
+        .groupBy(sql`COALESCE(${contactProfiles.funnelStage}::text, 'cold')`);
       const funnelCounts: Record<string, number> = {};
-      for (const s of stages) funnelCounts[s] = 0;
-      for (const c of allContacts) {
-        const stage = c.profile?.funnelStage ?? "cold";
-        funnelCounts[stage] = (funnelCounts[stage] ?? 0) + 1;
+      for (const st of stages) funnelCounts[st] = 0;
+      let totalContactsActive = 0;
+      for (const r of funnelRows) {
+        funnelCounts[r.stage] = (funnelCounts[r.stage] ?? 0) + r.count;
+        totalContactsActive += r.count;
       }
-      const totalActive = allContacts.length || 1;
+      const totalActive = totalContactsActive || 1;
       // Conversion = contacts that have progressed past each stage
       const funnelConversion = stages.slice(0, -1).map((stage, i) => {
         const nextStage = stages[i + 1]!;
-        const atOrBeyond = stages.slice(i + 1).reduce((sum, s) => sum + (funnelCounts[s] ?? 0), 0);
-        const atOrBeyondCurrent = stages.slice(i).reduce((sum, s) => sum + (funnelCounts[s] ?? 0), 0);
+        const atOrBeyond = stages.slice(i + 1).reduce((sum, st) => sum + (funnelCounts[st] ?? 0), 0);
+        const atOrBeyondCurrent = stages.slice(i).reduce((sum, st) => sum + (funnelCounts[st] ?? 0), 0);
         return {
           from: stage,
           to: nextStage,
@@ -462,10 +488,11 @@ export const intelligenceRouter = createTRPCRouter({
       });
 
       // --- Churn rate ---
-      const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-      const inactiveCount = allContacts.filter(
-        (c) => c.lastInteractionAt < thirtyDaysAgo
-      ).length;
+      const [inactiveRow] = await ctx.db
+        .select({ count: count() })
+        .from(contacts)
+        .where(and(activeContactWhere, lte(contacts.lastInteractionAt, thirtyDaysAgo)));
+      const inactiveCount = inactiveRow?.count ?? 0;
       const churnRate = Math.round((inactiveCount / totalActive) * 100);
 
       // --- ROI per platform ---
@@ -481,66 +508,65 @@ export const intelligenceRouter = createTRPCRouter({
         .groupBy(contacts.platformType);
 
       // --- Contacts at risk ---
+      // Had engagement but inactive 14-30 days
       const fourteenDaysAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
-      const atRisk = allContacts
-        .filter((c) => {
-          if (!c.profile) return false;
-          const engagement = c.profile.engagementLevel;
-          const lastInteraction = c.lastInteractionAt;
-          // Had engagement but inactive 14-30 days
-          return engagement > 20 && lastInteraction < fourteenDaysAgo && lastInteraction >= thirtyDaysAgo;
+      const atRiskRows = await ctx.db
+        .select({
+          id: contacts.id,
+          username: contacts.username,
+          displayName: contacts.displayName,
+          platformType: contacts.platformType,
+          lastInteractionAt: contacts.lastInteractionAt,
+          engagementLevel: contactProfiles.engagementLevel,
+          funnelStage: contactProfiles.funnelStage,
         })
-        .sort((a, b) => (b.profile?.engagementLevel ?? 0) - (a.profile?.engagementLevel ?? 0))
-        .slice(0, 10)
-        .map((c) => {
-          const daysSince = Math.floor(
-            (now.getTime() - c.lastInteractionAt.getTime()) / (24 * 60 * 60 * 1000)
-          );
-          return {
-            id: c.id,
-            username: c.username,
-            displayName: c.displayName,
-            platformType: c.platformType,
-            engagementLevel: c.profile!.engagementLevel,
-            funnelStage: c.profile!.funnelStage,
-            daysSinceInteraction: daysSince,
-          };
-        });
+        .from(contacts)
+        .innerJoin(contactProfiles, eq(contactProfiles.contactId, contacts.id))
+        .where(
+          and(
+            activeContactWhere,
+            sql`${contactProfiles.engagementLevel} > 20`,
+            lte(contacts.lastInteractionAt, fourteenDaysAgo),
+            gte(contacts.lastInteractionAt, thirtyDaysAgo)
+          )
+        )
+        .orderBy(desc(contactProfiles.engagementLevel))
+        .limit(10);
+      const atRisk = atRiskRows.map((c) => ({
+        id: c.id,
+        username: c.username,
+        displayName: c.displayName,
+        platformType: c.platformType,
+        engagementLevel: c.engagementLevel,
+        funnelStage: c.funnelStage,
+        daysSinceInteraction: Math.floor(
+          (now.getTime() - c.lastInteractionAt.getTime()) / (24 * 60 * 60 * 1000)
+        ),
+      }));
 
       // --- Average creator response time (last 30 days) ---
-      const recentConversations = await ctx.db.query.conversations.findMany({
-        where: and(
-          eq(conversations.creatorId, ctx.creatorId),
-          gte(conversations.lastMessageAt, thirtyDaysAgo)
-        ),
-        columns: { id: true },
-        limit: 500,
-      });
-
-      let totalResponseMs = 0;
-      let responseCount = 0;
-
-      for (const conv of recentConversations) {
-        const msgs = await ctx.db.query.messages.findMany({
-          where: eq(messages.conversationId, conv.id),
-          orderBy: (m, { asc }) => [asc(m.createdAt)],
-          columns: { role: true, createdAt: true },
-        });
-
-        for (let i = 1; i < msgs.length; i++) {
-          if (msgs[i - 1]!.role === "fan" && msgs[i]!.role === "creator") {
-            const diff = msgs[i]!.createdAt.getTime() - msgs[i - 1]!.createdAt.getTime();
-            if (diff > 0 && diff < 24 * 60 * 60 * 1000) {
-              // Ignore >24h gaps
-              totalResponseMs += diff;
-              responseCount++;
-            }
-          }
-        }
-      }
-
+      // Una sola query con LAG() en vez de cargar los mensajes de hasta 500
+      // conversaciones una a una (N+1). Solo pares fan→creador con <24h.
+      const responseRows = await ctx.db.execute<{ avg_ms: string | number | null; n: string | number }>(sql`
+        SELECT AVG(diff_ms) AS avg_ms, COUNT(*) AS n FROM (
+          SELECT
+            EXTRACT(EPOCH FROM (m.created_at - LAG(m.created_at) OVER w)) * 1000 AS diff_ms,
+            m.role AS role,
+            LAG(m.role) OVER w AS prev_role
+          FROM ${messages} m
+          JOIN ${conversations} c ON c.id = m.conversation_id
+          WHERE c.creator_id = ${ctx.creatorId}
+            AND m.created_at >= ${thirtyDaysAgo}
+          WINDOW w AS (PARTITION BY m.conversation_id ORDER BY m.created_at)
+        ) t
+        WHERE t.prev_role = 'fan' AND t.role = 'creator'
+          AND t.diff_ms > 0 AND t.diff_ms < 86400000
+      `);
+      const responseRow = (responseRows as unknown as { avg_ms: string | number | null; n: string | number }[])[0];
       const avgResponseMinutes =
-        responseCount > 0 ? Math.round(totalResponseMs / responseCount / 60000) : null;
+        responseRow && Number(responseRow.n) > 0 && responseRow.avg_ms !== null
+          ? Math.round(Number(responseRow.avg_ms) / 60000)
+          : null;
 
       return {
         revenueTrend,
@@ -602,13 +628,8 @@ export const intelligenceRouter = createTRPCRouter({
       }));
 
       if (input.format === "csv") {
-        const headers = Object.keys(rows[0] ?? {}).join(",");
-        const lines = rows.map((r) =>
-          Object.values(r)
-            .map((v) => `"${String(v).replace(/"/g, '""')}"`)
-            .join(",")
-        );
-        return { data: [headers, ...lines].join("\n"), format: "csv" as const };
+        const headers = Object.keys(rows[0] ?? {});
+        return { data: toCsv(headers, rows), format: "csv" as const };
       }
 
       return { data: JSON.stringify(rows, null, 2), format: "json" as const };
@@ -708,6 +729,7 @@ export const intelligenceRouter = createTRPCRouter({
       if (!contact) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Contacto no encontrado" });
       }
+      await assertCanAccessContact(ctx, input.contactId);
 
       const profile = await ctx.db.query.contactProfiles.findFirst({
         where: eq(contactProfiles.contactId, input.contactId),

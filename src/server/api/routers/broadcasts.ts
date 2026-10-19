@@ -25,8 +25,10 @@ const logger = createChildLogger("broadcasts-router");
 
 const platformTypeSchema = z.enum(platformTypeEnum.enumValues);
 
+const broadcastJobId = (id: string) => `broadcast-${id}`;
+
 export const broadcastsRouter = createTRPCRouter({
-  list: protectedProcedure
+  list: managerProcedure
     .input(
       z.object({
         limit: z.number().min(1).max(100).default(50),
@@ -60,7 +62,7 @@ export const broadcastsRouter = createTRPCRouter({
       };
     }),
 
-  getById: protectedProcedure
+  getById: managerProcedure
     .input(z.object({ id: z.string().uuid() }))
     .query(async ({ ctx, input }) => {
       const broadcast = await ctx.db.query.broadcasts.findFirst({
@@ -203,7 +205,7 @@ export const broadcastsRouter = createTRPCRouter({
       return { success: true };
     }),
 
-  previewSegment: protectedProcedure
+  previewSegment: managerProcedure
     .input(z.object({ segmentId: z.string().uuid() }))
     .query(async ({ ctx, input }) => {
       const segment = await ctx.db.query.segments.findFirst({
@@ -291,10 +293,11 @@ export const broadcastsRouter = createTRPCRouter({
         )
         .returning();
 
-      await broadcastProcessingQueue.add("process-broadcast", {
-        broadcastId: input.id,
-        creatorId: ctx.creatorId,
-      });
+      await broadcastProcessingQueue.add(
+        "process-broadcast",
+        { broadcastId: input.id, creatorId: ctx.creatorId },
+        { jobId: broadcastJobId(input.id) }
+      );
 
       logger.info({ broadcastId: input.id, totalRecipients: result.total }, "Broadcast enqueued for processing");
 
@@ -353,13 +356,12 @@ export const broadcastsRouter = createTRPCRouter({
         )
         .returning();
 
+      // jobId determinista: el scheduler del worker (checkScheduledBroadcasts)
+      // encola con el mismo id, así no se procesa dos veces.
       await broadcastProcessingQueue.add(
         "process-broadcast",
-        {
-          broadcastId: input.id,
-          creatorId: ctx.creatorId,
-        },
-        { delay }
+        { broadcastId: input.id, creatorId: ctx.creatorId },
+        { delay, jobId: broadcastJobId(input.id) }
       );
 
       logger.info({ broadcastId: input.id, scheduledAt: input.scheduledAt }, "Broadcast scheduled");
@@ -390,6 +392,15 @@ export const broadcastsRouter = createTRPCRouter({
           code: "BAD_REQUEST",
           message: "Solo se pueden cancelar broadcasts en estado borrador, programado o procesando",
         });
+      }
+
+      // Quitar el job retrasado/pendiente: antes un broadcast programado y
+      // cancelado se enviaba igualmente al llegar la hora.
+      try {
+        const job = await broadcastProcessingQueue.getJob(broadcastJobId(input.id));
+        if (job) await job.remove();
+      } catch (err) {
+        logger.warn({ err, broadcastId: input.id }, "Could not remove broadcast job");
       }
 
       const [updated] = await ctx.db
@@ -437,7 +448,7 @@ export const broadcastsRouter = createTRPCRouter({
       return created;
     }),
 
-  getRecipients: protectedProcedure
+  getRecipients: managerProcedure
     .input(
       z.object({
         broadcastId: z.string().uuid(),

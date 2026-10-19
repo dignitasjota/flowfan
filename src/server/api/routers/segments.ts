@@ -1,6 +1,7 @@
 import { z } from "zod";
+import { TRPCError } from "@trpc/server";
 import { eq, and, desc, count, sql, inArray } from "drizzle-orm";
-import { createTRPCRouter, protectedProcedure } from "../trpc";
+import { createTRPCRouter, protectedProcedure, managerProcedure } from "../trpc";
 import { segments, segmentMembers, contacts } from "@/server/db/schema";
 import { checkSegmentLimit } from "@/server/services/usage-limits";
 import { evaluateSegment, type SegmentFilter } from "@/server/services/segment-evaluator";
@@ -41,7 +42,7 @@ export const segmentsRouter = createTRPCRouter({
       return { ...segment, membersCount: membersCount?.total ?? 0 };
     }),
 
-  create: protectedProcedure
+  create: managerProcedure
     .input(
       z.object({
         name: z.string().min(1).max(255),
@@ -71,7 +72,7 @@ export const segmentsRouter = createTRPCRouter({
       return created;
     }),
 
-  update: protectedProcedure
+  update: managerProcedure
     .input(
       z.object({
         id: z.string().uuid(),
@@ -119,7 +120,7 @@ export const segmentsRouter = createTRPCRouter({
       return updated;
     }),
 
-  delete: protectedProcedure
+  delete: managerProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       // Don't allow deleting predefined segments
@@ -131,7 +132,10 @@ export const segmentsRouter = createTRPCRouter({
       });
 
       if (existing?.isPredefined) {
-        throw new Error("No se pueden eliminar segmentos predefinidos");
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "No se pueden eliminar segmentos predefinidos",
+        });
       }
 
       await ctx.db
@@ -221,7 +225,7 @@ export const segmentsRouter = createTRPCRouter({
       return { count: result.total };
     }),
 
-  addMembers: protectedProcedure
+  addMembers: managerProcedure
     .input(
       z.object({
         segmentId: z.string().uuid(),
@@ -238,27 +242,40 @@ export const segmentsRouter = createTRPCRouter({
       });
 
       if (!segment || (segment.type !== "static" && segment.type !== "mixed")) {
-        throw new Error("Solo se pueden agregar miembros a segmentos estáticos o mixtos");
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Solo se pueden agregar miembros a segmentos estáticos o mixtos",
+        });
       }
 
-      let added = 0;
-      for (const contactId of input.contactIds) {
-        try {
-          await ctx.db.insert(segmentMembers).values({
+      if (input.contactIds.length === 0) return { added: 0 };
+
+      // Solo contactos del tenant (antes se aceptaba cualquier UUID y un
+      // broadcast podía acabar enviando a fans de otro creador).
+      const owned = await ctx.db
+        .select({ id: contacts.id })
+        .from(contacts)
+        .where(
+          and(eq(contacts.creatorId, ctx.creatorId), inArray(contacts.id, input.contactIds))
+        );
+      if (owned.length === 0) return { added: 0 };
+
+      const inserted = await ctx.db
+        .insert(segmentMembers)
+        .values(
+          owned.map((c) => ({
             segmentId: input.segmentId,
-            contactId,
-            membershipType: "included",
-          });
-          added++;
-        } catch {
-          // ON CONFLICT DO NOTHING — unique constraint violation
-        }
-      }
+            contactId: c.id,
+            membershipType: "included" as const,
+          }))
+        )
+        .onConflictDoNothing()
+        .returning({ id: segmentMembers.id });
 
-      return { added };
+      return { added: inserted.length };
     }),
 
-  removeMembers: protectedProcedure
+  removeMembers: managerProcedure
     .input(
       z.object({
         segmentId: z.string().uuid(),
@@ -266,6 +283,12 @@ export const segmentsRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      const segment = await ctx.db.query.segments.findFirst({
+        where: and(eq(segments.id, input.segmentId), eq(segments.creatorId, ctx.creatorId)),
+        columns: { id: true },
+      });
+      if (!segment) throw new TRPCError({ code: "NOT_FOUND", message: "Segmento no encontrado" });
+
       const result = await ctx.db
         .delete(segmentMembers)
         .where(
@@ -279,7 +302,7 @@ export const segmentsRouter = createTRPCRouter({
       return { removed: result.length };
     }),
 
-  ensurePredefined: protectedProcedure.mutation(async ({ ctx }) => {
+  ensurePredefined: managerProcedure.mutation(async ({ ctx }) => {
     const predefinedDefs = [
       {
         predefinedKey: "hot_fans",

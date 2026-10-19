@@ -14,10 +14,12 @@ export async function middleware(request: NextRequest) {
   response.headers.set("x-next-pathname", pathname);
 
   // Check JWT token
-  const token = await getToken({
+  const rawToken = await getToken({
     req: request,
     secret: process.env.NEXTAUTH_SECRET,
   });
+  // Token de una cuenta eliminada (ver revalidación en server/auth.ts).
+  const token = rawToken && !rawToken.revoked ? rawToken : null;
 
   // Protected routes: redirect to login if no session
   const isPublicPath = PUBLIC_PATHS.some((p) => pathname.startsWith(p));
@@ -30,13 +32,13 @@ export async function middleware(request: NextRequest) {
   // Admin routes: require role === "admin"
   const isAdminPath = ADMIN_PATHS.some((p) => pathname.startsWith(p));
   if (isAdminPath) {
-    if (!token || (token as any).role !== "admin") {
+    if (!token || token.role !== "admin") {
       return NextResponse.redirect(new URL("/conversations", request.url));
     }
   }
 
   // Onboarding redirect: if logged in and onboarding not completed
-  if (token && !(token as any).onboardingCompleted && !pathname.startsWith("/onboarding")) {
+  if (token && !token.onboardingCompleted && !pathname.startsWith("/onboarding")) {
     const dashboardPaths = ["/conversations", "/contacts", "/settings", "/billing", "/dashboard"];
     const isDashboardPath = dashboardPaths.some((p) => pathname.startsWith(p));
     if (isDashboardPath) {
@@ -46,7 +48,9 @@ export async function middleware(request: NextRequest) {
 
   // Auth routes: redirect to dashboard if already logged in
   const isAuthPath = AUTH_PATHS.some((p) => pathname.startsWith(p));
-  if (isAuthPath && token) {
+  // `?expired=1`: el layout detectó una sesión inválida (cuenta eliminada o
+  // revocada). No rebotar a /conversations o se produciría un bucle.
+  if (isAuthPath && token && !request.nextUrl.searchParams.has("expired")) {
     return NextResponse.redirect(new URL("/conversations", request.url));
   }
 

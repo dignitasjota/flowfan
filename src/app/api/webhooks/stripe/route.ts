@@ -168,7 +168,11 @@ export async function POST(req: NextRequest) {
       }
     }
   } catch (err) {
-    log.error({ err }, "Error processing webhook event");
+    // 500 → Stripe reintenta con backoff. Antes se devolvía 200 y un fallo
+    // transitorio (BD caída) dejaba el plan desincronizado para siempre.
+    // Los handlers son idempotentes (UPDATE por creator / onConflictDoNothing).
+    log.error({ err, eventId: event.id, type: event.type }, "Error processing webhook event");
+    return NextResponse.json({ error: "Processing failed" }, { status: 500 });
   }
 
   return NextResponse.json({ received: true });

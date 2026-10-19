@@ -1,10 +1,11 @@
 import { Resend } from "resend";
 import { createChildLogger } from "@/lib/logger";
+import { escapeHtml } from "@/lib/html-escape";
 
 const log = createChildLogger("email-service");
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
-const EMAIL_FROM = process.env.EMAIL_FROM ?? "FlowFan <noreply@flowfan.app>";
+const EMAIL_FROM = process.env.EMAIL_FROM || "FlowFan <noreply@flowfan.app>";
 
 let resend: Resend | null = null;
 
@@ -67,7 +68,7 @@ function wrapTemplate(title: string, content: string): string {
 
 function buttonHtml(text: string, url: string): string {
   return `<div style="text-align:center;margin:24px 0;">
-    <a href="${url}" style="display:inline-block;background:#6366f1;color:white;padding:12px 32px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px;">${text}</a>
+    <a href="${escapeHtml(url)}" style="display:inline-block;background:#6366f1;color:white;padding:12px 32px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px;">${text}</a>
   </div>`;
 }
 
@@ -107,13 +108,13 @@ export type DailySummaryData = {
 export async function sendDailySummary(to: string, data: DailySummaryData): Promise<void> {
   const html = wrapTemplate(
     `Resumen diario — ${data.date}`,
-    `<p>Hola ${data.creatorName}, aqui tienes tu resumen del dia:</p>
+    `<p>Hola ${escapeHtml(data.creatorName)}, aqui tienes tu resumen del dia:</p>
     <table style="width:100%;border-collapse:collapse;margin:16px 0;">
       <tr><td style="padding:8px 0;color:#9ca3af;">Nuevos contactos</td><td style="padding:8px 0;text-align:right;font-weight:600;color:white;">${data.newContacts}</td></tr>
       <tr><td style="padding:8px 0;color:#9ca3af;">Mensajes recibidos</td><td style="padding:8px 0;text-align:right;font-weight:600;color:white;">${data.totalMessages}</td></tr>
       <tr><td style="padding:8px 0;color:#9ca3af;">Contactos en riesgo</td><td style="padding:8px 0;text-align:right;font-weight:600;color:${data.atRiskCount > 0 ? "#ef4444" : "#22c55e"};">${data.atRiskCount}</td></tr>
     </table>
-    ${data.topAction ? `<p style="background:#374151;padding:12px;border-radius:8px;border-left:3px solid #6366f1;"><strong>Accion recomendada:</strong> ${data.topAction}</p>` : ""}
+    ${data.topAction ? `<p style="background:#374151;padding:12px;border-radius:8px;border-left:3px solid #6366f1;"><strong>Accion recomendada:</strong> ${escapeHtml(data.topAction)}</p>` : ""}
     ${buttonHtml("Ir a FlowFan", process.env.NEXTAUTH_URL ?? "https://app.flowfan.app")}`
   );
   await send(to, `Resumen diario — ${data.date}`, html);
@@ -131,12 +132,12 @@ export type WeeklySummaryData = {
 
 export async function sendWeeklySummary(to: string, data: WeeklySummaryData): Promise<void> {
   const topContactsHtml = data.topContacts.length > 0
-    ? data.topContacts.map((c) => `<li style="margin:4px 0;">${c.name} <span style="color:#9ca3af;">(${c.stage})</span></li>`).join("")
+    ? data.topContacts.map((c) => `<li style="margin:4px 0;">${escapeHtml(c.name)} <span style="color:#9ca3af;">(${escapeHtml(c.stage)})</span></li>`).join("")
     : "<li style=\"color:#9ca3af;\">Sin contactos activos esta semana</li>";
 
   const html = wrapTemplate(
     `Resumen semanal — ${data.weekStart} a ${data.weekEnd}`,
-    `<p>Hola ${data.creatorName}, aqui tienes tu resumen semanal:</p>
+    `<p>Hola ${escapeHtml(data.creatorName)}, aqui tienes tu resumen semanal:</p>
     <table style="width:100%;border-collapse:collapse;margin:16px 0;">
       <tr><td style="padding:8px 0;color:#9ca3af;">Nuevos contactos</td><td style="padding:8px 0;text-align:right;font-weight:600;color:white;">${data.newContacts}</td></tr>
       <tr><td style="padding:8px 0;color:#9ca3af;">Revenue</td><td style="padding:8px 0;text-align:right;font-weight:600;color:#22c55e;">${data.revenueEur.toFixed(2)}€</td></tr>
@@ -156,12 +157,12 @@ export type ChurnAlertData = {
 
 export async function sendChurnAlert(to: string, data: ChurnAlertData): Promise<void> {
   const contactRows = data.contacts
-    .map((c) => `<tr><td style="padding:6px 0;color:white;">${c.name}</td><td style="padding:6px 0;text-align:center;color:#ef4444;font-weight:600;">${c.score}</td><td style="padding:6px 0;text-align:right;color:#9ca3af;">${c.stage}</td></tr>`)
+    .map((c) => `<tr><td style="padding:6px 0;color:white;">${escapeHtml(c.name)}</td><td style="padding:6px 0;text-align:center;color:#ef4444;font-weight:600;">${escapeHtml(c.score)}</td><td style="padding:6px 0;text-align:right;color:#9ca3af;">${escapeHtml(c.stage)}</td></tr>`)
     .join("");
 
   const html = wrapTemplate(
     "Alerta de churn",
-    `<p>Hola ${data.creatorName}, ${data.contacts.length} contacto${data.contacts.length > 1 ? "s" : ""} en riesgo de perderse:</p>
+    `<p>Hola ${escapeHtml(data.creatorName)}, ${data.contacts.length} contacto${data.contacts.length > 1 ? "s" : ""} en riesgo de perderse:</p>
     <table style="width:100%;border-collapse:collapse;margin:16px 0;">
       <tr style="border-bottom:1px solid #374151;"><th style="padding:6px 0;text-align:left;color:#9ca3af;font-weight:500;">Contacto</th><th style="padding:6px 0;text-align:center;color:#9ca3af;font-weight:500;">Riesgo</th><th style="padding:6px 0;text-align:right;color:#9ca3af;font-weight:500;">Etapa</th></tr>
       ${contactRows}

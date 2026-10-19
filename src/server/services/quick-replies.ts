@@ -1,4 +1,5 @@
 import { callAIProvider, type AIConfig } from "./ai";
+import { UNTRUSTED_DATA_RULE, wrapUntrusted } from "./prompt-safety";
 import { createChildLogger } from "@/lib/logger";
 import type { ClassificationResult } from "./message-classifier";
 
@@ -49,12 +50,14 @@ Reglas:
 - La tercera debe ser concisa/rapida
 - Separa cada respuesta con ---
 
+${UNTRUSTED_DATA_RULE}
+
 Responde SOLO con las 3 respuestas separadas por ---`;
 
     const result = await callAIProvider(
       config,
       systemPrompt,
-      [{ role: "user", content: context.message }],
+      [{ role: "user", content: wrapUntrusted("fan_message", context.message) }],
       300
     );
 

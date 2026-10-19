@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { createTRPCRouter, protectedProcedure } from "../trpc";
+import { createTRPCRouter, protectedProcedure, permissionProcedure } from "../trpc";
 import { sequences, sequenceEnrollments, contacts } from "@/server/db/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
 import {
@@ -74,7 +74,7 @@ export const sequencesRouter = createTRPCRouter({
       return { ...sequence, stats, enrollments };
     }),
 
-  create: protectedProcedure
+  create: permissionProcedure("sequences.manage")
     .input(
       z.object({
         name: z.string().min(1).max(255),
@@ -102,7 +102,7 @@ export const sequencesRouter = createTRPCRouter({
       return created;
     }),
 
-  update: protectedProcedure
+  update: permissionProcedure("sequences.manage")
     .input(
       z.object({
         id: z.string().uuid(),
@@ -127,7 +127,7 @@ export const sequencesRouter = createTRPCRouter({
       return { success: true };
     }),
 
-  toggleActive: protectedProcedure
+  toggleActive: permissionProcedure("sequences.manage")
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       const [current] = await ctx.db
@@ -200,7 +200,7 @@ export const sequencesRouter = createTRPCRouter({
       return { enrollments, total: count };
     }),
 
-  cancelEnrollment: protectedProcedure
+  cancelEnrollment: permissionProcedure("sequences.manage")
     .input(z.object({ enrollmentId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       // Verify ownership
@@ -218,7 +218,7 @@ export const sequencesRouter = createTRPCRouter({
       return { success: true };
     }),
 
-  enrollContact: protectedProcedure
+  enrollContact: permissionProcedure("sequences.manage")
     .input(
       z.object({
         sequenceId: z.string().uuid(),

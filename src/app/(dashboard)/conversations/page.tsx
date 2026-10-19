@@ -9,6 +9,7 @@ import { ChatPanel } from "@/components/conversations/chat-panel";
 import { ContactPanel } from "@/components/conversations/contact-panel";
 import { ShortcutsCheatsheet } from "@/components/conversations/shortcuts-cheatsheet";
 import { useConversationShortcuts } from "@/hooks/use-conversation-shortcuts";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 export default function ConversationsPage() {
   const searchParams = useSearchParams();
@@ -29,7 +30,14 @@ export default function ConversationsPage() {
   }, [searchParams]);
 
   const utils = trpc.useUtils();
-  const conversationsQuery = trpc.conversations.list.useQuery();
+  const PAGE_SIZE = 100;
+  const [listLimit, setListLimit] = useState(PAGE_SIZE);
+  const conversationsQuery = trpc.conversations.list.useQuery(
+    { limit: listLimit },
+    { placeholderData: (prev) => prev }
+  );
+  const canLoadMore =
+    (conversationsQuery.data?.length ?? 0) >= listLimit && listLimit < 1000;
   const conversationQuery = trpc.conversations.getById.useQuery(
     { id: selectedConversationId! },
     { enabled: !!selectedConversationId }
@@ -49,6 +57,7 @@ export default function ConversationsPage() {
   const hasConversation = selectedConversationId && conversationQuery.data;
 
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [confirmArchive, setConfirmArchive] = useState(false);
 
   const orderedIds = useMemo(
     () => (conversationsQuery.data ?? []).map((c) => c.id),
@@ -82,15 +91,13 @@ export default function ConversationsPage() {
     onReply: () => {
       window.dispatchEvent(new CustomEvent("fanflow:focus-reply"));
     },
+    // Pide confirmación: un atajo de una sola tecla no debe archivar sin aviso.
     onArchive: () => {
       if (!selectedConversationId) return;
-      archiveMutation.mutate({
-        id: selectedConversationId,
-        status: "archived",
-      });
+      setConfirmArchive(true);
     },
     onShowHelp: () => setShowShortcuts(true),
-  });
+  }, !confirmArchive && !showShortcuts);
 
   return (
     <div className="flex h-full">
@@ -106,6 +113,8 @@ export default function ConversationsPage() {
           selectedId={selectedConversationId}
           onSelect={handleSelectConversation}
           isLoading={conversationsQuery.isLoading}
+          onLoadMore={canLoadMore ? () => setListLimit((l) => l + PAGE_SIZE) : undefined}
+          isLoadingMore={conversationsQuery.isFetching && !conversationsQuery.isLoading}
         />
       </div>
 
@@ -163,6 +172,21 @@ export default function ConversationsPage() {
             onBack={() => setShowContactPanel(false)}
           />
         </div>
+      )}
+
+      {confirmArchive && selectedConversationId && (
+        <ConfirmDialog
+          title="Archivar conversación"
+          message="¿Archivar esta conversación? Podrás restaurarla desde la pestaña Archivadas."
+          confirmLabel="Archivar"
+          isDanger={false}
+          isPending={archiveMutation.isPending}
+          onCancel={() => setConfirmArchive(false)}
+          onConfirm={() => {
+            archiveMutation.mutate({ id: selectedConversationId, status: "archived" });
+            setConfirmArchive(false);
+          }}
+        />
       )}
 
       <ShortcutsCheatsheet

@@ -1,4 +1,5 @@
 import { type AIConfig, callAIProvider } from "./ai";
+import { UNTRUSTED_DATA_RULE, wrapTranscript } from "./prompt-safety";
 import { parseTolerantJSON } from "./ai-json-parser";
 import { getLanguageInstruction } from "./language-utils";
 
@@ -114,12 +115,10 @@ export async function generateContactReport(
 
   if (input.recentMessages.length > 0) {
     contextParts.push(`\nUltimos mensajes:`);
-    for (const m of input.recentMessages.slice(-10)) {
-      contextParts.push(`${m.role === "fan" ? "Fan" : "Creador"}: ${m.content}`);
-    }
+    contextParts.push(wrapTranscript(input.recentMessages.slice(-10)));
   }
 
-  let systemPrompt = REPORT_SYSTEM_PROMPT;
+  let systemPrompt = `${REPORT_SYSTEM_PROMPT}\n${UNTRUSTED_DATA_RULE}`;
   if (input.language) {
     systemPrompt += `\n\n${getLanguageInstruction(input.language)}`;
   }

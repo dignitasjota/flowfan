@@ -26,7 +26,7 @@ export async function GET(
   const item = await db.query.mediaItems.findFirst({
     where: and(
       eq(mediaItems.id, id),
-      eq(mediaItems.creatorId, session.user.id)
+      eq(mediaItems.creatorId, session.user.activeCreatorId ?? session.user.id)
     ),
   });
 

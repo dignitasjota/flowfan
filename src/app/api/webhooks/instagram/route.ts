@@ -120,6 +120,15 @@ export async function POST(request: NextRequest) {
       if (change.field !== "comments") continue;
       const v = change.value;
       if (!v?.id || !v.text || !v.from?.username || !v.media?.id) continue;
+      // Las respuestas del propio creador también llegan por el webhook: no
+      // son comentarios de fans (antes se ingerían y se les creaba contacto).
+      if (v.from.id && v.from.id === igUserId) continue;
+      if (
+        account.accountUsername &&
+        v.from.username.toLowerCase() === account.accountUsername.toLowerCase()
+      ) {
+        continue;
+      }
 
       // Find or create the parent social post (the IG media)
       let post = await db.query.socialPosts.findFirst({

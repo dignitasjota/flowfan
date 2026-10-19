@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { hash } from "bcryptjs";
 import { randomBytes } from "crypto";
-import { eq } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { db } from "@/server/db";
 import { creators } from "@/server/db/schema";
 import { z } from "zod";
@@ -25,7 +25,7 @@ const passwordSchema = z
 
 const registerSchema = z.object({
   name: z.string().min(1).max(255),
-  email: z.string().email(),
+  email: z.string().trim().toLowerCase().pipe(z.string().email()),
   password: passwordSchema,
   ref: z.string().max(20).optional(),
 });
@@ -76,7 +76,7 @@ export async function POST(req: Request) {
 
   // Check if email already exists
   const existing = await db.query.creators.findFirst({
-    where: eq(creators.email, email),
+    where: sql`lower(${creators.email}) = ${email}`,
   });
 
   if (existing) {

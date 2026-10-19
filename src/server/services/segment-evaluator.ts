@@ -118,7 +118,9 @@ function buildFilterCondition(filter: SegmentFilter, creatorId: string): SQL {
   if (CONTACT_FIELDS.has(field)) {
     // Tags special case
     if (field === "tags" && operator === "contains") {
-      return sql`${sql.raw(String(value))} = ANY(${contacts.tags})`;
+      // Valor parametrizado: antes se interpolaba con sql.raw y permitía
+      // inyección SQL (p.ej. `'x' OR true` anulaba el filtro por creator_id).
+      return sql`${String(value)} = ANY(${contacts.tags})`;
     }
 
     // Date fields
@@ -331,6 +333,18 @@ export async function evaluateSegment(
 
   const whereClause = and(...conditions)!;
 
+  // Miembros añadidos manualmente a un segmento mixto. Siempre acotados al
+  // tenant y a contactos no archivados (antes el OR sin paréntesis y sin
+  // filtro de creator dejaba pasar contactos de otros tenants).
+  const includedMembersSubquery = sql`(SELECT ${segmentMembers.contactId} FROM ${segmentMembers} WHERE ${segmentMembers.segmentId} = ${segmentId ?? null} AND ${segmentMembers.membershipType} = 'included')`;
+  const includedCondition = and(
+    eq(contacts.creatorId, creatorId),
+    eq(contacts.isArchived, false),
+    inArray(contacts.id, includedMembersSubquery),
+  )!;
+  const mixedIncludeRaw =
+    segmentType === "mixed" && segmentId ? sql`OR (${includedCondition})` : sql``;
+
   // Build the FROM + JOINs as a raw SQL fragment when revenue join is needed
   if (withRevenue) {
     // Use raw SQL for the full query when we need the revenue subquery
@@ -352,11 +366,8 @@ export async function evaluateSegment(
         FROM ${contacts}
         LEFT JOIN ${contactProfiles} ON ${contactProfiles.contactId} = ${contacts.id}
         ${revenueSubquery}
-        WHERE ${whereClause}
-        ${segmentType === "mixed" && segmentId
-          ? sql`OR ${contacts.id} IN (SELECT ${segmentMembers.contactId} FROM ${segmentMembers} WHERE ${segmentMembers.segmentId} = ${segmentId} AND ${segmentMembers.membershipType} = 'included')`
-          : sql``
-        }
+        WHERE (${whereClause})
+        ${mixedIncludeRaw}
       `);
       return { contactIds: [], total: (row as unknown as { total: number })?.total ?? 0 };
     }
@@ -367,11 +378,8 @@ export async function evaluateSegment(
       FROM ${contacts}
       LEFT JOIN ${contactProfiles} ON ${contactProfiles.contactId} = ${contacts.id}
       ${revenueSubquery}
-      WHERE ${whereClause}
-      ${segmentType === "mixed" && segmentId
-        ? sql`OR ${contacts.id} IN (SELECT ${segmentMembers.contactId} FROM ${segmentMembers} WHERE ${segmentMembers.segmentId} = ${segmentId} AND ${segmentMembers.membershipType} = 'included')`
-        : sql``
-      }
+      WHERE (${whereClause})
+      ${mixedIncludeRaw}
       ORDER BY ${contacts.lastInteractionAt} DESC
       ${limit ? sql`LIMIT ${limit}` : sql``}
       ${offset ? sql`OFFSET ${offset}` : sql``}
@@ -385,11 +393,8 @@ export async function evaluateSegment(
       FROM ${contacts}
       LEFT JOIN ${contactProfiles} ON ${contactProfiles.contactId} = ${contacts.id}
       ${revenueSubquery}
-      WHERE ${whereClause}
-      ${segmentType === "mixed" && segmentId
-        ? sql`OR ${contacts.id} IN (SELECT ${segmentMembers.contactId} FROM ${segmentMembers} WHERE ${segmentMembers.segmentId} = ${segmentId} AND ${segmentMembers.membershipType} = 'included')`
-        : sql``
-      }
+      WHERE (${whereClause})
+      ${mixedIncludeRaw}
     `);
 
     return { contactIds, total: (countRow as unknown as { total: number })?.total ?? 0 };
@@ -400,13 +405,7 @@ export async function evaluateSegment(
   // Mixed: include manually added members via OR
   const mixedIncludeCondition =
     segmentType === "mixed" && segmentId
-      ? or(
-          whereClause,
-          inArray(
-            contacts.id,
-            sql`(SELECT ${segmentMembers.contactId} FROM ${segmentMembers} WHERE ${segmentMembers.segmentId} = ${segmentId} AND ${segmentMembers.membershipType} = 'included')`,
-          ),
-        )
+      ? or(whereClause, includedCondition)
       : whereClause;
 
   if (countOnly) {

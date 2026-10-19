@@ -6,6 +6,7 @@ import {
   type SuggestionVariant,
 } from "./ai";
 import { getLanguageInstruction } from "./language-utils";
+import { wrapUntrusted } from "./prompt-safety";
 
 type PersonalityConfig = {
   role?: string;
@@ -147,13 +148,19 @@ function buildConversationMessages(input: CommentSuggestionInput) {
   for (const c of input.thread.slice(-10)) {
     msgs.push({
       role: c.role === "fan" ? "user" : "assistant",
-      content: `[${c.authorUsername}] ${c.content}`,
+      content:
+        c.role === "fan"
+          ? wrapUntrusted("comment", `[${c.authorUsername}] ${c.content}`)
+          : c.content,
     });
   }
 
   msgs.push({
     role: "user",
-    content: `[${input.fanComment.authorUsername}] ${input.fanComment.content}`,
+    content: wrapUntrusted(
+      "comment",
+      `[${input.fanComment.authorUsername}] ${input.fanComment.content}`
+    ),
   });
 
   return msgs;

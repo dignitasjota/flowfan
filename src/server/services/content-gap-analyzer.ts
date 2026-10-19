@@ -58,6 +58,16 @@ export type AggregatedData = {
 // Phase 1: Aggregation (no AI)
 // ============================================================
 
+/** Caída >30% de engagement entre el antepenúltimo y el último snapshot. */
+export function hasEngagementDrop(scoringHistory: unknown): boolean {
+  if (!Array.isArray(scoringHistory) || scoringHistory.length < 3) return false;
+  const recent = scoringHistory
+    .slice(-3)
+    .map((h) => Number((h as { engagementLevel?: number })?.engagementLevel));
+  if (recent.some((v) => !Number.isFinite(v))) return false;
+  return recent[0]! > 0 && recent[2]! < recent[0]! * 0.7;
+}
+
 export async function aggregateConversationData(
   db: any,
   creatorId: string,
@@ -109,13 +119,11 @@ export async function aggregateConversationData(
       }
     }
 
-    // Detect engagement drops via scoring history
-    const history = profile.scoringHistory as { engagement?: number[] } | null;
-    if (history?.engagement && history.engagement.length >= 3) {
-      const recent = history.engagement.slice(-3);
-      if (recent[2]! < recent[0]! * 0.7) {
-        engagementDropCount += 1;
-      }
+    // Detect engagement drops via scoring history. El historial es un array
+    // de snapshots { engagementLevel, ... } (antes se esperaba
+    // `{ engagement: number[] }` y el contador siempre era 0).
+    if (hasEngagementDrop(profile.scoringHistory)) {
+      engagementDropCount += 1;
     }
   }
 

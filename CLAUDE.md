@@ -21,6 +21,7 @@ SaaS CRM para creadores de contenido con asistente IA para gestionar conversacio
 - `npm run db:generate` — generate migrations
 - `npm run db:migrate` — run migrations
 - `npm run db:studio` — Drizzle Studio (DB browser)
+- `npm run db:ensure-search` — crea/repara el trigger de full-text search de `messages` (necesario tras `db:push`; `db:migrate` ya lo incluye en `0010_schema_sync.sql`)
 
 ## Development
 
@@ -38,6 +39,9 @@ SaaS CRM para creadores de contenido con asistente IA para gestionar conversacio
 - Personality configuration per platform stored as JSONB
 - Team support with base roles (`owner`, `manager`, `chatter`) + custom roles with granular permissions
 - `ownerProcedure` for owner-only actions, `permissionProcedure(...perms)` for permission-gated actions
+- **Alcance de conversaciones/contactos** (`src/server/api/access.ts`): se resuelve por permisos (`conversations.read_all` → todo, `read_assigned` → solo asignadas, ninguno → nada), respetando roles personalizados. Usar `assertCanAccessConversation` / `assertCanAccessContact` en endpoints por id y `conversationScopeFilter` / `contactScopeFilter` en listados. No volver a comprobar `teamRole === "chatter"` a mano.
+- **`permissionProcedure`** se usa en contactos (create/update/delete), envío de mensajes y sugerencias IA (`conversations.send_messages`), asignaciones (`conversations.assign`), equipo (`team.manage_members` / `team.manage_roles`), secuencias (`sequences.manage`) y API keys (`api.manage_keys`). Los managers incluyen `contacts.delete` por defecto.
+- **Sesión revalidada**: el callback `jwt` de `src/server/auth.ts` relee cada 60 s rol, existencia de la cuenta y membresía de equipo; una cuenta borrada deja la sesión sin `user` (layouts redirigen a `/login?expired=1`).
 - Real-time collaboration via SSE + Redis Pub/Sub (presence, typing, viewing indicators)
 - Team audit log for tracking all team member actions
 
@@ -1024,7 +1028,7 @@ When adding a new mutation, follow the same pattern: import `logTeamAction`, gat
 
 - **Vitest** for unit tests under `__tests__/unit/`.
 - **Mocks**: services that touch `db`, `fetch`, BullMQ queues or webhook dispatcher are mocked at the module boundary (`vi.mock("@/...")`) so tests stay deterministic and fast.
-- Pre-commit hook (lint-staged → `vitest run --run`) executes the test suite on every commit; commits with failing tests are rejected before reaching git history.
+- Pre-commit hook: `lint-staged` (ESLint sobre los ficheros staged) + `vitest run` (suite completa) en cada commit; commits con errores de lint o tests en rojo se rechazan. ESLint usa flat config (`eslint.config.mjs`) y se ejecuta con `npm run lint` (`next lint` está deprecado).
 
 ### Recently added coverage
 
@@ -1190,4 +1194,10 @@ Utilidades reutilizables introducidas/consolidadas durante la remediación de la
 - **`src/lib/rate-limit.ts` → `incrMonthlyCounter(key, limit)`** — contador atómico en Redis (`INCR` + `EXPIRE` a fin de mes UTC) usado como gate de límites de plan que gatean una llamada IA real (`checkAIMessageLimit`/`checkReportLimit`/`checkCoachingLimit` en `usage-limits.ts`), en vez de `SELECT count()` contra Postgres (racy bajo concurrencia). Fail-open ante error de Redis, igual que `rateLimit()`.
 - **`src/lib/rate-limit.ts` → `acquireLock(key, ttlMs)` / `releaseLock(key, token)`** — lock distribuido simple (`SET NX PX` + compare-and-del vía Lua) para serializar una sección crítica entre procesos. Usarlo siempre con **relectura de la fila de DB dentro del lock** antes de actuar — un lock sin relectura no evita usar datos ya obsoletos que otro proceso cambió mientras se esperaba (ver `getFreshTwitterAccessToken` en `twitter-publisher.ts`).
 - **`src/server/services/ai-json-parser.ts` → `parseTolerantJSON<T>(text)`** — extrae y parsea un objeto JSON de la respuesta de un modelo de IA, tolerando `<think>` sin cerrar, fences ` ```json `, y texto extra alrededor. Único punto para esta lógica — antes estaba duplicada (con pequeñas variantes) en 8 servicios de IA.
+- **`src/server/services/prompt-safety.ts`** → `UNTRUSTED_DATA_RULE`, `wrapUntrusted(tag, text)`, `wrapTranscript(msgs)`: todo texto escrito por fans/comentaristas que entre en un prompt va envuelto y con la regla en el system prompt.
+- **`src/server/services/conversation-context.ts`** → `resolvePersonalityForConversation` / `resolveModeForContact` / `getContactTotalSpentCents`: resolución de modo OnlyFans + A/B con el gasto real del contacto. Única implementación (antes duplicada en `ai.suggest`/`regenerate`).
+- **`src/server/services/message-delivery.ts`** → `deliverAutomatedCreatorMessage`: tras insertar un mensaje de creador automático (secuencias, workflows) publica el evento realtime y lo envía por Telegram si aplica.
+- **`src/lib/csv.ts`** (`toCsv`, celdas protegidas contra inyección de fórmulas) y **`src/lib/html-escape.ts`** (`escapeHtml` para emails).
+- **`src/lib/search-highlight.ts`**: los snippets de búsqueda usan marcadores centinela y se renderizan como texto; nunca `dangerouslySetInnerHTML` con contenido de fans.
+- **`src/lib/rate-limit.ts` → `setOnce(key, ttl)`** (dedupe de eventos periódicos) y **`readMonthlyCounter`** (uso mostrado en Billing = contador real de límites).
 - **`src/components/ui/confirm-dialog.tsx` → `<ConfirmDialog>`** — diálogo de confirmación accesible sobre `<Modal>` (título, mensaje, `onConfirm`/`onCancel`, `isPending`, `isDanger`). Usar siempre en vez de `window.confirm()` para acciones destructivas — bloquea el hilo de JS, no respeta el tema oscuro y no es personalizable.

@@ -15,9 +15,15 @@
  *              instagram_content_publish
  */
 
-export const FB_AUTH_URL = "https://www.facebook.com/v19.0/dialog/oauth";
-export const FB_TOKEN_URL = "https://graph.facebook.com/v19.0/oauth/access_token";
-export const FB_GRAPH_URL = "https://graph.facebook.com/v19.0";
+/**
+ * Versión de la Graph API. v19.0 (enero 2024) ya está fuera del periodo de
+ * soporte de Meta (~2 años por versión). Configurable para poder subirla sin
+ * redeploy de código cuando Meta deprecie la actual.
+ */
+export const FB_GRAPH_VERSION = process.env.FB_GRAPH_VERSION || "v22.0";
+export const FB_AUTH_URL = `https://www.facebook.com/${FB_GRAPH_VERSION}/dialog/oauth`;
+export const FB_TOKEN_URL = `https://graph.facebook.com/${FB_GRAPH_VERSION}/oauth/access_token`;
+export const FB_GRAPH_URL = `https://graph.facebook.com/${FB_GRAPH_VERSION}`;
 
 export const INSTAGRAM_SCOPES = [
   "pages_show_list",

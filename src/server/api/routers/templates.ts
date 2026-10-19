@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { eq, and, desc } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
-import { createTRPCRouter, protectedProcedure } from "../trpc";
+import { createTRPCRouter, protectedProcedure, managerProcedure } from "../trpc";
 import { responseTemplates } from "@/server/db/schema";
 import { checkTemplateLimit } from "@/server/services/usage-limits";
 
@@ -49,7 +49,7 @@ export const templatesRouter = createTRPCRouter({
       return template;
     }),
 
-  create: protectedProcedure
+  create: managerProcedure
     .input(
       z.object({
         name: z.string().min(1).max(255),
@@ -77,7 +77,7 @@ export const templatesRouter = createTRPCRouter({
       return template;
     }),
 
-  update: protectedProcedure
+  update: managerProcedure
     .input(
       z.object({
         id: z.string().uuid(),
@@ -116,7 +116,7 @@ export const templatesRouter = createTRPCRouter({
       return updated;
     }),
 
-  delete: protectedProcedure
+  delete: managerProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       const existing = await ctx.db.query.responseTemplates.findFirst({

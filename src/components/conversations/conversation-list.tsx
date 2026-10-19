@@ -73,6 +73,9 @@ type Props = {
   selectedId: string | null;
   onSelect: (id: string) => void;
   isLoading: boolean;
+  /** Si existe, hay más conversaciones en el servidor. */
+  onLoadMore?: () => void;
+  isLoadingMore?: boolean;
 };
 
 export function ConversationList({
@@ -80,6 +83,8 @@ export function ConversationList({
   selectedId,
   onSelect,
   isLoading,
+  onLoadMore,
+  isLoadingMore,
 }: Props) {
   const { newMessageConversations, markConversationSeen } = useRealtimeMessages();
   const [searchTerm, setSearchTerm] = useState("");
@@ -564,6 +569,15 @@ export function ConversationList({
               </div>
             );
           })
+        )}
+        {onLoadMore && (
+          <button
+            onClick={onLoadMore}
+            disabled={isLoadingMore}
+            className="w-full py-3 text-center text-xs text-indigo-400 hover:text-indigo-300 disabled:opacity-50"
+          >
+            {isLoadingMore ? "Cargando..." : "Cargar más conversaciones"}
+          </button>
         )}
       </div>
     </div>

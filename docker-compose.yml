@@ -38,7 +38,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    command: ["node", "dist/server/worker.js"]
+      # Etapa `worker` del Dockerfile (tsx src/server/worker.ts). Antes se
+      # usaba `node dist/server/worker.js`, que no existe en ninguna imagen.
+      target: worker
     environment:
       - DATABASE_URL=postgresql://${POSTGRES_USER:-fanflow}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-fanflow}
       - REDIS_URL=redis://redis:6379

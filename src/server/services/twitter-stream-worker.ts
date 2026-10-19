@@ -1,4 +1,4 @@
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import {
   socialPosts,
   socialComments,
@@ -250,8 +250,21 @@ class TwitterStreamRunner {
         source: "stream",
         publishedAt: tweet.created_at ? new Date(tweet.created_at) : null,
       })
+      // El poller puede haber insertado el mismo reply en paralelo.
+      .onConflictDoNothing()
       .returning();
     if (!inserted) return;
+
+    // Antes el stream no actualizaba los contadores del post (bandeja y badge
+    // de pendientes desincronizados respecto a poller/webhook).
+    await (this.db as any)
+      .update(socialPosts)
+      .set({
+        commentsCount: sql`${socialPosts.commentsCount} + 1`,
+        unhandledCount: sql`${socialPosts.unhandledCount} + 1`,
+        lastCommentAt: inserted.publishedAt ?? new Date(),
+      })
+      .where(eq(socialPosts.id, post.id));
 
     dispatchWebhookEvent(this.db, creatorId, "comment.received", {
       commentId: inserted.id,

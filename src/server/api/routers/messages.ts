@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { eq, and } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
-import { createTRPCRouter, protectedProcedure } from "../trpc";
+import { createTRPCRouter, protectedProcedure, permissionProcedure } from "../trpc";
 import { createChildLogger } from "@/lib/logger";
 import { publishEvent } from "@/lib/redis-pubsub";
 
@@ -10,8 +10,9 @@ import { messages, conversations, contacts } from "@/server/db/schema";
 import { analysisQueue, telegramOutgoingQueue } from "@/server/queues";
 import { logTeamAction } from "@/server/services/team-audit";
 import { markExperimentReplyForContact } from "@/server/services/message-experiment";
+import { recordExperimentEventForContact } from "@/server/services/ab-experiment";
 import { sendPushToCreator } from "@/server/services/push-notifications";
-import { canAccessConversation } from "../access";
+import { assertCanAccessConversation } from "../access";
 
 export const messagesRouter = createTRPCRouter({
   list: protectedProcedure
@@ -35,13 +36,8 @@ export const messagesRouter = createTRPCRouter({
         throw new TRPCError({ code: "NOT_FOUND", message: "Conversation not found" });
       }
 
-      // TEN-6: los chatters solo pueden leer/escribir en conversaciones asignadas.
-      if (!(await canAccessConversation(ctx, input.conversationId))) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "No tienes acceso a esta conversación",
-        });
-      }
+      // TEN-6: alcance según permisos (asignadas / todas).
+      await assertCanAccessConversation(ctx, input.conversationId);
 
       return ctx.db.query.messages.findMany({
         where: eq(messages.conversationId, input.conversationId),
@@ -51,7 +47,7 @@ export const messagesRouter = createTRPCRouter({
       });
     }),
 
-  addFanMessage: protectedProcedure
+  addFanMessage: permissionProcedure("conversations.send_messages")
     .input(
       z.object({
         conversationId: z.string().uuid(),
@@ -71,13 +67,8 @@ export const messagesRouter = createTRPCRouter({
         throw new TRPCError({ code: "NOT_FOUND", message: "Conversation not found" });
       }
 
-      // TEN-6: los chatters solo pueden leer/escribir en conversaciones asignadas.
-      if (!(await canAccessConversation(ctx, input.conversationId))) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "No tienes acceso a esta conversación",
-        });
-      }
+      // TEN-6: alcance según permisos (asignadas / todas).
+      await assertCanAccessConversation(ctx, input.conversationId);
 
       const [message] = await ctx.db
         .insert(messages)
@@ -161,7 +152,7 @@ export const messagesRouter = createTRPCRouter({
       return message;
     }),
 
-  addCreatorMessage: protectedProcedure
+  addCreatorMessage: permissionProcedure("conversations.send_messages")
     .input(
       z.object({
         conversationId: z.string().uuid(),
@@ -182,13 +173,8 @@ export const messagesRouter = createTRPCRouter({
         throw new TRPCError({ code: "NOT_FOUND", message: "Conversation not found" });
       }
 
-      // TEN-6: los chatters solo pueden leer/escribir en conversaciones asignadas.
-      if (!(await canAccessConversation(ctx, input.conversationId))) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "No tienes acceso a esta conversación",
-        });
-      }
+      // TEN-6: alcance según permisos (asignadas / todas).
+      await assertCanAccessConversation(ctx, input.conversationId);
 
       const [message] = await ctx.db
         .insert(messages)
@@ -218,6 +204,11 @@ export const messagesRouter = createTRPCRouter({
           },
         }).catch(() => {});
       }
+
+      // A/B de modos: respuesta enviada al contacto del experimento.
+      recordExperimentEventForContact(ctx.db, conversation.contactId, "response_sent").catch(
+        () => {}
+      );
 
       // Audit log for team members
       if (ctx.teamRole) {

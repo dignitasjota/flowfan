@@ -1,4 +1,5 @@
 import { callAIProvider, type AIConfig } from "./ai";
+import { UNTRUSTED_DATA_RULE, wrapUntrusted } from "./prompt-safety";
 import { parseTolerantJSON } from "./ai-json-parser";
 import { createChildLogger } from "@/lib/logger";
 
@@ -75,12 +76,13 @@ export async function classifyMessage(
 - general: Conversacion normal que no encaja en las otras categorias
 
 Responde SOLO con un JSON: {"category": "...", "confidence": 0.0-1.0}
-No incluyas nada mas. Plataforma: ${platformType}`;
+No incluyas nada mas. Plataforma: ${platformType}
+${UNTRUSTED_DATA_RULE}`;
 
     const result = await callAIProvider(
       config,
       systemPrompt,
-      [{ role: "user", content: message }],
+      [{ role: "user", content: wrapUntrusted("fan_message", message) }],
       100
     );
 

@@ -1,4 +1,5 @@
 import { type AIConfig, callAIProvider } from "./ai";
+import { UNTRUSTED_DATA_RULE, wrapTranscript } from "./prompt-safety";
 import { parseTolerantJSON } from "./ai-json-parser";
 import { getLanguageInstruction } from "./language-utils";
 
@@ -70,12 +71,10 @@ export async function summarizeConversation(
     `Usuario: @${input.contactUsername}`,
     `Etapa del funnel: ${input.funnelStage}`,
     `\nConversacion (${input.messages.length} mensajes):`,
-    ...input.messages.slice(-30).map(
-      (m) => `${m.role === "fan" ? "Fan" : "Creador"}: ${m.content}`
-    ),
+    wrapTranscript(input.messages.slice(-30)),
   ].join("\n");
 
-  let systemPrompt = SUMMARY_SYSTEM_PROMPT;
+  let systemPrompt = `${SUMMARY_SYSTEM_PROMPT}\n${UNTRUSTED_DATA_RULE}`;
   if (input.language) {
     systemPrompt += `\n\n${getLanguageInstruction(input.language)}`;
   }

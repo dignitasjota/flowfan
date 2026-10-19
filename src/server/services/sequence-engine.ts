@@ -1,4 +1,4 @@
-import { eq, and, lte, sql, isNotNull } from "drizzle-orm";
+import { eq, and, lte, sql, isNotNull, desc } from "drizzle-orm";
 import {
   sequences,
   sequenceEnrollments,
@@ -9,6 +9,7 @@ import {
 } from "@/server/db/schema";
 import { sequenceQueue } from "@/server/queues";
 import { createChildLogger } from "@/lib/logger";
+import { deliverAutomatedCreatorMessage } from "./message-delivery";
 
 const log = createChildLogger("sequence-engine");
 
@@ -231,15 +232,21 @@ export async function cancelEnrollment(db: DB, enrollmentId: string): Promise<vo
 export async function checkSequenceSteps(db: DB): Promise<void> {
   const now = new Date();
 
+  // Solo secuencias activas: antes las de secuencias desactivadas se
+  // reencolaban cada 5 min (processSequenceStep salía sin tocar nextStepAt).
+  // Al reactivar la secuencia, sus enrollments vuelven a procesarse.
   const dueEnrollments = await (db as any)
-    .select({ id: sequenceEnrollments.id })
+    .select({ id: sequenceEnrollments.id, currentStep: sequenceEnrollments.currentStep })
     .from(sequenceEnrollments)
+    .innerJoin(sequences, eq(sequences.id, sequenceEnrollments.sequenceId))
     .where(
       and(
         eq(sequenceEnrollments.status, "active"),
+        eq(sequences.isActive, true),
         lte(sequenceEnrollments.nextStepAt, now)
       )
-    );
+    )
+    .limit(1000);
 
   for (const enrollment of dueEnrollments) {
     try {
@@ -249,7 +256,9 @@ export async function checkSequenceSteps(db: DB): Promise<void> {
       await sequenceQueue.add(
         "process_step",
         { type: "process_step", enrollmentId: enrollment.id },
-        { jobId: `step-${enrollment.id}` }
+        // Incluye el paso: con solo el enrollment, el job del paso N (completado
+        // y retenido por removeOnComplete) bloqueaba encolar el paso N+1.
+        { jobId: `step-${enrollment.id}-${enrollment.currentStep}` }
       );
     } catch {
       // Duplicate job (mismo jobId aún en cola), skip
@@ -349,6 +358,7 @@ async function executeStepAction(
             eq(conversations.status, "active")
           )
         )
+        .orderBy(desc(conversations.lastMessageAt))
         .limit(1);
 
       if (!conversation) {
@@ -367,16 +377,30 @@ async function executeStepAction(
         .replace(/\{\{username\}\}/g, contact?.username ?? "")
         .replace(/\{\{displayName\}\}/g, contact?.displayName ?? "");
 
-      await (db as any).insert(messages).values({
-        conversationId: conversation.id,
-        role: "creator",
-        content: finalContent,
-      });
+      const [inserted] = await (db as any)
+        .insert(messages)
+        .values({
+          conversationId: conversation.id,
+          role: "creator",
+          content: finalContent,
+          source: "sequence",
+        })
+        .returning({ id: messages.id });
 
       await (db as any)
         .update(conversations)
         .set({ lastMessageAt: new Date() })
         .where(eq(conversations.id, conversation.id));
+
+      if (inserted) {
+        await deliverAutomatedCreatorMessage(db as any, {
+          creatorId,
+          conversationId: conversation.id,
+          messageId: inserted.id,
+          content: finalContent,
+          source: "sequence",
+        });
+      }
 
       log.info({ contactId, conversationId: conversation.id }, "Sequence message sent");
       break;

@@ -6,6 +6,18 @@ import { UsageCard } from "@/components/billing/usage-card";
 import { PricingTable } from "@/components/landing/pricing-table";
 import { Skeleton, UsageCardSkeleton } from "@/components/ui/skeleton";
 
+/** Importe con su moneda real (antes siempre con "$" aunque fuera EUR). */
+function formatMoney(amount: number, currency: string | null | undefined): string {
+  try {
+    return new Intl.NumberFormat("es-ES", {
+      style: "currency",
+      currency: (currency ?? "eur").toUpperCase(),
+    }).format(amount);
+  } catch {
+    return `${amount.toFixed(2)} ${(currency ?? "").toUpperCase()}`;
+  }
+}
+
 export default function BillingPage() {
   const planQuery = trpc.billing.getPlan.useQuery();
   const usageQuery = trpc.billing.getUsage.useQuery();
@@ -187,7 +199,7 @@ export default function BillingPage() {
                           : "-"}
                       </td>
                       <td className="px-4 py-3 text-sm text-white">
-                        ${invoice.amount.toFixed(2)} {invoice.currency?.toUpperCase()}
+                        {formatMoney(invoice.amount, invoice.currency)}
                       </td>
                       <td className="px-4 py-3">
                         <span className="inline-flex rounded-full bg-green-500/10 px-2 py-0.5 text-xs font-medium text-green-400">

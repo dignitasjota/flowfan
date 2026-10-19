@@ -1,7 +1,14 @@
 import { z } from "zod";
 import { eq, and, desc, count, sql } from "drizzle-orm";
-import { createTRPCRouter, protectedProcedure } from "../trpc";
-import { workflows, workflowExecutions, contacts } from "@/server/db/schema";
+import { createTRPCRouter, protectedProcedure, managerProcedure } from "../trpc";
+import { TRPCError } from "@trpc/server";
+import {
+  workflows,
+  workflowExecutions,
+  contacts,
+  responseTemplates,
+  sequences,
+} from "@/server/db/schema";
 import { checkWorkflowLimit } from "@/server/services/usage-limits";
 
 const triggerTypeSchema = z.enum([
@@ -17,7 +24,45 @@ const actionTypeSchema = z.enum([
   "send_template",
   "create_notification",
   "change_tags",
+  "advance_sequence",
 ]);
+
+type Db = typeof import("@/server/db").db;
+
+/**
+ * Las acciones send_template / advance_sequence referencian otras entidades
+ * por id: deben pertenecer al tenant (antes se aceptaba cualquier UUID).
+ */
+async function assertActionTargetsOwned(
+  db: Db,
+  creatorId: string,
+  actionType: string | undefined,
+  actionConfig: Record<string, unknown> | undefined
+) {
+  if (!actionType || !actionConfig) return;
+  if (actionType === "send_template") {
+    const id = actionConfig.templateId;
+    if (typeof id !== "string") {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "Falta templateId" });
+    }
+    const tpl = await db.query.responseTemplates.findFirst({
+      where: and(eq(responseTemplates.id, id), eq(responseTemplates.creatorId, creatorId)),
+      columns: { id: true },
+    });
+    if (!tpl) throw new TRPCError({ code: "NOT_FOUND", message: "Template no encontrado" });
+  }
+  if (actionType === "advance_sequence") {
+    const id = actionConfig.sequenceId;
+    if (typeof id !== "string") {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "Falta sequenceId" });
+    }
+    const seq = await db.query.sequences.findFirst({
+      where: and(eq(sequences.id, id), eq(sequences.creatorId, creatorId)),
+      columns: { id: true },
+    });
+    if (!seq) throw new TRPCError({ code: "NOT_FOUND", message: "Secuencia no encontrada" });
+  }
+}
 
 export const workflowsRouter = createTRPCRouter({
   list: protectedProcedure
@@ -69,7 +114,7 @@ export const workflowsRouter = createTRPCRouter({
       }) ?? null;
     }),
 
-  create: protectedProcedure
+  create: managerProcedure
     .input(
       z.object({
         name: z.string().min(1).max(255),
@@ -90,6 +135,7 @@ export const workflowsRouter = createTRPCRouter({
     )
     .mutation(async ({ ctx, input }) => {
       await checkWorkflowLimit(ctx.db, ctx.creatorId);
+      await assertActionTargetsOwned(ctx.db, ctx.creatorId, input.actionType, input.actionConfig);
 
       const [created] = await ctx.db
         .insert(workflows)
@@ -109,7 +155,7 @@ export const workflowsRouter = createTRPCRouter({
       return created;
     }),
 
-  update: protectedProcedure
+  update: managerProcedure
     .input(
       z.object({
         id: z.string().uuid(),
@@ -134,6 +180,19 @@ export const workflowsRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       const { id, ...fields } = input;
 
+      const existing = await ctx.db.query.workflows.findFirst({
+        where: and(eq(workflows.id, id), eq(workflows.creatorId, ctx.creatorId)),
+      });
+      if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "Workflow no encontrado" });
+      if (fields.actionType !== undefined || fields.actionConfig !== undefined) {
+        await assertActionTargetsOwned(
+          ctx.db,
+          ctx.creatorId,
+          fields.actionType ?? existing.actionType,
+          fields.actionConfig ?? (existing.actionConfig as Record<string, unknown>)
+        );
+      }
+
       const updates: Record<string, unknown> = { updatedAt: new Date() };
 
       if (fields.name !== undefined) updates.name = fields.name;
@@ -156,7 +215,7 @@ export const workflowsRouter = createTRPCRouter({
       return updated;
     }),
 
-  delete: protectedProcedure
+  delete: managerProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       await ctx.db
@@ -171,7 +230,7 @@ export const workflowsRouter = createTRPCRouter({
       return { success: true };
     }),
 
-  toggleActive: protectedProcedure
+  toggleActive: managerProcedure
     .input(
       z.object({
         id: z.string().uuid(),

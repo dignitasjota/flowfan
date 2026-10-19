@@ -8,6 +8,10 @@ import {
   conversationAssignments,
 } from "@/server/db/schema";
 import { platformTypeSchema } from "@/lib/constants";
+import { conversationScopeFilter } from "../access";
+import { HIGHLIGHT_START, HIGHLIGHT_END } from "@/lib/search-highlight";
+
+const HEADLINE_OPTIONS = `MaxWords=30, MinWords=10, StartSel=${HIGHLIGHT_START}, StopSel=${HIGHLIGHT_END}`;
 
 export const searchRouter = createTRPCRouter({
   search: protectedProcedure
@@ -35,15 +39,9 @@ export const searchRouter = createTRPCRouter({
         sql`"messages".search_vector @@ ${tsquery}`,
       ];
 
-      // Chatters only see their assigned conversations
-      if (ctx.teamRole === "chatter") {
-        conditions.push(
-          inArray(
-            conversations.id,
-            sql`(SELECT ${conversationAssignments.conversationId} FROM ${conversationAssignments} WHERE ${conversationAssignments.assignedToUserId} = ${ctx.actingUserId})`
-          )
-        );
-      }
+      // Alcance según permisos (roles base o personalizados).
+      const scope = await conversationScopeFilter(ctx);
+      if (scope) conditions.push(scope);
 
       if (input.filters?.platform) {
         conditions.push(eq(conversations.platformType, input.filters.platform));
@@ -87,7 +85,10 @@ export const searchRouter = createTRPCRouter({
           contactDisplayName: contacts.displayName,
           platformType: conversations.platformType,
           role: messages.role,
-          snippet: sql<string>`ts_headline('spanish', ${messages.content}, ${tsquery}, 'MaxWords=30, MinWords=10, StartSel=<mark>, StopSel=</mark>')`,
+          // Marcadores centinela (no HTML): el contenido del mensaje lo escribe el
+          // fan y no está escapado; el cliente parte el snippet por estos
+          // caracteres y lo renderiza como texto (sin dangerouslySetInnerHTML).
+          snippet: sql<string>`ts_headline('spanish', ${messages.content}, ${tsquery}, ${HEADLINE_OPTIONS})`,
           relevanceScore: sql<number>`ts_rank("messages".search_vector, ${tsquery})`,
           createdAt: messages.createdAt,
         })

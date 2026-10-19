@@ -24,10 +24,10 @@ import { deliverWebhook, dispatchWebhookEvent } from "./services/webhook-dispatc
 import { importJobs, contactProfiles } from "./db/schema";
 import { createChildLogger } from "@/lib/logger";
 import { publishEvent } from "@/lib/redis-pubsub";
+import { UNTRUSTED_DATA_RULE, wrapUntrusted } from "./services/prompt-safety";
 
 const log = createChildLogger("worker");
 
-const redisUrl = new URL(process.env.REDIS_URL ?? "redis://localhost:6379");
 
 const worker = new Worker<AnalysisJobData>(
   "message-analysis",
@@ -56,8 +56,23 @@ const worker = new Worker<AnalysisJobData>(
       contactId,
       { type: source, id: messageId },
       analysis,
-      creatorId
+      creatorId,
+      { messageLength: messageContent.length }
     );
+
+    // El análisis de sentimiento solo se hace aquí (ya no también en ai.suggest),
+    // así que el coste se registra aquí.
+    try {
+      const { aiUsageLog } = await import("@/server/db/schema");
+      await db.insert(aiUsageLog).values({
+        creatorId,
+        requestType: "analysis",
+        tokensUsed: analysis.tokensUsed,
+        modelUsed: `${config.provider}/${config.model}`,
+      });
+    } catch (err) {
+      log.warn({ err }, "Failed to log analysis usage");
+    }
 
     // Dispatch webhook for messages only (comments use comment.received on ingestion)
     if (source === "message") {
@@ -344,11 +359,12 @@ const telegramAutoReplyWorker = new Worker<TelegramAutoReplyJobData>(
     const systemPrompt =
       "Eres un asistente de conversación para un creador de contenido en Telegram. " +
       "Responde de forma amigable y natural al mensaje del fan. " +
-      "Sé conciso y conversacional. No reveles que eres una IA.";
+      "Sé conciso y conversacional. No reveles que eres una IA. " +
+      UNTRUSTED_DATA_RULE;
 
     const conversationMsgs = recentMessages.reverse().map((m) => ({
       role: (m.role === "fan" ? "user" : "assistant") as "user" | "assistant",
-      content: m.content,
+      content: m.role === "fan" ? wrapUntrusted("fan_message", m.content) : m.content,
     }));
 
     const result = await callAIProvider(aiConfig, systemPrompt, conversationMsgs, 512);
@@ -409,12 +425,12 @@ const broadcastProcessingWorker = new Worker<BroadcastProcessingJobData>(
       log.info({ jobId: job.id, broadcastId }, "Broadcast processing completed");
     } catch (err) {
       log.error({ jobId: job.id, broadcastId, err }, "Broadcast processing failed");
-      const { eq } = await import("drizzle-orm");
+      const { eq, and, ne } = await import("drizzle-orm");
       const { broadcasts } = await import("@/server/db/schema");
       await db
         .update(broadcasts)
         .set({ status: "failed", updatedAt: new Date() })
-        .where(eq(broadcasts.id, broadcastId));
+        .where(and(eq(broadcasts.id, broadcastId), ne(broadcasts.status, "cancelled")));
       throw err;
     }
   },
@@ -632,15 +648,14 @@ async function checkScheduledBroadcasts() {
     );
 
   for (const bc of scheduledBroadcasts) {
-    await db
-      .update(broadcasts)
-      .set({ status: "processing", updatedAt: now })
-      .where(eq(broadcasts.id, bc.id));
-
-    await broadcastProcessingQueue.add("process", {
-      broadcastId: bc.id,
-      creatorId: bc.creatorId,
-    });
+    // Mismo jobId que usa broadcasts.schedule: si el job retrasado ya existe
+    // (o sigue en la cola), BullMQ no crea un duplicado. El claim atómico de
+    // processSegment cubre el resto.
+    await broadcastProcessingQueue.add(
+      "process",
+      { broadcastId: bc.id, creatorId: bc.creatorId },
+      { jobId: `broadcast-${bc.id}` }
+    );
 
     log.info({ broadcastId: bc.id }, "Scheduled broadcast triggered");
   }
@@ -1031,8 +1046,9 @@ emailWorker.on("failed", (job, err) => {
 let summarySchedulerInterval: ReturnType<typeof setInterval> | null = null;
 
 async function startSummaryScheduler() {
-  const redis = (await import("ioredis")).default;
-  const redisClient = new redis(process.env.REDIS_URL ?? "redis://localhost:6379");
+  // ARCH-10: factoría única (antes `new Redis(url)` suelto).
+  const { createRedisClient, LONG_LIVED_REDIS_OPTIONS } = await import("@/lib/redis-client");
+  const redisClient = createRedisClient(LONG_LIVED_REDIS_OPTIONS);
 
   summarySchedulerInterval = setInterval(async () => {
     const now = new Date();
@@ -1055,8 +1071,9 @@ async function startSummaryScheduler() {
 
     // Weekly summary (Mondays only, dedup by week)
     if (now.getUTCDay() === 1) {
-      const weekNum = Math.ceil(((now.getTime() - new Date(now.getFullYear(), 0, 1).getTime()) / 86400000 + 1) / 7);
-      const weeklyKey = `summary:weekly:${now.getFullYear()}-W${weekNum}`;
+      // Clave por fecha UTC del lunes: única por semana e independiente de la
+      // zona horaria del contenedor.
+      const weeklyKey = `summary:weekly:${now.toISOString().slice(0, 10)}`;
       const weeklySent = await redisClient.set(weeklyKey, "1", "EX", 604800, "NX");
       if (weeklySent) {
         try {
@@ -1093,7 +1110,11 @@ const scheduledPostWorker = new Worker<ScheduledPostJobData>(
       log.warn({ scheduledPostId }, "Scheduled post not found, skipping");
       return;
     }
-    if (post.status !== "scheduled" && post.status !== "failed") {
+    // `partial` y `processing` también son reintentables: un retry tras un
+    // fallo parcial o un crash a mitad del job (job stalled) debe continuar.
+    // La idempotencia por plataforma (externalPostIds persistidos) evita
+    // republicar lo que ya salió.
+    if (!["scheduled", "failed", "partial", "processing"].includes(post.status)) {
       log.warn(
         { scheduledPostId, status: post.status },
         "Scheduled post not in publishable state, skipping"
@@ -1155,8 +1176,11 @@ const scheduledPostWorker = new Worker<ScheduledPostJobData>(
         accountConditions.push(eq(socialAccounts.id, platformCfg.accountId));
       }
 
+      // Sin accountId explícito: preferir la cuenta nativa sobre la de webhook
+      // (enum: native < webhook) y la más antigua como desempate estable.
       const account = await db.query.socialAccounts.findFirst({
         where: and(...accountConditions),
+        orderBy: (a, { asc }) => [asc(a.connectionType), asc(a.createdAt)],
       });
 
       if (!account) {

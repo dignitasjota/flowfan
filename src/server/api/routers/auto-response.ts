@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { eq, and, sql, gte, count } from "drizzle-orm";
-import { createTRPCRouter, protectedProcedure } from "../trpc";
-import { autoResponseConfigs, messages } from "@/server/db/schema";
+import { createTRPCRouter, protectedProcedure, managerProcedure } from "../trpc";
+import { autoResponseConfigs, messages, conversations } from "@/server/db/schema";
 
 const platformTypeSchema = z.enum([
   "instagram",
@@ -21,7 +21,7 @@ export const autoResponseRouter = createTRPCRouter({
     });
   }),
 
-  upsertConfig: protectedProcedure
+  upsertConfig: managerProcedure
     .input(
       z.object({
         platformType: platformTypeSchema,
@@ -84,21 +84,21 @@ export const autoResponseRouter = createTRPCRouter({
     // Query messages with classification in sentiment JSONB
     const stats = await ctx.db
       .select({
-        category: sql<string>`(${messages.sentiment}->>'classification')::jsonb->>'category'`,
+        category: sql<string>`${messages.sentiment}->'classification'->>'category'`,
         count: count(),
       })
       .from(messages)
-      .innerJoin(
-        sql`conversations ON conversations.id = ${messages.conversationId}`,
-        sql`conversations.creator_id = ${ctx.creatorId}`
-      )
+      // Join real (el sql`conversations ON …` generaba un doble ON inválido y
+      // la query fallaba siempre, igual que WK-14).
+      .innerJoin(conversations, eq(conversations.id, messages.conversationId))
       .where(
         and(
+          eq(conversations.creatorId, ctx.creatorId),
           gte(messages.createdAt, thirtyDaysAgo),
           sql`${messages.sentiment}->>'classification' IS NOT NULL`
         )
       )
-      .groupBy(sql`(${messages.sentiment}->>'classification')::jsonb->>'category'`);
+      .groupBy(sql`${messages.sentiment}->'classification'->>'category'`);
 
     const result: Record<string, number> = {
       urgent: 0,

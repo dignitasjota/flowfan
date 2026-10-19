@@ -605,7 +605,9 @@ export const adminRouter = createTRPCRouter({
     ]);
 
     // MRR calculado por plan
-    const PLAN_PRICES = { free: 0, starter: 15, pro: 29, business: 0 };
+    // Mismos precios que la PricingTable / JSON-LD (antes Starter=15 y
+    // Business=0 aquí, frente a 14 € y 99 € en la landing).
+    const PLAN_PRICES = { free: 0, starter: 14, pro: 29, business: 99 };
     const mrr = planDistribution.reduce((sum, row) => {
       const price = PLAN_PRICES[row.plan as keyof typeof PLAN_PRICES] ?? 0;
       return sum + price * row.count;

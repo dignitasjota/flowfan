@@ -152,6 +152,27 @@ export default function BroadcastsPage() {
     },
   });
 
+  const broadcasts = useMemo(
+    () => ((broadcastsList.data as { items?: Broadcast[] } | undefined)?.items ?? []) as Broadcast[],
+    [broadcastsList.data]
+  );
+
+  // Stats
+  const stats = useMemo(() => {
+    const now = new Date();
+    const thisMonth = broadcasts.filter((b) => {
+      if (!b.completedAt) return false;
+      const d = new Date(b.completedAt);
+      return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+    });
+
+    return {
+      total: broadcasts.length,
+      sentThisMonth: thisMonth.length,
+      totalRecipients: broadcasts.reduce((sum, b) => sum + b.totalRecipients, 0),
+    };
+  }, [broadcasts]);
+
   // Plan gate
   if (broadcastsList.error?.data?.code === "FORBIDDEN") {
     return (
@@ -171,24 +192,6 @@ export default function BroadcastsPage() {
       </div>
     );
   }
-
-  const broadcasts = ((broadcastsList.data as { items?: Broadcast[] } | undefined)?.items ?? []) as Broadcast[];
-
-  // Stats
-  const stats = useMemo(() => {
-    const now = new Date();
-    const thisMonth = broadcasts.filter((b) => {
-      if (!b.completedAt) return false;
-      const d = new Date(b.completedAt);
-      return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-    });
-
-    return {
-      total: broadcasts.length,
-      sentThisMonth: thisMonth.length,
-      totalRecipients: broadcasts.reduce((sum, b) => sum + b.totalRecipients, 0),
-    };
-  }, [broadcasts]);
 
   return (
     <div className="flex-1 overflow-y-auto bg-gray-950 p-4 sm:p-6 lg:p-8">

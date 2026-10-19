@@ -365,6 +365,8 @@ const TASK_TYPES = [
   { value: "summary", label: "Resumenes", description: "Resumen automatico de conversaciones" },
   { value: "report", label: "Informes", description: "Informes detallados de contactos" },
   { value: "price_advice", label: "Precios", description: "Recomendaciones de precio" },
+  { value: "coaching", label: "Coaching", description: "Coaching de negociación y de hilos públicos" },
+  { value: "content_gap", label: "Content gaps", description: "Análisis de huecos de contenido" },
 ] as const;
 
 type TaskType = typeof TASK_TYPES[number]["value"];

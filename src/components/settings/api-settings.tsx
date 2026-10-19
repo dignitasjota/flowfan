@@ -9,6 +9,11 @@ const WEBHOOK_EVENTS = [
   { value: "message.received", label: "Mensaje recibido" },
   { value: "funnel_stage.changed", label: "Cambio de funnel" },
   { value: "transaction.created", label: "Transaccion creada" },
+  { value: "comment.received", label: "Comentario recibido" },
+  { value: "post.scheduled", label: "Post programado" },
+  { value: "post.publishing", label: "Post publicándose (webhook)" },
+  { value: "post.published", label: "Post publicado" },
+  { value: "post.failed", label: "Post fallido" },
 ] as const;
 
 function CopyButton({ text }: { text: string }) {
@@ -247,7 +252,11 @@ function WebhooksSection() {
             </div>
           </div>
           <button
-            onClick={() => createMutation.mutate({ url, events: events as any, description: description || undefined })}
+            onClick={() => createMutation.mutate({
+                url,
+                events: events as (typeof WEBHOOK_EVENTS)[number]["value"][],
+                description: description || undefined,
+              })}
             disabled={!url || events.length === 0 || createMutation.isPending}
             className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
           >

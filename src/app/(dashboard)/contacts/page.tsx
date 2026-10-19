@@ -22,6 +22,7 @@ export default function ContactsPage() {
   const [filterPlatform, setFilterPlatform] = useState<PlatformType | "">("");
   const [filterFunnel, setFilterFunnel] = useState<FunnelStage | "">("");
   const [page, setPage] = useState(0);
+  const [showArchived, setShowArchived] = useState(false);
   const pageSize = 50;
 
   const { success: toastSuccess } = useToast();
@@ -30,6 +31,7 @@ export default function ContactsPage() {
     search: search || undefined,
     platformType: filterPlatform || undefined,
     funnelStage: filterFunnel || undefined,
+    includeArchived: showArchived,
     limit: pageSize,
     offset: page * pageSize,
   });
@@ -229,6 +231,18 @@ export default function ContactsPage() {
             Limpiar filtros
           </button>
         )}
+        <label className="flex items-center gap-1.5 text-xs text-gray-400">
+          <input
+            type="checkbox"
+            checked={showArchived}
+            onChange={(e) => {
+              setShowArchived(e.target.checked);
+              setPage(0);
+            }}
+            className="h-3.5 w-3.5 rounded border-gray-700 bg-gray-800"
+          />
+          Mostrar archivados
+        </label>
         <span className="text-xs text-gray-500">
           {total} contacto{total !== 1 ? "s" : ""}
         </span>
@@ -329,6 +343,11 @@ export default function ContactsPage() {
                 >
                   <td className="px-6 py-3 text-sm text-white">
                     @{contact.username}
+                    {contact.isArchived && (
+                      <span className="ml-2 rounded bg-gray-800 px-1.5 py-0.5 text-[10px] text-gray-400">
+                        archivado
+                      </span>
+                    )}
                   </td>
                   <td className="px-6 py-3 text-sm text-gray-400">
                     {contact.platformType}

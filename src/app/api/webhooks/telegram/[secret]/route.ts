@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { timingSafeEqual } from "crypto";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { db } from "@/server/db";
 import {
   telegramBotConfigs,
   contacts,
+  contactProfiles,
   conversations,
   messages,
 } from "@/server/db/schema";
@@ -98,6 +99,9 @@ export async function POST(
         })
         .returning();
       contact = newContact!;
+      // Sin perfil, updateContactProfile no tenía dónde escribir y los fans
+      // de Telegram nunca se puntuaban.
+      await db.insert(contactProfiles).values({ contactId: contact.id }).onConflictDoNothing();
 
       // Dispatch new_contact workflow event
       await workflowQueue
@@ -119,7 +123,9 @@ export async function POST(
       ),
     });
 
+    let isNewConversation = false;
     if (!conversation) {
+      isNewConversation = true;
       const [newConv] = await db
         .insert(conversations)
         .values({
@@ -155,7 +161,11 @@ export async function POST(
       .update(contacts)
       .set({
         lastInteractionAt: new Date(),
-        totalConversations: contact.totalConversations + 1,
+        // Solo al abrir una conversación nueva (antes se sumaba 1 por mensaje
+        // y distorsionaba los factores de profundidad/conversaciones).
+        ...(isNewConversation
+          ? { totalConversations: sql`${contacts.totalConversations} + 1` }
+          : {}),
       })
       .where(eq(contacts.id, contact.id));
 

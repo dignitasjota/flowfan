@@ -129,14 +129,38 @@ export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact
     },
   });
   const optimalTimeQuery = trpc.scheduledMessages.suggestOptimalTime.useQuery(
-    { contactId: conversation.contactId },
-    { enabled: false }
+    {
+      contactId: conversation.contactId,
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    },
+    { enabled: false, retry: false }
   );
+
+  /** Próxima ocurrencia (local) de la hora en la que el fan suele escribir. */
+  async function fillOptimalTime(setter: (v: string) => void) {
+    const res = await optimalTimeQuery.refetch();
+    if (res.error) {
+      handleError(res.error);
+      return;
+    }
+    if (!res.data) return;
+    const next = new Date();
+    next.setHours(res.data.suggestedHour, res.data.suggestedMinute, 0, 0);
+    if (next.getTime() <= Date.now() + 60_000) next.setDate(next.getDate() + 1);
+    setter(formatDateTimeLocal(next));
+    toastSuccess(res.data.reason);
+  }
   const usageQuery = trpc.billing.getUsage.useQuery(undefined, {
     refetchInterval: 60000,
   });
-  const { handleError } = useTrpcErrorHandler();
-  const { success: toastSuccess } = useToast();
+  const { handleError: handlePlanError } = useTrpcErrorHandler();
+  const { success: toastSuccess, error: toastError } = useToast();
+  // Errores de plan → modal de upgrade; el resto se muestran como toast.
+  function handleError(err: unknown) {
+    if (!handlePlanError(err)) {
+      toastError(err instanceof Error ? err.message : "Ha ocurrido un error");
+    }
+  }
 
   // A/B de mensajes: experimentos activos para esta plataforma.
   const runningExperiments = trpc.messageExperiments.listRunning.useQuery({
@@ -561,6 +585,15 @@ export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact
                         className="flex-1 rounded border border-gray-700 bg-gray-800 px-2 py-1 text-xs text-white focus:border-indigo-500 focus:outline-none"
                       />
                       <button
+                        type="button"
+                        onClick={() => fillOptimalTime(setScheduleDate)}
+                        disabled={optimalTimeQuery.isFetching}
+                        className="rounded border border-gray-600 px-2 py-1 text-[11px] text-gray-300 hover:bg-gray-700 disabled:opacity-50"
+                        title="Sugerir la hora en la que el fan suele escribir"
+                      >
+                        ⏱ Hora óptima
+                      </button>
+                      <button
                         onClick={() => {
                           if (!scheduleDate) return;
                           scheduleMutation.mutate({
@@ -771,6 +804,15 @@ export function ChatPanel({ conversation, onMessageSent, onBack, onToggleContact
                   min={formatDateTimeLocal(new Date())}
                   className="flex-1 rounded border border-gray-700 bg-gray-800 px-2 py-1 text-xs text-white focus:border-indigo-500 focus:outline-none"
                 />
+                <button
+                  type="button"
+                  onClick={() => fillOptimalTime(setScheduleManualDate)}
+                  disabled={optimalTimeQuery.isFetching}
+                  className="rounded border border-gray-600 px-2 py-1 text-[11px] text-gray-300 hover:bg-gray-700 disabled:opacity-50"
+                  title="Sugerir la hora en la que el fan suele escribir"
+                >
+                  ⏱ Hora óptima
+                </button>
                 <button
                   onClick={() => {
                     if (!scheduleManualDate || manualQueue.filter((m) => m.role === "creator").length === 0) return;

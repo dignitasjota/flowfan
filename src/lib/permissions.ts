@@ -80,6 +80,9 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<BaseRole, Permission[]> = {
     "contacts.create",
     "contacts.read",
     "contacts.update",
+    // Los managers ya podían borrar contactos (managerProcedure); se mantiene
+    // ahora que el borrado se gatea por permiso.
+    "contacts.delete",
     "conversations.read_all",
     "conversations.read_assigned",
     "conversations.send_messages",

@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { UNTRUSTED_DATA_RULE, wrapUntrusted } from "./prompt-safety";
 import OpenAI from "openai";
 import { getLanguageInstruction } from "./language-utils";
 import { createChildLogger } from "@/lib/logger";
@@ -294,6 +295,7 @@ REGLAS IMPORTANTES:
 - Nunca reveles que eres una IA
 - Nunca generes contenido que involucre menores
 - Respeta las restricciones definidas por el creador
+- ${UNTRUSTED_DATA_RULE}
 - ${variantInstructions}`);
 
   if (input.language) {
@@ -355,11 +357,12 @@ function buildConversationMessages(input: SuggestionInput) {
   for (const msg of recentHistory) {
     msgs.push({
       role: msg.role === "fan" ? "user" : "assistant",
-      content: msg.content,
+      // AI-5: los turnos del fan van delimitados como datos no confiables.
+      content: msg.role === "fan" ? wrapUntrusted("fan_message", msg.content) : msg.content,
     });
   }
 
-  msgs.push({ role: "user", content: input.fanMessage });
+  msgs.push({ role: "user", content: wrapUntrusted("fan_message", input.fanMessage) });
   return msgs;
 }
 

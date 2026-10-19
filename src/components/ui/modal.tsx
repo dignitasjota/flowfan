@@ -34,6 +34,13 @@ export function Modal({
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   const previouslyFocused = useRef<HTMLElement | null>(null);
+  // `onClose` suele ser un callback inline (nuevo en cada render del padre).
+  // Si fuera dependencia del efecto, cada re-render reejecutaba el efecto y
+  // devolvía el foco al primer control (p.ej. al escribir en un input).
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
   useEffect(() => {
     previouslyFocused.current = document.activeElement as HTMLElement | null;
@@ -47,7 +54,7 @@ export function Modal({
     function onKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") {
         e.stopPropagation();
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (e.key === "Tab" && panel) {
@@ -75,12 +82,12 @@ export function Modal({
       document.removeEventListener("keydown", onKeyDown, true);
       previouslyFocused.current?.focus?.();
     };
-  }, [onClose]);
+  }, []);
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-      onClick={closeOnBackdrop ? onClose : undefined}
+      onClick={closeOnBackdrop ? () => onCloseRef.current() : undefined}
     >
       <div
         ref={panelRef}

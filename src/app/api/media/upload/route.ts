@@ -38,7 +38,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "No autenticado" }, { status: 401 });
     }
 
-    const creatorId = session.user.id;
+    // Tenant activo (en modo equipo, el vault es el del creador).
+    const creatorId = session.user.activeCreatorId ?? session.user.id;
+    if (session.user.teamRole === "chatter") {
+      return NextResponse.json(
+        { error: "No tienes permisos para subir archivos" },
+        { status: 403 }
+      );
+    }
     const formData = await request.formData();
     const file = formData.get("file") as File | null;
     const categoryId = formData.get("categoryId") as string | null;

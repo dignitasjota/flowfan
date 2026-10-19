@@ -148,6 +148,20 @@ export async function incrMonthlyCounter(
 }
 
 /**
+ * Lee el contador mensual de `incrMonthlyCounter` sin incrementarlo. Devuelve
+ * null si Redis no responde (el caller decide el fallback).
+ */
+export async function readMonthlyCounter(key: string): Promise<number | null> {
+  try {
+    const r = getRedis();
+    const value = await r.get(`usage_monthly:${key}:${monthBucketUTC()}`);
+    return value ? Number(value) : 0;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * WK-8: lock distribuido simple (`SET NX PX`) para serializar una sección
  * crítica entre procesos — p.ej. el refresco de un refresh_token OAuth
  * rotativo (Twitter), donde dos procesos refrescando en paralelo con el
@@ -180,6 +194,23 @@ export async function releaseLock(key: string, token: string): Promise<void> {
     );
   } catch {
     // Best-effort: si Redis falla al liberar, el TTL lo expira igualmente.
+  }
+}
+
+/**
+ * Marca `key` como procesada durante `ttlSeconds` (SET NX EX). Devuelve true
+ * solo la primera vez dentro de la ventana. Útil para deduplicar eventos
+ * periódicos sin depender de que BullMQ retenga los jobs completados.
+ * Fail-open: si Redis falla devuelve true (mejor un evento duplicado —que el
+ * cooldown del workflow absorbe— que perderlo).
+ */
+export async function setOnce(key: string, ttlSeconds: number): Promise<boolean> {
+  try {
+    const r = getRedis();
+    const result = await r.set(`once:${key}`, "1", "EX", ttlSeconds, "NX");
+    return result === "OK";
+  } catch {
+    return true;
   }
 }
 

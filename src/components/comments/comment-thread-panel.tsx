@@ -109,7 +109,10 @@ export function CommentThreadPanel({ postId }: Props) {
 
   function submitReply() {
     if (!activeCommentId || !replyDraft.trim()) return;
-    reply.mutate({ commentId: activeCommentId, content: replyDraft.trim() });
+    const content = replyDraft.trim();
+    // FanFlow aún no publica respuestas en la plataforma: se copian para pegarlas.
+    navigator.clipboard?.writeText(content).catch(() => {});
+    reply.mutate({ commentId: activeCommentId, content });
   }
 
   if (post.isLoading) {
@@ -322,7 +325,7 @@ export function CommentThreadPanel({ postId }: Props) {
                 disabled={!replyDraft.trim() || reply.isPending}
                 className="flex-1 rounded-md bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
               >
-                {reply.isPending ? "Enviando..." : "Responder"}
+                {reply.isPending ? "Guardando..." : "Guardar y copiar"}
               </button>
               <button
                 onClick={() =>
@@ -421,8 +424,10 @@ export function CommentThreadPanel({ postId }: Props) {
             </div>
 
             <p className="mt-3 text-xs text-gray-500">
-              La respuesta se publicará en el hilo. Sin presión comercial; el AI
-              está calibrado para tono público.
+              La respuesta se registra en FanFlow, marca el comentario como
+              resuelto y se copia al portapapeles para que la publiques en{" "}
+              <span className="capitalize">{activeComment.platformType}</span>.
+              El AI está calibrado para tono público.
             </p>
           </div>
         )}

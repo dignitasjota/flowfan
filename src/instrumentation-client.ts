@@ -7,3 +7,6 @@ Sentry.init({
   replaysSessionSampleRate: 0,
   replaysOnErrorSampleRate: 1.0,
 });
+
+// Instrumenta las navegaciones del App Router.
+export const onRouterTransitionStart = Sentry.captureRouterTransitionStart;

@@ -4,6 +4,12 @@ import { createRedisClient, FAIL_FAST_REDIS_OPTIONS } from "@/lib/redis-client";
 
 export const dynamic = "force-dynamic";
 
+// Endpoint público: en producción no se exponen mensajes internos (hosts,
+// puertos, detalles del driver).
+const exposeErrors = process.env.NODE_ENV !== "production";
+const errMsg = (e: unknown) =>
+  exposeErrors ? (e instanceof Error ? e.message : "Unknown error") : "unavailable";
+
 export async function GET() {
   const checks: Record<string, { status: "ok" | "error"; latencyMs?: number; error?: string }> = {};
 
@@ -16,23 +22,26 @@ export async function GET() {
     checks.database = {
       status: "error",
       latencyMs: Date.now() - dbStart,
-      error: e instanceof Error ? e.message : "Unknown error",
+      error: errMsg(e),
     };
   }
 
   // Check Redis
   const redisStart = Date.now();
+  const redis = createRedisClient({ ...FAIL_FAST_REDIS_OPTIONS, connectTimeout: 3000 });
+  redis.on("error", () => {});
   try {
-    const redis = createRedisClient({ ...FAIL_FAST_REDIS_OPTIONS, connectTimeout: 3000 });
     await redis.ping();
-    await redis.quit();
     checks.redis = { status: "ok", latencyMs: Date.now() - redisStart };
   } catch (e) {
     checks.redis = {
       status: "error",
       latencyMs: Date.now() - redisStart,
-      error: e instanceof Error ? e.message : "Unknown error",
+      error: errMsg(e),
     };
+  } finally {
+    // Cerrar siempre: antes un ping fallido dejaba la conexión abierta.
+    redis.disconnect();
   }
 
   const allHealthy = Object.values(checks).every((c) => c.status === "ok");

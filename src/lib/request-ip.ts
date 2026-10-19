@@ -14,16 +14,30 @@
  * proxy más externo de confianza) en vez de tomar el primer valor.
  */
 export function getClientIp(req: Request): string {
-  const xff = req.headers.get("x-forwarded-for");
+  return getClientIpFromHeaders((name) => req.headers.get(name));
+}
+
+/**
+ * Variante para contextos que no exponen un `Request` estándar (p.ej. el
+ * `authorize` de NextAuth, que recibe las cabeceras como objeto plano).
+ */
+export function getClientIpFromHeaders(
+  getHeader: (name: string) => string | string[] | null | undefined
+): string {
+  const read = (name: string) => {
+    const v = getHeader(name);
+    return Array.isArray(v) ? v.join(",") : v ?? null;
+  };
+  const xff = read("x-forwarded-for");
   if (xff) {
     const parts = xff.split(",").map((p) => p.trim()).filter(Boolean);
     if (parts.length > 0) {
       const hops = Number(process.env.TRUSTED_PROXY_HOPS ?? 0);
       if (hops > 0 && parts.length >= hops) {
-        return parts[parts.length - hops];
+        return parts[parts.length - hops]!;
       }
-      return parts[0];
+      return parts[0]!;
     }
   }
-  return req.headers.get("x-real-ip")?.trim() || "unknown";
+  return read("x-real-ip")?.trim() || "unknown";
 }

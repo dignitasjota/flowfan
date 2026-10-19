@@ -212,6 +212,8 @@ Verificar en: `https://fanflow.example.com` → debería mostrar la landing page
 # La imagen `app` (Next.js standalone) no incluye drizzle.config.ts ni src/;
 # el `worker` sí (además de drizzle-kit y las scripts de mantenimiento).
 docker compose -f /opt/fanflow/docker-compose.prod.yml exec worker npm run db:push
+# db:push no crea triggers: asegura el de full-text search de messages (idempotente)
+docker compose -f /opt/fanflow/docker-compose.prod.yml exec worker npm run db:ensure-search
 
 # Scripts de mantenimiento (también en el worker). Las env vienen del compose,
 # por eso los scripts usan --env-file-if-exists (no requieren un .env dentro del contenedor):

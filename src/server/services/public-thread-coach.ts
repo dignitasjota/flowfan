@@ -1,4 +1,5 @@
 import { type AIConfig, callAIProvider } from "./ai";
+import { UNTRUSTED_DATA_RULE, wrapUntrusted } from "./prompt-safety";
 import { parseTolerantJSON } from "./ai-json-parser";
 import { getLanguageInstruction } from "./language-utils";
 
@@ -40,6 +41,7 @@ REGLAS CRÍTICAS:
 - Evita recomendar nada que invite a DM, mencione precios, o suene comercial en abierto.
 - Si el comentario es hostil, evalúa si responder o ignorar es mejor.
 - Si el comentario es genuino, recomienda cómo responder de forma cálida y memorable.
+- ${UNTRUSTED_DATA_RULE}
 
 FORMATO OBLIGATORIO — devuelve SOLO un JSON válido sin texto adicional, fences, ni explicaciones:
 
@@ -80,13 +82,19 @@ function buildUserMessage(input: PublicCoachingInput): string {
 
   if (input.thread.length > 0) {
     lines.push(`\nHILO PREVIO:`);
-    for (const c of input.thread.slice(-15)) {
-      lines.push(`[${c.role === "creator" ? "creator" : c.author}] ${c.content}`);
-    }
+    lines.push(
+      wrapUntrusted(
+        "comment",
+        input.thread
+          .slice(-15)
+          .map((c) => `[${c.role === "creator" ? "creator" : c.author}] ${c.content}`)
+          .join("\n")
+      )
+    );
   }
 
   lines.push(`\nCOMENTARIO A RESPONDER:`);
-  lines.push(`[${input.focusComment.author}] ${input.focusComment.content}`);
+  lines.push(wrapUntrusted("comment", `[${input.focusComment.author}] ${input.focusComment.content}`));
 
   return lines.join("\n");
 }

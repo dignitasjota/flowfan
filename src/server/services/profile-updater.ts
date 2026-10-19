@@ -7,7 +7,7 @@ import { workflowQueue } from "@/server/queues";
 import { createChildLogger } from "@/lib/logger";
 import { publishEvent } from "@/lib/redis-pubsub";
 import { dispatchWebhookEvent } from "./webhook-dispatcher";
-import { findContactExperiment, recordExperimentMetric } from "./ab-experiment";
+import { recordExperimentEventForContact } from "./ab-experiment";
 import { markExperimentConversionForContact } from "./message-experiment";
 
 const log = createChildLogger("profile-updater");
@@ -32,7 +32,13 @@ export async function updateContactProfile(
   contactId: string,
   messageOrTarget: string | AnalysisTarget,
   analysis: SentimentResult,
-  creatorId?: string
+  creatorId?: string,
+  options: {
+    /** Longitud real del mensaje (caracteres). */
+    messageLength?: number;
+    /** Si true, parte de señales vacías (recalcular un perfil desde cero). */
+    resetSignals?: boolean;
+  } = {}
 ): Promise<void> {
   const target: AnalysisTarget =
     typeof messageOrTarget === "string"
@@ -66,7 +72,9 @@ export async function updateContactProfile(
       const prevFunnel = profile.funnelStage;
 
       // Calculate time since last message
-      const currentSignals = profile.behavioralSignals as BehavioralSignals | null;
+      const currentSignals = options.resetSignals
+        ? null
+        : (profile.behavioralSignals as BehavioralSignals | null);
       let timeSinceLastMsg: number | null = null;
       if (currentSignals?.lastMessageAt) {
         timeSinceLastMsg = (Date.now() - new Date(currentSignals.lastMessageAt).getTime()) / (1000 * 60);
@@ -76,7 +84,8 @@ export async function updateContactProfile(
       const newSignals = updateSignals(
         currentSignals,
         analysis,
-        analysis.keyPhrases.join(" ").length + 50,
+        // Longitud real del mensaje; antes se aproximaba con las keyPhrases.
+        options.messageLength ?? analysis.keyPhrases.join(" ").length + 50,
         timeSinceLastMsg,
         contact?.totalConversations ?? 1
       );
@@ -249,24 +258,9 @@ export async function updateContactProfile(
 
       // Record A/B experiment metrics if contact is enrolled
       try {
-        const experiment = await findContactExperiment(db, contactId);
-        if (experiment) {
-          await recordExperimentMetric(
-            db,
-            experiment.experimentId,
-            contactId,
-            experiment.variant,
-            "fan_replied"
-          );
-          if (scores.funnelStage !== prevFunnel) {
-            await recordExperimentMetric(
-              db,
-              experiment.experimentId,
-              contactId,
-              experiment.variant,
-              "conversion"
-            );
-          }
+        await recordExperimentEventForContact(db, contactId, "fan_replied", { once: true });
+        if (scores.funnelStage !== prevFunnel) {
+          await recordExperimentEventForContact(db, contactId, "conversion", { once: true });
         }
       } catch {
         // Non-critical: don't break profile update

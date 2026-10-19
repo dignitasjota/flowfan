@@ -3,6 +3,9 @@ import { db } from "@/server/db";
 import { authenticateApiKey } from "@/server/api/middleware/api-key-auth";
 import { conversations, contacts } from "@/server/db/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
+import { z } from "zod";
+
+const statusSchema = z.enum(["active", "paused", "archived"]);
 
 export async function GET(request: NextRequest) {
   const auth = await authenticateApiKey(request);
@@ -11,7 +14,16 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const page = Math.max(1, Number(searchParams.get("page")) || 1);
   const limit = Math.min(100, Math.max(1, Number(searchParams.get("limit")) || 50));
-  const status = searchParams.get("status") ?? "active";
+  // Validar contra el enum: un valor arbitrario hacía fallar el cast en
+  // Postgres y devolvía 500.
+  const statusParsed = statusSchema.safeParse(searchParams.get("status") ?? "active");
+  if (!statusParsed.success) {
+    return NextResponse.json(
+      { error: "status must be one of: active, paused, archived" },
+      { status: 400 }
+    );
+  }
+  const status = statusParsed.data;
 
   const offset = (page - 1) * limit;
 
@@ -32,7 +44,7 @@ export async function GET(request: NextRequest) {
     .where(
       and(
         eq(contacts.creatorId, auth.creatorId),
-        eq(conversations.status, status as any)
+        eq(conversations.status, status)
       )
     )
     .orderBy(desc(conversations.lastMessageAt))
@@ -46,7 +58,7 @@ export async function GET(request: NextRequest) {
     .where(
       and(
         eq(contacts.creatorId, auth.creatorId),
-        eq(conversations.status, status as any)
+        eq(conversations.status, status)
       )
     );
 
