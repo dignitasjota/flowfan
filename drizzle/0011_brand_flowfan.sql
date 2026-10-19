@@ -1,0 +1,1 @@
+ALTER TABLE "seo_config" ALTER COLUMN "site_title" SET DEFAULT 'FlowFan - CRM con IA para Creadores de Contenido';

@@ -97,7 +97,7 @@ export async function extractContent(url: string): Promise<ExtractedContent> {
     res = await fetch(currentUrl, {
       headers: {
         "User-Agent":
-          "Mozilla/5.0 (compatible; FanFlow/1.0; +https://flowfan.app)",
+          "Mozilla/5.0 (compatible; FlowFan/1.0; +https://flowfan.app)",
         Accept: "text/html",
       },
       redirect: "manual",

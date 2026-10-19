@@ -6,7 +6,7 @@ import { createHash, randomBytes } from "crypto";
  * Required env vars:
  *   - TWITTER_CLIENT_ID        — from developer.x.com (OAuth 2.0 client)
  *   - TWITTER_CLIENT_SECRET    — optional for public clients; required for confidential
- *   - APP_URL                  — base URL of FanFlow (used for redirect_uri)
+ *   - APP_URL                  — base URL of FlowFan (used for redirect_uri)
  *
  * Scopes used: tweet.read, tweet.write, users.read, offline.access
  * "offline.access" is required to get a refresh_token.

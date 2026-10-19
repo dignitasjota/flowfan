@@ -54,10 +54,10 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-gray-950">
       <div className="w-full max-w-md rounded-xl bg-gray-900 p-8 shadow-xl">
         <div className="mb-6 flex justify-center">
-          <Image src="/logo.png" alt="FanFlow Logo" width={80} height={80} className="rounded-2xl" />
+          <Image src="/logo.png" alt="FlowFan Logo" width={80} height={80} className="rounded-2xl" />
         </div>
         <h1 className="mb-2 text-center text-2xl font-bold text-white">
-          FanFlow
+          FlowFan
         </h1>
         <p className="mb-8 text-center text-sm text-gray-400">
           CRM inteligente para creadores

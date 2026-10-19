@@ -115,7 +115,7 @@ export async function pollTwitterCommentsForCreator(
     return { inserted: 0, processedPosts: 0, errors: 1 };
   }
 
-  // Tweets we've published from FanFlow and want to monitor
+  // Tweets we've published from FlowFan and want to monitor
   const posts = await db.query.socialPosts.findMany({
     where: and(
       eq(socialPosts.creatorId, account.creatorId),

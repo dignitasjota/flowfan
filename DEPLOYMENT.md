@@ -1,4 +1,4 @@
-# 🚀 Guía de Deployment FanFlow v2 en VPS con Portainer + Nginx Proxy Manager
+# 🚀 Guía de Deployment FlowFan v2 en VPS con Portainer + Nginx Proxy Manager
 
 ## Pre-requisitos
 
@@ -7,7 +7,7 @@
 - Docker Compose 2.0+ instalado
 - Portainer instalado (opcional, pero recomendado para UI)
 - **Nginx Proxy Manager ya running** (escuchando en 80/443)
-- Dominio propio (ej: fanflow.example.com)
+- Dominio propio (ej: flowfan.example.com)
 - SSH access al VPS
 
 ## Paso 1: Preparar el VPS
@@ -83,7 +83,7 @@ NPM debe estar manejando ya el tráfico HTTP/HTTPS. Los certificados SSL están 
 
 ---
 
-## Paso 4: Desplegar FanFlow en Docker
+## Paso 4: Desplegar FlowFan en Docker
 
 ### 4.1 Clonar o copiar el proyecto
 ```bash
@@ -93,7 +93,7 @@ cd /opt/fanflow
 git clone https://github.com/tu-usuario/fanflow.git .
 
 # O copiar los archivos manualmente
-# rsync -av ./FanFlow\ v2/ root@tu-vps-ip:/opt/fanflow/
+# rsync -av ./FlowFan\ v2/ root@tu-vps-ip:/opt/fanflow/
 ```
 
 ### 4.2 Crear archivo .env.prod
@@ -109,7 +109,7 @@ POSTGRES_DB=fanflow
 REDIS_PASSWORD=<generar-contraseña-segura>
 
 # NextAuth
-NEXTAUTH_URL=https://fanflow.example.com
+NEXTAUTH_URL=https://flowfan.example.com
 NEXTAUTH_SECRET=<generar-con-openssl>
 
 # Encryption
@@ -144,13 +144,13 @@ Modificar las referencias a variables de entorno:
 
 ```bash
 # Reemplazar en docker-compose.prod.yml:
-NEXTAUTH_URL=${NEXTAUTH_URL}  # -> https://fanflow.example.com
+NEXTAUTH_URL=${NEXTAUTH_URL}  # -> https://flowfan.example.com
 LOG_LEVEL=${LOG_LEVEL}  # -> info
 
 # Asegurarse que el archivo source el .env.prod correcto
 ```
 
-### 4.4 Desplegar FanFlow
+### 4.4 Desplegar FlowFan
 
 **Opción A - Vía CLI (recomendado):**
 ```bash
@@ -162,18 +162,33 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
 1. Portainer → Stacks → Add Stack
 2. Name: `fanflow-prod`
 3. Paste docker-compose.prod.yml
-4. Configurar variables desde .env.prod
+4. Configurar variables desde .env.prod (añade también `GIT_SHA` con el commit, ver abajo)
 5. Deploy
+
+> ⚠️ **Portainer no reconstruye las imágenes al redesplegar.** `app` y `worker`
+> se construyen desde el código (`build:` en el compose). "Update the stack" o
+> "Pull and redeploy" hacen `docker compose up -d`, que **reutiliza la imagen
+> existente** si ya hay una: el contenedor sigue con el código antiguo aunque
+> el repositorio esté actualizado. Para actualizar, reconstruye por SSH
+> (sección 7.4) o activa la opción de re-build/re-pull si tu versión de
+> Portainer la ofrece **y verifica** el resultado.
+>
+> **Cómo verificar qué código corre:** `https://tu-dominio/api/health` devuelve
+> `"build": "<commit>"`. Debe coincidir con `git rev-parse --short HEAD` del
+> servidor. Si devuelve `"unknown"`, la imagen se construyó sin `GIT_SHA`
+> (por ejemplo desde Portainer sin esa variable); en ese caso comprueba en la
+> consola del worker que el código es el nuevo, p. ej.
+> `grep ensure-search /app/package.json`.
 
 ---
 
-## Paso 5: Agregar FanFlow a Nginx Proxy Manager
+## Paso 5: Agregar FlowFan a Nginx Proxy Manager
 
 En tu Nginx Proxy Manager existente (http://tu-vps-ip:81):
 
 1. **Dashboard → Proxy Hosts → Add Proxy Host**
 2. **Details:**
-   - **Domain Names:** `fanflow.example.com`
+   - **Domain Names:** `flowfan.example.com`
    - **Scheme:** `http`
    - **Forward Hostname/IP:** `localhost` (o la IP interna del Docker host)
    - **Forward Port:** `3000`
@@ -200,30 +215,62 @@ En tu Nginx Proxy Manager existente (http://tu-vps-ip:81):
    > (número de proxies de confianza) para que la app cuente la IP desde la derecha.
 5. **Save**
 
-Verificar en: `https://fanflow.example.com` → debería mostrar la landing page
+Verificar en: `https://flowfan.example.com` → debería mostrar la landing page
 
 ---
 
 ## Paso 6: Post-Deployment
 
 ### 6.1 Ejecutar migraciones de BD
+
+Producción aplica el schema con `db:push` (compara `src/server/db/schema.ts`
+con la base de datos y aplica la diferencia). **No uses `db:migrate` en el
+servidor:** la imagen del worker no incluye la carpeta `drizzle/`.
+
+Se ejecuta en el contenedor **worker**: la imagen `app` (Next.js standalone)
+no incluye `drizzle.config.ts` ni `src/`.
+
+**Antes de migrar, asegúrate de que el worker corre la imagen nueva** (ver el
+aviso de Portainer en 4.4). Si migras con una imagen antigua, `db:push` usa el
+schema viejo: no aplica los cambios y puede intentar deshacer columnas nuevas.
+
+**Opción A — script (recomendado, por SSH):**
 ```bash
-# IMPORTANTE: las migraciones se corren en el contenedor WORKER, no en app.
-# La imagen `app` (Next.js standalone) no incluye drizzle.config.ts ni src/;
-# el `worker` sí (además de drizzle-kit y las scripts de mantenimiento).
-docker compose -f /opt/fanflow/docker-compose.prod.yml exec worker npm run db:push
-# db:push no crea triggers: asegura el de full-text search de messages (idempotente)
-docker compose -f /opt/fanflow/docker-compose.prod.yml exec worker npm run db:ensure-search
-
-# Scripts de mantenimiento (también en el worker). Las env vienen del compose,
-# por eso los scripts usan --env-file-if-exists (no requieren un .env dentro del contenedor):
-docker compose -f /opt/fanflow/docker-compose.prod.yml exec worker npm run grandfather:email-verified
-docker compose -f /opt/fanflow/docker-compose.prod.yml exec worker npm run generate:vapid
+cd /opt/fanflow
+./scripts/deploy.sh migrate
 ```
+Hace backup en `./backups`, comprueba que el worker corre el commit actual,
+lanza `db:push` de forma **interactiva**, crea el trigger de búsqueda y
+reinicia `app` y `worker`. Necesita una terminal interactiva: no lo lances
+desde cron ni desde CI.
 
-> Recuerda hacer `git pull` en el servidor y **reconstruir las imágenes**
-> (`docker compose -f docker-compose.prod.yml build && ... up -d`) antes de
-> migrar, para que el worker tenga el schema actualizado.
+**Opción B — consola del worker en Portainer:**
+Containers → `worker` → Console → comando `/bin/sh` (la imagen es Alpine, no
+hay bash) → Connect:
+```sh
+cd /app
+grep ensure-search package.json   # si no imprime nada, la imagen es antigua: para
+npm run db:push
+npm run db:ensure-search
+```
+Después reinicia `app` y `worker`.
+
+**Preguntas de `db:push`:**
+- *¿Columna/tabla nueva o renombrada?* → elige **create** salvo que sea un
+  renombrado real.
+- *Aviso de pérdida de datos (truncar, borrar columna con datos)* → responde
+  **No** y revisa antes de continuar.
+
+`db:push` no crea triggers, por eso `db:ensure-search` es obligatorio después:
+crea (o repara) el trigger de full-text search de `messages` y rellena la
+columna `search_vector`. Es idempotente.
+
+**Scripts de mantenimiento** (también en el worker; las variables vienen del
+compose, por eso usan `--env-file-if-exists`):
+```bash
+docker compose -f /opt/fanflow/docker-compose.prod.yml --env-file /opt/fanflow/.env.prod exec worker npm run grandfather:email-verified -- --dry-run
+docker compose -f /opt/fanflow/docker-compose.prod.yml --env-file /opt/fanflow/.env.prod exec worker npm run generate:vapid
+```
 
 ### 6.2 Verificar logs
 ```bash
@@ -243,7 +290,7 @@ docker compose -f /opt/fanflow/docker-compose.prod.yml logs -f postgres
 curl http://localhost:3000/api/health
 
 # Desde navegador
-https://fanflow.example.com/api/health
+https://flowfan.example.com/api/health
 ```
 
 ---
@@ -281,20 +328,34 @@ crontab -e
 
 ### 7.4 Actualizar la aplicación
 
+**Con el script (recomendado):**
 ```bash
-# 1. Descargar últimos cambios
+cd /opt/fanflow
+./scripts/deploy.sh update
+```
+Hace `git pull`, reconstruye `app` y `worker` con el commit actual (`GIT_SHA`),
+redespliega, espera a que la app esté healthy y lanza `migrate` (backup +
+`db:push` interactivo + `db:ensure-search` + reinicio).
+
+**A mano:**
+```bash
 cd /opt/fanflow
 git pull origin main
+export GIT_SHA=$(git rev-parse --short HEAD)
 
-# 2. Reconstruir imagen
-docker compose -f docker-compose.prod.yml build --no-cache
+# Reconstruir: imprescindible, `up -d` solo no recoge el código nuevo
+docker compose -f docker-compose.prod.yml --env-file .env.prod build --no-cache app worker
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
 
-# 3. Redeploy (sin downtime)
-docker compose -f docker-compose.prod.yml up -d
+# Verificar que corre el commit nuevo
+curl -s http://localhost:3000/api/health   # "build" debe ser igual a $GIT_SHA
 
-# 4. Verificar logs
-docker compose -f docker-compose.prod.yml logs -f app
+# Migrar (interactivo)
+./scripts/deploy.sh migrate
 ```
+
+Si despliegas desde Portainer, haz igualmente la reconstrucción por SSH:
+Portainer no reconstruye las imágenes por sí solo (ver 4.4).
 
 ---
 
@@ -303,7 +364,7 @@ docker compose -f docker-compose.prod.yml logs -f app
 En Stripe Dashboard (https://dashboard.stripe.com/webhooks):
 
 1. **Create endpoint**
-2. **Endpoint URL:** `https://fanflow.example.com/api/webhooks/stripe`
+2. **Endpoint URL:** `https://flowfan.example.com/api/webhooks/stripe`
 3. **Events to send:**
    - `checkout.session.completed`
    - `customer.subscription.updated`
@@ -347,7 +408,7 @@ docker volume rm fanflow_redis_data
 
 ### NPM no alcanza la app (502 Bad Gateway)
 ```bash
-# Verificar que FanFlow está corriendo
+# Verificar que FlowFan está corriendo
 docker compose -f /opt/fanflow/docker-compose.prod.yml ps app
 
 # Verificar puerta 3000 desde el host
@@ -367,12 +428,13 @@ curl http://localhost:3000/api/health
 - ✅ Nginx Proxy Manager ya running (puerto 81, 80/443)
 - ✅ `.env.prod` creado con `./scripts/deploy.sh setup`
 - ✅ `.env.prod` editado: dominio + Stripe keys
-- ✅ FanFlow desplegado: `./scripts/deploy.sh start`
-- ✅ Proxy host en NPM: `fanflow.example.com` → `localhost:3000`
+- ✅ FlowFan desplegado: `./scripts/deploy.sh start`
+- ✅ Proxy host en NPM: `flowfan.example.com` → `localhost:3000`
 - ✅ SSL en NPM: Let's Encrypt automático
-- ✅ Migraciones de BD ejecutadas (automático)
+- ✅ Migraciones de BD ejecutadas (`deploy.sh start`/`update` lanzan `migrate`, interactivo)
+- ✅ `/api/health` devuelve `"build"` igual al commit desplegado
 - ✅ `http://localhost:3000/api/health` → 200
-- ✅ `https://fanflow.example.com` → landing page
+- ✅ `https://flowfan.example.com` → landing page
 - ✅ Webhook de Stripe configurado
 
 ---
@@ -383,11 +445,15 @@ curl http://localhost:3000/api/health
 # Volver a versión anterior
 cd /opt/fanflow
 git revert HEAD
-docker compose -f docker-compose.prod.yml build --no-cache
-docker compose -f docker-compose.prod.yml up -d
+export GIT_SHA=$(git rev-parse --short HEAD)
+docker compose -f docker-compose.prod.yml --env-file .env.prod build --no-cache app worker
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
 
-# O restaurar desde backup
-psql -U fanflow fanflow < /opt/fanflow/backups/fanflow_YYYYMMDD.sql
+# O restaurar desde backup (psql corre dentro del contenedor de Postgres).
+# Ojo: restaurar sobre una BD con datos puede fallar por duplicados; para una
+# restauración limpia, recrea antes la base de datos.
+docker compose -f docker-compose.prod.yml --env-file .env.prod exec -T postgres \
+  sh -c 'psql -U "$POSTGRES_USER" "$POSTGRES_DB"' < /opt/fanflow/backups/flowfan_YYYYMMDD_HHMMSS.sql
 ```
 
 ---

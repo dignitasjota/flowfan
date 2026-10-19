@@ -91,8 +91,8 @@ export function Sidebar({ user }: SidebarProps) {
       {/* Logo */}
       <div className="flex h-16 items-center justify-between px-6">
         <div className="flex items-center gap-3">
-          <Image src="/logo.png" alt="FanFlow Logo" width={32} height={32} className="rounded-md" />
-          <h1 className="text-xl font-bold text-white">FanFlow</h1>
+          <Image src="/logo.png" alt="FlowFan Logo" width={32} height={32} className="rounded-md" />
+          <h1 className="text-xl font-bold text-white">FlowFan</h1>
         </div>
         {/* Close button (mobile only) */}
         <button

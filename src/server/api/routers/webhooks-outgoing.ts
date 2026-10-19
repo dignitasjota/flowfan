@@ -156,7 +156,7 @@ export const webhooksOutgoingRouter = createTRPCRouter({
         event: "test",
         payload: {
           test: true,
-          message: "This is a test webhook from FanFlow",
+          message: "This is a test webhook from FlowFan",
           timestamp: new Date().toISOString(),
         },
         url: config.url,

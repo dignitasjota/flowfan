@@ -92,8 +92,8 @@ export function AdminSidebar({ user }: AdminSidebarProps) {
       {/* Logo + badge */}
       <div className="flex h-16 items-center justify-between px-5">
         <div className="flex items-center gap-2.5">
-          <Image src="/logo.png" alt="FanFlow Logo" width={28} height={28} className="rounded-md" />
-          <span className="text-lg font-bold text-white">FanFlow</span>
+          <Image src="/logo.png" alt="FlowFan Logo" width={28} height={28} className="rounded-md" />
+          <span className="text-lg font-bold text-white">FlowFan</span>
           <span className="rounded bg-red-600 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
             Admin
           </span>

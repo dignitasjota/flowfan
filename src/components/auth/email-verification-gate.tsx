@@ -31,7 +31,7 @@ export function EmailVerificationGate({ email }: { email: string }) {
         <p className="mt-2 text-sm text-gray-400">
           Te hemos enviado un enlace de verificación a{" "}
           <span className="font-medium text-gray-200">{email}</span>. Haz clic en
-          el enlace para activar tu cuenta y acceder a FanFlow.
+          el enlace para activar tu cuenta y acceder a FlowFan.
         </p>
 
         {sent && (

@@ -29,7 +29,7 @@ export default function InvitePage() {
     <div className="flex min-h-screen items-center justify-center bg-gray-950 px-4">
       <div className="w-full max-w-md rounded-xl border border-gray-800 bg-gray-900 p-8">
         <div className="mb-6 text-center">
-          <h1 className="text-2xl font-bold text-white">FanFlow</h1>
+          <h1 className="text-2xl font-bold text-white">FlowFan</h1>
           <p className="mt-1 text-sm text-gray-400">Invitacion de equipo</p>
         </div>
 
@@ -50,7 +50,7 @@ export default function InvitePage() {
         ) : session ? (
           <div className="space-y-4 text-center">
             <p className="text-sm text-gray-300">
-              Has sido invitado a unirte a un equipo en FanFlow como{" "}
+              Has sido invitado a unirte a un equipo en FlowFan como{" "}
               <span className="font-medium text-white">
                 {session.user?.name ?? session.user?.email}
               </span>

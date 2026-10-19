@@ -1,7 +1,7 @@
-/* FanFlow service worker — push notifications + basic app-shell install.
+/* FlowFan service worker — push notifications + basic app-shell install.
  * Kept dependency-free and small. Bump CACHE_VERSION to force an update. */
 
-const CACHE_VERSION = "fanflow-v1";
+const CACHE_VERSION = "flowfan-v2";
 
 self.addEventListener("install", (event) => {
   // Activa la nueva versión inmediatamente.
@@ -27,10 +27,10 @@ self.addEventListener("push", (event) => {
   try {
     payload = event.data ? event.data.json() : {};
   } catch (e) {
-    payload = { title: "FanFlow", body: event.data ? event.data.text() : "" };
+    payload = { title: "FlowFan", body: event.data ? event.data.text() : "" };
   }
 
-  const title = payload.title || "FanFlow";
+  const title = payload.title || "FlowFan";
   const options = {
     body: payload.body || "",
     icon: "/icon-192.png",

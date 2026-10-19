@@ -44,7 +44,7 @@ export function StepFirstContact({ onComplete }: Props) {
           Añade tu primer contacto
         </h3>
         <p className="mt-1 text-sm text-gray-400">
-          Añade un fan para empezar a usar FanFlow. Puedes saltar este paso si
+          Añade un fan para empezar a usar FlowFan. Puedes saltar este paso si
           prefieres.
         </p>
       </div>

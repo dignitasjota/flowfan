@@ -110,7 +110,7 @@ export function CommentThreadPanel({ postId }: Props) {
   function submitReply() {
     if (!activeCommentId || !replyDraft.trim()) return;
     const content = replyDraft.trim();
-    // FanFlow aún no publica respuestas en la plataforma: se copian para pegarlas.
+    // FlowFan aún no publica respuestas en la plataforma: se copian para pegarlas.
     navigator.clipboard?.writeText(content).catch(() => {});
     reply.mutate({ commentId: activeCommentId, content });
   }
@@ -424,7 +424,7 @@ export function CommentThreadPanel({ postId }: Props) {
             </div>
 
             <p className="mt-3 text-xs text-gray-500">
-              La respuesta se registra en FanFlow, marca el comentario como
+              La respuesta se registra en FlowFan, marca el comentario como
               resuelto y se copia al portapapeles para que la publiques en{" "}
               <span className="capitalize">{activeComment.platformType}</span>.
               El AI está calibrado para tono público.

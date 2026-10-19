@@ -123,7 +123,7 @@ export function AccountSettings() {
       <div>
         <h3 className="text-lg font-semibold text-white">Notificaciones push</h3>
         <p className="mt-1 text-sm text-gray-400">
-          Avisos en tiempo real en tu navegador o móvil, incluso con FanFlow cerrado.
+          Avisos en tiempo real en tu navegador o móvil, incluso con FlowFan cerrado.
         </p>
         <div className="mt-4">
           <PushToggle />

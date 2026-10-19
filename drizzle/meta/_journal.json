@@ -78,6 +78,13 @@
       "when": 1792366602080,
       "tag": "0010_schema_sync",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1792398657956,
+      "tag": "0011_brand_flowfan",
+      "breakpoints": true
     }
   ]
 }

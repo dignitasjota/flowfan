@@ -82,7 +82,7 @@ export default function ContactsPage() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `contactos-fanflow.${format}`;
+      a.download = `contactos-flowfan.${format}`;
       a.click();
       URL.revokeObjectURL(url);
     });

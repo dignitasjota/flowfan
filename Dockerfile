@@ -20,6 +20,10 @@ RUN npm run build
 FROM base AS worker
 WORKDIR /app
 ENV NODE_ENV=production
+# Commit con el que se construyó la imagen (deploy.sh lo pasa como build arg).
+# Permite detectar un contenedor que sigue con una imagen antigua.
+ARG GIT_SHA=unknown
+ENV GIT_SHA=$GIT_SHA
 COPY --from=deps /app/node_modules ./node_modules
 COPY package.json package-lock.json ./
 COPY drizzle.config.ts ./
@@ -36,6 +40,8 @@ CMD ["npx", "tsx", "src/server/worker.ts"]
 FROM base AS runner
 WORKDIR /app
 ENV NODE_ENV=production
+ARG GIT_SHA=unknown
+ENV GIT_SHA=$GIT_SHA
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
 

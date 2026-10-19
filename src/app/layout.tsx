@@ -7,12 +7,12 @@ import { ServiceWorkerRegister } from "@/components/pwa/service-worker-register"
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "FanFlow - CRM para Creadores",
+  title: "FlowFan - CRM para Creadores",
   description: "Gestiona conversaciones con fans usando IA",
   manifest: "/manifest.webmanifest",
   appleWebApp: {
     capable: true,
-    title: "FanFlow",
+    title: "FlowFan",
     statusBarStyle: "black-translucent",
   },
 };

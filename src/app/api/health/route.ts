@@ -51,6 +51,9 @@ export async function GET() {
       status: allHealthy ? "healthy" : "degraded",
       timestamp: new Date().toISOString(),
       version: process.env.npm_package_version ?? "0.1.0",
+      // Commit de la imagen desplegada: sirve para confirmar que un redeploy
+      // (p. ej. desde Portainer) reconstruyó realmente la imagen.
+      build: process.env.GIT_SHA || "unknown",
       checks,
     },
     { status: allHealthy ? 200 : 503 }

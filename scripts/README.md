@@ -1,4 +1,4 @@
-# FanFlow Deployment Scripts
+# FlowFan Deployment Scripts
 
 ## Quick Start
 
@@ -34,8 +34,9 @@ This will:
 | `start` | Build and start services |
 | `stop` | Stop all services |
 | `logs [service]` | Stream logs (default: app) |
-| `backup` | Create database backup |
-| `update` | Pull latest code and redeploy |
+| `backup` | Create database backup in `./backups` |
+| `migrate` | Backup + `db:push` (interactive) + `db:ensure-search` + restart app/worker |
+| `update` | Pull latest code, rebuild app+worker, redeploy and migrate |
 | `health` | Check health of all services |
 | `help` | Show help |
 
@@ -95,11 +96,14 @@ docker compose -f docker-compose.prod.yml build --no-cache
 ### deploy.sh
 Main deployment helper script with these functions:
 - **setup**: Creates `.env.prod` with randomly generated secure values
-- **start**: Builds images, starts containers, runs migrations
+- **start**: Builds images, starts containers, waits for the app to be healthy, runs `migrate`
 - **stop**: Gracefully stops all services
 - **logs**: Streams logs from any service
 - **backup**: Creates SQL backup of PostgreSQL database
-- **update**: Pulls git changes and redeploys
+- **migrate**: Checks the worker runs the current commit (`GIT_SHA`), backs up, runs `db:push` interactively and `db:ensure-search`
+- **update**: Pulls git changes, rebuilds `app` and `worker`, redeploys and runs `migrate`
+
+All `docker compose` calls use `--env-file .env.prod`. `start`, `update` and `migrate` need an interactive terminal (SSH), because `drizzle-kit push` may ask questions.
 - **health**: Checks Docker container and API health
 
 ## Environment Variables

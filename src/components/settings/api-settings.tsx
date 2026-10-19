@@ -205,7 +205,7 @@ function WebhooksSection() {
         <div>
           <h4 className="text-sm font-semibold text-white">Webhooks</h4>
           <p className="text-xs text-gray-400">
-            Recibe notificaciones HTTP cuando ocurren eventos en FanFlow.
+            Recibe notificaciones HTTP cuando ocurren eventos en FlowFan.
           </p>
         </div>
         <button
@@ -350,7 +350,7 @@ export function ApiSettings() {
       <div>
         <h3 className="text-lg font-medium text-white">API y Webhooks</h3>
         <p className="mt-1 text-sm text-gray-400">
-          Gestiona el acceso programatico a FanFlow y las notificaciones a sistemas externos.
+          Gestiona el acceso programatico a FlowFan y las notificaciones a sistemas externos.
         </p>
       </div>
 

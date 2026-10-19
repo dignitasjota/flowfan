@@ -92,7 +92,7 @@ export default function AdminSeoPage() {
               <div className="space-y-4">
                 <div>
                   <label className={labelClass}>Título del sitio</label>
-                  <input name="siteTitle" value={form.siteTitle} onChange={handleChange} className={inputClass} placeholder="FanFlow - CRM con IA para Creadores" />
+                  <input name="siteTitle" value={form.siteTitle} onChange={handleChange} className={inputClass} placeholder="FlowFan - CRM con IA para Creadores" />
                   <p className="mt-1 text-xs text-gray-600">{form.siteTitle.length}/255 caracteres</p>
                 </div>
                 <div>

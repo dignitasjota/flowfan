@@ -9,7 +9,7 @@
  * Required env vars:
  *   - FB_CLIENT_ID            — Facebook App ID
  *   - FB_CLIENT_SECRET        — Facebook App Secret
- *   - APP_URL                 — base URL of FanFlow
+ *   - APP_URL                 — base URL of FlowFan
  *
  * Scopes used: pages_show_list, pages_read_engagement, instagram_basic,
  *              instagram_content_publish

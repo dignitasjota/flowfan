@@ -2,8 +2,8 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "FanFlow - CRM para Creadores",
-    short_name: "FanFlow",
+    name: "FlowFan - CRM para Creadores",
+    short_name: "FlowFan",
     description: "Gestiona conversaciones con fans usando IA",
     start_url: "/conversations",
     display: "standalone",

@@ -52,6 +52,7 @@ services:
       cache_from: []
       args:
         - NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=${NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY}
+        - GIT_SHA=${GIT_SHA:-unknown}
     environment: *app-env
     volumes:
       - media_uploads:/app/uploads
@@ -80,6 +81,8 @@ services:
       dockerfile: Dockerfile
       cache_from: []
       target: worker
+      args:
+        - GIT_SHA=${GIT_SHA:-unknown}
     environment: *app-env
     depends_on:
       postgres:

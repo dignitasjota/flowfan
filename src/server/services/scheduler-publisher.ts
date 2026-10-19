@@ -40,7 +40,7 @@ export type PublishResult = {
   error?: string;
 };
 
-export const REDDIT_USER_AGENT = "FanFlow/1.0 (by /u/fanflow)";
+export const REDDIT_USER_AGENT = "FlowFan/1.0 (by /u/flowfan)";
 
 export function decryptRedditCredentials(
   encryptedCredentials: string

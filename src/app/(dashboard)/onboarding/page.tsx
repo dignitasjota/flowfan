@@ -8,7 +8,7 @@ export default function OnboardingPage() {
       <div className="w-full max-w-xl">
         <div className="mb-8 text-center">
           <h1 className="text-3xl font-bold text-white">
-            Bienvenido a FanFlow
+            Bienvenido a FlowFan
           </h1>
           <p className="mt-2 text-gray-400">
             Configura tu cuenta en 3 sencillos pasos.

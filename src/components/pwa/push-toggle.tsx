@@ -109,7 +109,7 @@ export function PushToggle() {
         <div>
           <h4 className="text-sm font-medium text-white">Notificaciones push</h4>
           <p className="mt-1 text-sm text-gray-400">
-            Recibe avisos de nuevos mensajes y alertas aunque no tengas FanFlow
+            Recibe avisos de nuevos mensajes y alertas aunque no tengas FlowFan
             abierto. Actívalas en cada navegador o dispositivo.
           </p>
         </div>

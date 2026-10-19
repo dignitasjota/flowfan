@@ -9,6 +9,8 @@ import { describe, it, expect, vi } from "vitest";
 vi.mock("@/server/queues", () => ({
   webhookDeliveryQueue: { add: vi.fn() },
 }));
+// Sin resolución DNS real en los tests.
+vi.mock("@/lib/ssrf", () => ({ assertPublicHttpUrl: vi.fn().mockResolvedValue(undefined) }));
 
 import { generateWebhookSignature } from "@/server/services/webhook-dispatcher";
 import { createHmac } from "crypto";
@@ -83,5 +85,30 @@ describe("resolveWebhookSecret", () => {
     const { resolveWebhookSecret } = await import("@/server/services/webhook-dispatcher");
     expect(resolveWebhookSecret(encrypt("abc123"))).toBe("abc123");
     expect(resolveWebhookSecret("legacy-plain")).toBe("legacy-plain");
+  });
+});
+
+describe("deliverWebhook headers", () => {
+  it("envía las cabeceras FlowFan y las legacy FanFlow con la misma firma", async () => {
+    const { deliverWebhook } = await import("@/server/services/webhook-dispatcher");
+    const chain = {
+      values: () => chain,
+      returning: async () => [{ id: "log-1" }],
+      set: () => chain,
+      where: async () => undefined,
+    };
+    const db = { insert: () => chain, update: () => chain };
+    const fetchMock = vi.fn().mockResolvedValue(new Response("ok", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await deliverWebhook(db as never, "cfg-1", "contact.created", { a: 1 }, "https://example.com/hook", "s3cret", 1);
+
+    const headers = fetchMock.mock.calls[0]![1].headers as Record<string, string>;
+    const expected = generateWebhookSignature(JSON.stringify({ a: 1 }), "s3cret");
+    expect(headers["X-FlowFan-Signature"]).toBe(expected);
+    expect(headers["X-FanFlow-Signature"]).toBe(expected);
+    expect(headers["X-FlowFan-Event"]).toBe("contact.created");
+    expect(headers["X-FanFlow-Event"]).toBe("contact.created");
+    vi.unstubAllGlobals();
   });
 });

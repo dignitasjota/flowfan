@@ -103,9 +103,13 @@ export async function deliverWebhook(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        "X-FlowFan-Signature": signature,
+        "X-FlowFan-Event": event,
+        // Cabeceras legacy (marca antigua): se mantienen para no romper
+        // integraciones que ya verifican X-FanFlow-Signature.
         "X-FanFlow-Signature": signature,
         "X-FanFlow-Event": event,
-        "User-Agent": "FanFlow-Webhooks/1.0",
+        "User-Agent": "FlowFan-Webhooks/1.0",
       },
       body,
       redirect: "manual", // no seguir redirecciones a destinos internos

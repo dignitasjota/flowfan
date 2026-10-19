@@ -2,6 +2,8 @@
 
 SaaS CRM para creadores de contenido con asistente IA para gestionar conversaciones con fans.
 
+> **Marca:** el producto se llama **FlowFan** (dominio `flowfan.app`). "FanFlow" solo sobrevive en identificadores técnicos que no deben cambiarse sin migración: nombre del repo, BD/usuario `fanflow`, contenedores, claves `fanflow:*` de `localStorage`, eventos `fanflow:*`, prefijo `ff_live_` y la cabecera legacy `X-FanFlow-Signature` (los webhooks envían también `X-FlowFan-*`). Todo texto visible nuevo debe decir FlowFan.
+
 > **Backlog de auditoría:** los bugs y mejoras pendientes identificados en la auditoría (2026-07-02) están en [`AUDITORIA_BACKLOG.md`](./AUDITORIA_BACKLOG.md), con IDs referenciables (`SEC-*`, `TEN-*`, `AI-*`, `WK-*`, `FE-*`, `ARCH-*`), ubicación `archivo:línea`, escenario y fix propuesto. Consúltalo antes de tocar auth, routers tRPC, workers/pollers o la capa realtime.
 
 ## Stack
@@ -22,6 +24,7 @@ SaaS CRM para creadores de contenido con asistente IA para gestionar conversacio
 - `npm run db:migrate` — run migrations
 - `npm run db:studio` — Drizzle Studio (DB browser)
 - `npm run db:ensure-search` — crea/repara el trigger de full-text search de `messages` (necesario tras `db:push`; `db:migrate` ya lo incluye en `0010_schema_sync.sql`)
+- `./scripts/deploy.sh update` / `migrate` — despliegue en el VPS (ver `DEPLOYMENT.md`). En producción el schema se aplica con `db:push` desde el worker, nunca con `db:migrate`; Portainer no reconstruye las imágenes, comprueba el campo `build` de `/api/health`.
 
 ## Development
 
@@ -648,7 +651,7 @@ Webhooks send HTTP POST notifications to external URLs when events occur in FanF
 
 - `webhookDeliveryQueue` ("webhook-delivery") with BullMQ, 3 attempts, exponential 5s backoff
 - Worker concurrency: 5
-- Request headers: `X-FanFlow-Signature: sha256=HMAC(payload, secret)`, `X-FanFlow-Event`, `Content-Type: application/json`
+- Request headers: `X-FlowFan-Signature: sha256=HMAC(payload, secret)`, `X-FlowFan-Event`, `Content-Type: application/json` (más las legacy `X-FanFlow-Signature` / `X-FanFlow-Event`, con el mismo valor)
 - All deliveries logged in `webhookDeliveryLogs` (statusCode, responseBody, error, attempt)
 - 10 second timeout per delivery
 
