@@ -309,6 +309,10 @@ Inline command palette inside the manual-mode reply textarea:
 - Keyboard: `↑`/`↓` navigate, `Enter`/`Tab` insert, `Esc` closes (replaces the slash range with empty string).
 - Mounted as `position: absolute` floating above the textarea.
 
+### Sidebar (`src/components/layout/sidebar.tsx`)
+
+Los ítems de navegación declaran `section` y se agrupan en 4 secciones: **Bandeja** (dashboard, conversaciones, comentarios, contactos), **Growth & IA**, **Publicación** y **Administración**. Cada ítem tiene `access` (`all` / `manager` / `owner`) para filtrar por rol. Un ítem nuevo debe ir en una de esas secciones, no en una lista plana.
+
 ### Sidebar Unread Badges (`SidebarBadge` in `src/components/layout/sidebar.tsx`)
 
 Red pill (`99+` clamp) shown next to navigation items with pending work:
@@ -630,7 +634,7 @@ All endpoints require `Authorization: Bearer ff_live_xxx` header. API access is 
 
 ### Overview
 
-Webhooks send HTTP POST notifications to external URLs when events occur in FanFlow. Each webhook config has a secret used for HMAC-SHA256 signature verification.
+Webhooks send HTTP POST notifications to external URLs when events occur in FlowFan. Each webhook config has a secret used for HMAC-SHA256 signature verification.
 
 ### Events
 
@@ -723,7 +727,7 @@ Push-based ingestion via Meta's webhooks:
 - **POST** event delivery:
   1. Validates `X-Hub-Signature-256` (HMAC SHA-256 of the raw body using `META_WEBHOOK_APP_SECRET`) with a constant-time compare.
   2. For each `entry.id` (= Instagram Business Account id), looks up the matching `socialAccount` via `externalAccountId`. Multi-creator dispatch supported.
-  3. For each `change.field === "comments"` event: lazy-creates the parent `socialPosts` row if the IG media was published outside FanFlow, deduplicates by `externalCommentId`, resolves `parent_id` for threaded replies, and runs the standard ingest pipeline (`source: "webhook"`).
+  3. For each `change.field === "comments"` event: lazy-creates the parent `socialPosts` row if the IG media was published outside FlowFan, deduplicates by `externalCommentId`, resolves `parent_id` for threaded replies, and runs the standard ingest pipeline (`source: "webhook"`).
 - Meta delivers retries on 5xx; idempotency guaranteed by the unique index on `(creatorId, platformType, externalCommentId)`.
 
 ### AI Service (`src/server/services/ai-comment-suggester.ts`)
@@ -842,7 +846,7 @@ Schedule public posts to native APIs (**Reddit, Twitter / X, Instagram**) or to 
   - **Single Reel** (length 1, video URL): `media?media_type=REELS&video_url=…` → poll `status_code` until `FINISHED` → `media_publish`. Returns `/reel/{id}/`. Polling: 5s interval, 5 min cap.
   - **Carousel** (length 2-10, images and/or videos mixed): N × `media?is_carousel_item=true` (caption omitted on children — it lives on the parent). Video children are polled to FINISHED before the parent is created. Then `media?media_type=CAROUSEL&children=id1,id2,…` → poll parent → `media_publish`. Returns `/p/{id}/`.
 - The `platformConfigs.instagram` JSONB uses `mediaUrls: string[]`. Back-compat: the worker also accepts legacy `mediaUrl` (single string) and `imageUrl` (oldest) so already-queued posts keep working. Media URLs must be **publicly accessible** (Instagram fetches them server-side, rejects signed URLs that expire quickly). When R2 is configured (see "Media Storage (R2)"), uploads from the composer's `MediaUploader` land in R2 and the resulting `publicUrl`s are fed directly into `platformConfigs.instagram.mediaUrls`.
-- Env vars: `FB_CLIENT_ID`, `FB_CLIENT_SECRET`, `APP_URL`.
+- Env vars: `FB_CLIENT_ID`, `FB_CLIENT_SECRET`, `APP_URL`, `FB_GRAPH_VERSION` (opcional, default `v22.0`).
 - Redirect URI to register with developers.facebook.com: `{APP_URL}/api/oauth/instagram/callback`.
 
 ### OAuth Routes
@@ -1131,7 +1135,7 @@ Cada creator tiene un código/link de referido; cuando un referido se suscribe a
 
 ## PWA & Push Notifications
 
-FanFlow es una PWA instalable con notificaciones push web.
+FlowFan es una PWA instalable con notificaciones push web.
 
 - **Manifest** (`src/app/manifest.ts`): `/manifest.webmanifest` con `display: standalone`, theme color, iconos (usa `public/logo.png`). Metadata PWA + `themeColor` en el root layout.
 - **Service worker** (`public/sw.js`): registrado por `ServiceWorkerRegister` (montado en el root layout). Maneja `push` (muestra la notificación) y `notificationclick` (enfoca/navega a la URL del payload). No cachea fetch (sin estrategia offline por ahora). Bump `CACHE_VERSION` para forzar update.

@@ -1,16 +1,20 @@
-# FanFlow v2 — Estado del Proyecto
+# FlowFan (repo FanFlow v2) — Estado del Proyecto
 
 > **Documento de referencia para agentes y desarrolladores.**
-> Última actualización: 2026-07-10
-> Estado actual: **Producción-ready**. Todas las funcionalidades core + el grueso del roadmap (fases 5-13, 15) implementadas, testeadas y documentadas.
+> Última actualización: 2026-11-19 (refleja el código hasta el commit `6014803`, 2026-10-19)
+> Estado actual: **Producción-ready**. Todo el roadmap de features (fases 1-16) implementado; las dos auditorías (2026-07-02 y 2026-10-19) aplicadas. Lo que queda abierto son mejoras arquitectónicas no bloqueantes (ARCH-2/4/6/8/9).
+>
+> **Marca:** el producto se llama **FlowFan** (dominio `flowfan.app`) desde el 2026-10-19. "FanFlow" solo sobrevive en identificadores técnicos (repo, BD/usuario `fanflow`, contenedores, claves `fanflow:*`, prefijo `ff_live_`, cabecera legacy `X-FanFlow-Signature`).
 >
 > ⚠️ **Este documento resume el estado; el detalle exhaustivo y siempre actualizado de cada módulo está en [`CLAUDE.md`](./CLAUDE.md)** (85 KB, fuente de verdad de la arquitectura). Aquí se mantienen la visión general, el stack, la seguridad y lo que queda pendiente. Para el roadmap de features ver [`ROADMAP.md`](./ROADMAP.md); para bugs/deuda técnica ver [`AUDITORIA_BACKLOG.md`](./AUDITORIA_BACKLOG.md).
 >
 > **Desde la v1 de este doc (marzo 2026) se han añadido** (ver detalle en CLAUDE.md): Team Management + roles custom + audit log, Telegram bot, Broadcasts, Revenue Tracking, Mensajes Programados, Media Vault (Cloudflare R2), Workflows, Segmentación, A/B Testing de conversation modes, Calendario unificado, bandeja de Comentarios públicos (Reddit/Twitter/Instagram), Publishing Scheduler nativo con OAuth, Blog-to-Social, Content Gaps, Audience Insights, Coaching IA, Churn Prediction, API REST pública + webhooks salientes, import de contactos, auto-respuestas y panel de admin. El API tiene **37 routers tRPC** (no los ~10 listados en la sección 4, que refleja el estado de marzo).
+>
+> **Desde la actualización de julio:** cierre completo del backlog de la primera auditoría (bajos, WK-8/10/13, ARCH-1/3/5/7/10/11), `ConfirmDialog` accesible y sidebar agrupado (2026-09-15), loading states con Skeleton (2026-09-22), segunda auditoría completa (2026-10-19, ver final de `AUDITORIA_BACKLOG.md`), `deploy.sh migrate` con verificación de imagen y unificación de marca FlowFan (2026-10-19).
 
 ---
 
-## 1. Qué es FanFlow
+## 1. Qué es FlowFan
 
 SaaS CRM para creadores de contenido adulto (OnlyFans, Instagram, etc.) con asistente IA para gestionar conversaciones con fans. El producto permite:
 
@@ -176,7 +180,7 @@ creators (tenant principal)
 
 ## 6. Sistema de planes y límites
 
-| Feature | Free | Starter ($15/mes) | Pro ($29/mes) | Business (custom) |
+| Feature | Free | Starter (€14/mes) | Pro (€29/mes) | Business (€99/mes o custom) |
 |---------|------|-------------------|---------------|-------------------|
 | Contactos | 5 | 50 | ∞ | ∞ |
 | Mensajes IA/mes | 20 | 200 | 2.000 | ∞ |
@@ -187,7 +191,9 @@ creators (tenant principal)
 | Multi-modelo IA | ❌ | ❌ | ✅ | ✅ |
 | Exportar datos | ❌ | CSV | CSV+JSON | CSV+JSON+API |
 
-Los límites se aplican en los routers antes de cada mutación. Un `TRPCError` con código `FORBIDDEN` bloquea la operación y el frontend muestra un modal de upgrade.
+Los límites se aplican en los routers antes de cada mutación. Un `TRPCError` con código `FORBIDDEN` bloquea la operación y el frontend muestra un modal de upgrade (solo ante errores de plan, no ante cualquier `FORBIDDEN`). La tabla es un resumen: la fuente de verdad es `PLAN_LIMITS` en `src/server/services/usage-limits.ts` (incluye media, workflows, segmentos, broadcasts, equipo, coaching, API…).
+
+Los límites que gatean una llamada IA real (`checkAIMessageLimit`, `checkReportLimit`, `checkCoachingLimit`) usan un contador atómico en Redis (`incrMonthlyCounter`), y el uso mostrado en Billing lee esos mismos contadores (`readMonthlyCounter`). Business tiene self-checkout solo si `STRIPE_BUSINESS_PRICE_ID` está configurado.
 
 ---
 
@@ -235,16 +241,20 @@ Las API keys se cifran con **AES-256-GCM** antes de guardar en DB (`src/lib/cryp
 
 ## 9. Seguridad implementada
 
-- **Autenticación**: NextAuth JWT con `NEXTAUTH_SECRET`
+- **Autenticación**: NextAuth JWT con `NEXTAUTH_SECRET`. El callback `jwt` relee cada 60 s rol, existencia de la cuenta y membresía de equipo; una cuenta borrada pierde la sesión (`/login?expired=1`).
+- **Verificación de email obligatoria** antes de entrar al dashboard (token 24 h).
 - **Multi-tenancy**: `protectedProcedure` inyecta `creatorId`; todas las queries filtran por `creatorId`
-- **Rate limiting**: Redis sorted sets. Configurado en registro (3/5min), auth (5/1min)
+- **Alcance por permisos** (`src/server/api/access.ts`): `conversations.read_all` / `read_assigned` deciden qué ve cada miembro, respetando roles personalizados. `assertCanAccessConversation`/`assertCanAccessContact` en endpoints por id, `conversationScopeFilter`/`contactScopeFilter` en listados. `permissionProcedure(...perms)` en contactos, envío de mensajes, sugerencias IA, asignaciones, equipo, secuencias y API keys.
+- **Rate limiting**: sliding window en Redis. Registro (3/5min), auth (5/1min) **fail-closed** si Redis cae; API keys en Redis por `keyId`; IP real vía `getClientIp()` con `TRUSTED_PROXY_HOPS`
+- **Anti-SSRF** (`src/lib/ssrf.ts`) en webhooks salientes y blog-to-social; webhooks firmados con el secreto **descifrado** (HMAC-SHA256)
+- **Inyección**: SQL parametrizado en filtros de segmentos; snippets de búsqueda renderizados como texto (sin `dangerouslySetInnerHTML`); CSV protegido contra fórmulas (`src/lib/csv.ts`); HTML escapado en emails; texto de fans envuelto en los prompts (`prompt-safety.ts`) contra prompt injection
 - **CSRF**: Verificación de `Origin` header en endpoints API
 - **Cifrado en reposo**: API keys cifradas AES-256-GCM
 - **Password hashing**: bcrypt con cost factor 12
 - **Anti-enumeración**: `forgot-password` siempre retorna 200 independientemente de si el email existe
 - **Ownership checks**: Verificación explícita en `conversations.create`, `messages.list`, `messages.addFanMessage`, `messages.addCreatorMessage`
 - **TRPCError tipados**: Todos los errores usan `TRPCError` con códigos correctos (NOT_FOUND, FORBIDDEN, UNAUTHORIZED)
-- **Headers de seguridad**: Configurados en `next.config.js`
+- **Headers de seguridad**: `X-Frame-Options: DENY`, `nosniff`, HSTS en producción, etc. (`next.config.ts`)
 
 ---
 
@@ -273,13 +283,17 @@ STRIPE_PRO_PRICE_ID=price_...
 
 # Opcional
 LOG_LEVEL=info  # debug | info | warn | error
+TRUSTED_PROXY_HOPS=1  # nº de proxies de confianza delante de la app (NPM = 1)
+STRIPE_BUSINESS_PRICE_ID=price_...  # habilita el self-checkout de Business
 ```
+
+Integraciones opcionales (todas degradan a no-op si faltan; ver `.env.example`): `RESEND_API_KEY` (emails), `TWITTER_CLIENT_ID`/`SECRET`/`BEARER_TOKEN`, `FB_CLIENT_ID`/`SECRET`/`FB_GRAPH_VERSION`, `META_WEBHOOK_VERIFY_TOKEN`/`APP_SECRET`, `R2_*` (5 variables), `VAPID_*`. Desde la segunda auditoría, `docker-compose.prod.yml` las pasa todas a `app` y `worker`.
 
 ---
 
-## 11. Tests — Suite completa (900+ tests)
+## 11. Tests — Suite completa (950+ tests)
 
-**Configuración**: `vitest.config.mts` + `__tests__/setup.ts` (mocks de Redis, variables de entorno). Nota: el config es `.mts` (ESM) para compatibilidad con Vitest 4 + std-env 4.x. Las tablas de abajo reflejan el subconjunto core de marzo 2026; hoy hay **77 ficheros de test / 904 tests unitarios+integración en verde** (+ 9 E2E opt-in que requieren `TEST_DATABASE_URL`). Ver `__tests__/` para la cobertura completa (incluye scheduler, social-comments, media/R2, publishers de IG/X/Reddit, recurrence, blog-to-social, audience-insights, etc.).
+**Configuración**: `vitest.config.mts` + `__tests__/setup.ts` (mocks de Redis, variables de entorno). Nota: el config es `.mts` (ESM) para compatibilidad con Vitest 4 + std-env 4.x. Las tablas de abajo reflejan el subconjunto core de marzo 2026; hoy hay **87 ficheros de test / 959 tests unitarios+integración en verde** (2026-10-19) (+ 9 E2E opt-in que requieren `TEST_DATABASE_URL`). Ver `__tests__/` para la cobertura completa (incluye scheduler, social-comments, media/R2, publishers de IG/X/Reddit, recurrence, blog-to-social, audience-insights, etc.).
 
 ### Tests unitarios — Servicios
 | Archivo | Tests | Qué cubre |
@@ -339,20 +353,21 @@ npm run test:coverage  # Con cobertura v8
 ## 12. Git hooks y CI/CD
 
 ### Pre-commit (Husky + lint-staged)
-Cada `git commit` ejecuta automáticamente los tests de los archivos `.test.ts` modificados.
+Cada `git commit` ejecuta `npx lint-staged` (ESLint sobre los ficheros staged) y después `npx vitest run` (**suite completa**). Commits con errores de lint o tests en rojo se rechazan.
 
-Configurado en `package.json`:
 ```json
 "lint-staged": {
-  "**/*.test.ts": "vitest run --run"
+  "*.{ts,tsx,mjs}": "eslint --no-warn-ignored"
 }
 ```
 
+ESLint usa flat config (`eslint.config.mjs`) y se lanza con `npm run lint` (`next lint` está deprecado).
+
 ### GitHub Actions (`.github/workflows/ci.yml`)
 En cada push/PR a `main` se ejecutan en paralelo:
-1. **Lint** — `next lint`
+1. **Lint** — `npm run lint` (ESLint flat config)
 2. **TypeCheck** — `tsc --noEmit`
-3. **Tests** — `vitest run` (367 tests, sin DB ni Redis reales)
+3. **Tests** — `npm run test` (959 tests, sin DB ni Redis reales)
 
 Y solo si los 3 pasan:
 4. **Build** — `next build`
@@ -423,25 +438,28 @@ Al completar → `billing.completeOnboarding()` pone `onboardingCompleted = true
 ### Nginx Proxy Manager
 1. Desplegar NPM en puerto 80/443
 2. En NPM UI (`:81`), crear **Proxy Host:**
-   - Domain: `fanflow.example.com`
+   - Domain: `flowfan.app`
    - Forward to: `app:3000`
    - SSL: Let's Encrypt (automático)
 3. El tráfico HTTPS es manejado por NPM
 
-### Post-deploy
+### Actualizar y migrar (desde 2026-10-19)
 ```bash
-# Ejecutar migraciones DB — en el contenedor WORKER (el `app` no tiene el schema)
-docker compose exec worker npm run db:push
+./scripts/deploy.sh update    # git pull + build de imágenes con GIT_SHA + up -d
+./scripts/deploy.sh migrate   # backup + espera a healthy + comprueba que el worker corre el commit actual
+                              # + db:push interactivo + db:ensure-search + reinicio
+```
 
-# Verificar salud
-curl https://fanflow.example.com/api/health
+- En producción el schema se aplica con **`db:push` desde el worker**, nunca con `db:migrate` (la imagen del worker no copia `drizzle/`). Tras cada `db:push` hay que ejecutar `npm run db:ensure-search` para recrear el trigger de full-text search de `messages` (`deploy.sh migrate` ya lo hace).
+- **Portainer no reconstruye imágenes con `build:`** ("Pull and redeploy" deja el código viejo). Reconstruir por SSH (`deploy.sh update`) y comprobar el commit desplegado en el campo `build` de `/api/health`.
 
-# Monitoring en Portainer + logs
-docker compose logs -f app
+```bash
+curl https://flowfan.app/api/health   # status + latencias + build (commit)
+docker compose -f docker-compose.prod.yml --env-file .env.prod logs -f app
 ```
 
 ### Webhooks de Stripe
-En Stripe Dashboard, crear endpoint en `https://fanflow.example.com/api/webhooks/stripe` con eventos:
+En Stripe Dashboard, crear endpoint en `https://flowfan.app/api/webhooks/stripe` con eventos:
 - `checkout.session.completed`
 - `customer.subscription.updated`
 - `customer.subscription.deleted`

@@ -1,6 +1,6 @@
-# FanFlow v2 — Roadmap de Mejoras
+# FlowFan (repo FanFlow v2) — Roadmap de Mejoras
 
-> **Última actualización: 2026-07-10.** La mayor parte del roadmap original (fases 5-13 y 15) ya está **implementada y en producción**. Ver el detalle de cada módulo en [`CLAUDE.md`](./CLAUDE.md). Este documento conserva la descripción de diseño de cada fase para referencia histórica, con su estado marcado en el título. La lista viva de lo que queda está en la sección [**Lo que falta por implementar**](#lo-que-falta-por-implementar) al final.
+> **Última actualización: 2026-11-19.** Todo el roadmap original (fases 1-16) está **implementado y en producción**; desde julio solo ha habido remediación de auditorías, UX y despliegue (ver [Después del roadmap](#después-del-roadmap-jul--oct-2026)). Ver el detalle de cada módulo en [`CLAUDE.md`](./CLAUDE.md). Este documento conserva la descripción de diseño de cada fase para referencia histórica, con su estado marcado en el título. La lista viva de lo que queda está en la sección [**Lo que falta por implementar**](#lo-que-falta-por-implementar) al final.
 >
 > Para bugs y deuda técnica (distinto de features nuevas), ver [`AUDITORIA_BACKLOG.md`](./AUDITORIA_BACKLOG.md).
 
@@ -404,3 +404,24 @@ Estado verificado contra el código el 2026-07-10. **Las 6 piezas que quedaban s
 **Ya resueltos previamente** (el histórico los listaba como pendientes): email service (Resend), cancelar suscripción de Stripe en `deleteAccount`.
 
 **Lo único que queda ahora es deuda técnica / bugs**, no funcionalidad nueva → ver [`AUDITORIA_BACKLOG.md`](./AUDITORIA_BACKLOG.md).
+
+---
+
+## Después del roadmap (jul – oct 2026)
+
+Sin features nuevas: endurecimiento, UX y operación.
+
+| Fecha | Qué |
+|-------|-----|
+| 2026-07-10 | Remediación de la primera auditoría: críticos, altos y medios |
+| 2026-09-15 | Cierre del backlog: bajos, WK-8/10/13, ARCH-1/3/5/7/10/11 (wrapper de IA, prompt caching, registry de modelos, contadores en Redis). `ConfirmDialog` en lugar de `window.confirm()`, sidebar agrupado en 4 secciones |
+| 2026-09-22 | Loading states unificados con `Skeleton`; CLAUDE.md al día con la capa de IA |
+| 2026-10-19 | Segunda auditoría completa aplicada (959 tests). `deploy.sh migrate`, imágenes con `GIT_SHA` y `build` en `/api/health`. Marca unificada: **FlowFan** |
+
+### Abierto (mejoras de arquitectura, no bloqueantes)
+
+- **ARCH-2** — `setInterval` → BullMQ Job Schedulers (permite más de una réplica de worker).
+- **ARCH-4** — structured outputs (json_schema) en los proveedores que lo soportan.
+- **ARCH-6** — streaming de sugerencias (primera variante en <1 s).
+- **ARCH-8** — claims atómicos como patrón para todo check-then-act.
+- **ARCH-9** — transacciones en los flujos multi-write restantes.

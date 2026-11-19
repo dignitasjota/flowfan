@@ -261,5 +261,7 @@ Revisión completa de `src/`, migraciones, Docker y CI. Todo lo siguiente quedó
 
 **Medios y mejoras:** uso de Billing desde contadores reales · búsqueda/paginación de conversaciones · contactos archivados ocultos · invitaciones (email, reactivación, enlace) · `callbackUrl` y avisos en login · hora óptima por zona horaria · stats de clasificación · redirects en blog-to-social · detección de caídas en content gaps · métricas A/B de modos · tareas `coaching`/`content_gap` · multi-cuenta Reddit y webhook no destructivo · respuestas propias en webhook de IG · `testWebhook` dirigido · media en modo equipo · entrega de mensajes automáticos por Telegram · modal de upgrade solo en errores de plan · foco del `Modal` · `/api/health` · dashboards en SQL · churn por lotes · pool de Postgres · cabeceras de seguridad · Dockerfile standalone · Graph API configurable · resúmenes por email · precios MRR · moneda de facturas · iconos PWA · confirmación al archivar con atajo.
 
-**Pendiente (decisión de producto):** unificar la marca (`FanFlow` en la app vs `FlowFan` en landing, emails y dominio `flowfan.app`).
+**Marca (resuelto 2026-10-19, commit `6014803`):** el producto se llama **FlowFan** en todo el texto visible. Los identificadores técnicos (`fanflow` en BD, contenedores, `localStorage`, eventos, `ff_live_`) se mantienen; los webhooks envían `X-FlowFan-*` además de las legacy `X-FanFlow-*`. Migración `0011_brand_flowfan.sql` para el título SEO.
+
+**Despliegue (2026-10-19):** `./scripts/deploy.sh migrate` (backup + verificación de que el worker corre el commit actual + `db:push` interactivo + `db:ensure-search`); `/api/health` expone el commit en `build`.
 
